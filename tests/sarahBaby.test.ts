@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { babyPast, bellyPush, growSac, placeBaby, pushAt, pushZone, babyLine, babyPlace, babySize, curlFrame, FETAL_CHART, fitInSac, MODEL_CROWN_RUMP, sacRadius, SAC_FILL, weekForBump, wombAt, wombFromSkin, wombRadius, WOMB_BACK_Z, WOMB_FLOOR_Y, WOMB_TISSUE_M } from '../src/sarahlab/baby';
+import { AUTO_DEPTH_MOST, babiesInHer, babyBody, babySolid, balanceDeg, BALANCE_MOST_DEG, FIT_TOLERANCE, PACK_SOFT, SHRINK_MOST, solidDeep, type BabyPlace, multipleShare, placeBabies, sacAround, babyPast, bellyPush, growSac, placeBaby, pushAt, pushZone, babyLine, babyPlace, babySize, curlFrame, FETAL_CHART, fitInSac, MODEL_CROWN_RUMP, sacRadius, SAC_FILL, weekForBump, wombAt, wombFromSkin, wombRadius, WOMB_BACK_Z, WOMB_FLOOR_Y, WOMB_TISSUE_M } from '../src/sarahlab/baby';
 
 describe('her baby: the chart', () => {
   it('runs weeks 12 to 41 in order, every weight inside its 10th to 90th', () => {
@@ -132,7 +132,7 @@ describe('her baby: in her womb', () => {
     let moved = 0;
     for (let y = 0.92; y <= 1.1; y += 0.02) if (pushAt(push, 0, y, 0.05 + 0.1 * Math.sqrt(Math.max(0, 1 - ((y - 1.02) / 0.2) ** 2)), out)) moved = Math.max(moved, out.z);
     expect(moved).toBeGreaterThan(0.002);
-    expect(pushZone(0, 1.25)).toBe(0); expect(pushZone(0, 0.83)).toBe(0); expect(pushZone(0.26, 1.0)).toBe(0); expect(pushZone(0, 1.0)).toBe(1);
+    expect(pushZone(0, 1.25)).toBe(0); expect(pushZone(0, 0.83)).toBe(0); expect(pushZone(0.31, 1.0)).toBe(0); expect(pushZone(0, 1.0)).toBe(1);
   });
 
   it('a heavier baby is drawn bigger, a lighter one smaller', () => {
@@ -140,5 +140,116 @@ describe('her baby: in her womb', () => {
     const at = { centre: new THREE.Vector3(), axis: new THREE.Vector3(0, 1, 0) };
     expect(babyPlace(100, 100, curl, at).scale).toBeGreaterThan(babyPlace(100, 0, curl, at).scale);
     expect(babyPlace(100, -100, curl, at).scale).toBeLessThan(babyPlace(100, 0, curl, at).scale);
+  });
+});
+
+describe('her babies: twins and triplets, and how they lie', () => {
+  it('twins and triplets grow as one until the womb is shared, then slower', () => {
+    expect(multipleShare(20, 2)).toBe(1); expect(multipleShare(31, 2)).toBe(1); expect(multipleShare(28, 3)).toBe(1);
+    expect(multipleShare(40, 2)).toBeCloseTo(0.84, 9); expect(multipleShare(40, 3)).toBeCloseTo(0.78, 9);
+    expect(multipleShare(34, 3)).toBeCloseTo(0.89, 9);   // ~10% below a singleton by 34 (triplet EFW 1.9 kg against 2.1)
+    expect(multipleShare(40, 1)).toBe(1);
+    expect(babySize(40, 0, 2).g).toBeCloseTo(3460 * 0.84, 6);
+    // and the same belly holds them earlier: twins at 32 weeks at 100%, triplets at 29; born around 36-37 and 33-35
+    expect(weekForBump(100, 2)).toBe(32); expect(weekForBump(150, 2)).toBe(36); expect(weekForBump(100, 3)).toBe(29);
+    expect(weekForBump(100)).toBe(40); expect(weekForBump(0, 3)).toBe(12);
+    expect(babySize(40, 0, 2).cm).toBeLessThan(babySize(40).cm);
+    expect(babyLine(100, 0, 2)).toContain('TWINS'); expect(babyLine(100, 0, 2)).toContain('each');
+  });
+
+  // a curled baby's stand-in: an egg's skin, points close enough together to close it
+  const blob = (n = 300) => {
+    const pts: number[] = [];
+    for (let i = 0; i < n; i++) { const t = i * 2.39996, z = ((i + 0.5) / n) * 2 - 1, r = Math.sqrt(1 - z * z); pts.push(0.25 * r * Math.cos(t), 0.55 * z, 0.3 * r * Math.sin(t)); }
+    return pts;
+  };
+  const belly = (depth: number) => {
+    const pts: number[] = [];
+    for (let y = 0.80; y <= 1.23; y += 0.008) for (let x = -0.22; x <= 0.22; x += 0.008) { const u = (y - 1.02) / 0.2, w = x / 0.2, k = 1 - u * u - w * w; pts.push(x, y, 0.05 + (k > 0 ? depth * Math.sqrt(k) : 0)); }
+    return pts;
+  };
+
+  it('each lies as asked, none inside another, none down through her pelvic floor', () => {
+    const pts = blob(4000), curl = curlFrame(pts, new THREE.Vector3(0, 1, 0)), room = wombFromSkin(belly(0.3), weekForBump(150));
+    for (const lies of [['head', 'breech'], ['head', 'breech', 'side'], ['side', 'side']] as const) {
+      const fits = placeBabies(pts, 150, 0, curl, room, lies);
+      expect(fits).toHaveLength(lies.length);
+      fits.forEach((f, i) => {
+        const along = curl.long.clone().applyQuaternion(f.quaternion);   // toward its head
+        if (lies[i] === 'head') expect(along.y).toBeLessThan(-0.5);
+        if (lies[i] === 'breech') expect(along.y).toBeGreaterThan(0.5);
+        if (lies[i] === 'side') expect(Math.abs(along.x)).toBeGreaterThan(0.7);
+        expect(babyBody(f, curl).centre.y).toBeGreaterThan(0.85);
+      });
+      // apart: no point of one more than a soft press (and a cube of the solid) inside another's body
+      const solid = babySolid(pts, curl);
+      for (let a = 0; a < fits.length; a++) for (let b = 0; b < fits.length; b++) {
+        if (a === b) continue;
+        const q = new THREE.Vector3(), back = fits[b].quaternion.clone().invert();
+        for (let i = 0; i < pts.length / 3; i += 3) {
+          q.set(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]).multiplyScalar(fits[a].scale).applyQuaternion(fits[a].quaternion).add(fits[a].position)
+            .sub(fits[b].position).applyQuaternion(back).divideScalar(fits[b].scale).sub(curl.centre);
+          expect(solidDeep(solid, q.x, q.y, q.z) * fits[b].scale).toBeLessThan(PACK_SOFT + 0.012);
+        }
+      }
+    }
+  });
+
+  it('a solid from its skin: inside is inside, outside is not, deepest at its middle', () => {
+    const pts = blob(4000), curl = curlFrame(pts, new THREE.Vector3(0, 1, 0)), solid = babySolid(pts, curl);
+    const mid = solidDeep(solid, 0, 0, 0);
+    expect(mid).toBeGreaterThan(0.18); expect(mid).toBeLessThan(0.26);   // the egg's smallest half width is 0.25
+    expect(solidDeep(solid, 0, 0.45, 0)).toBeLessThan(mid);
+    expect(solidDeep(solid, 0.4, 0, 0)).toBe(0); expect(solidDeep(solid, 0, 0.7, 0)).toBe(0); expect(solidDeep(solid, 5, 5, 5)).toBe(0);
+  });
+
+  /** her belly's skin and how far her DEPTH moves each point (forward, most at the bump's middle) */
+  const depthOf = (skin: number[]) => skin.map((_, i) => {
+    if (i % 3 !== 2) return 0;
+    const u = (skin[i - 1] - 1.02) / 0.2, w = skin[i - 2] / 0.2, k = 1 - u * u - w * w;
+    return k > 0 ? 0.016 * Math.sqrt(k) : 0;
+  });
+
+  it('as they are where they fit: not smaller, not deeper, nothing pushed', () => {
+    const pts = blob(4000), curl = curlFrame(pts, new THREE.Vector3(0, 1, 0)), solid = babySolid(pts, curl), skin = belly(0.3);
+    for (const lies of [['head'], ['head', 'breech']] as const) {
+      const her = babiesInHer(pts, pts, solid, 150, -100, curl, skin, depthOf(skin), 0.1, lies);
+      expect(her.shrink).toBe(1); expect(her.depth).toBe(0); expect(her.push.most).toBe(0);
+      expect(her.over).toBeLessThanOrEqual(FIT_TOLERANCE);
+    }
+  });
+
+  it('where they do not: a little smaller first (a tenth at most), then her own DEPTH, never past its most', () => {
+    const pts = blob(4000), curl = curlFrame(pts, new THREE.Vector3(0, 1, 0)), solid = babySolid(pts, curl);
+    for (const d of [0.14, 0.10]) {
+      const skin = belly(d), her = babiesInHer(pts, pts, solid, 150, 100, curl, skin, depthOf(skin), 0.1, ['head', 'breech']);
+      expect(her.shrink).toBeGreaterThanOrEqual(1 - SHRINK_MOST - 1e-9); expect(her.shrink).toBeLessThan(1);
+      expect(her.depth).toBeGreaterThanOrEqual(0); expect(her.depth).toBeLessThanOrEqual(AUTO_DEPTH_MOST);
+      // deeper only once as small as they may be
+      if (her.depth > 0) expect(her.shrink).toBeCloseTo(1 - SHRINK_MOST, 9);
+    }
+  });
+
+  it('the balance: against her spine none, at the front of her womb all of it -- by how many, by how heavy', () => {
+    const pts = blob(), curl = curlFrame(pts, new THREE.Vector3(0, 1, 0)), room = wombFromSkin(belly(0.3), weekForBump(150));
+    const back = room.centre.z - sacRadius(room, 0, 0, -1), front = room.centre.z + sacRadius(room, 0, 0, 1);
+    const at = (z: number): BabyPlace => ({ position: new THREE.Vector3(0, room.centre.y, z).sub(curl.centre.clone().multiplyScalar(0.3)), quaternion: new THREE.Quaternion(), scale: 0.3 });
+    expect(balanceDeg([at(back)], curl, room, 3460)).toBeCloseTo(0, 6);
+    expect(balanceDeg([at((back + front) / 2)], curl, room, 3460)).toBeCloseTo(BALANCE_MOST_DEG[1] / 2, 6);
+    expect(balanceDeg([at(front)], curl, room, 3460)).toBeCloseTo(15, 6);
+    expect(balanceDeg([at(front), at(front)], curl, room, 3460)).toBeCloseTo(25, 6);
+    expect(balanceDeg([at(front), at(front), at(front)], curl, room, 6000)).toBeCloseTo(35, 6);
+    // the middle of all of them; and a light one sags her less
+    expect(balanceDeg([at(front), at(back)], curl, room, 3460)).toBeCloseTo(12.5, 6);
+    expect(balanceDeg([at(front)], curl, room, 1730)).toBeCloseTo(7.5, 6);
+  });
+
+  it('each of several has its own sac round it', () => {
+    const pts = blob(), curl = curlFrame(pts, new THREE.Vector3(0, 1, 0)), room = wombFromSkin(belly(0.3), weekForBump(150));
+    const [f] = placeBabies(pts, 150, 0, curl, room, ['head', 'breech']), sac = sacAround(pts, f, curl), q = new THREE.Vector3();
+    for (let i = 0; i < pts.length / 3; i++) {
+      q.set(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]).multiplyScalar(f.scale).applyQuaternion(f.quaternion).add(f.position).sub(sac.centre);
+      const r = q.length(); expect(r).toBeLessThanOrEqual(sacRadius(sac, q.x / r, q.y / r, q.z / r) + 1e-3);
+    }
   });
 });

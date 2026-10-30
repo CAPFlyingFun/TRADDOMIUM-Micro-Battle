@@ -37,10 +37,24 @@ export const FETAL_CHART: readonly ChartWeek[] = Object.freeze([
 export const MODEL_CROWN_RUMP = 0.652;
 
 /** The week her belly stands for: 0% week 12, 100% week 40, on to 42 at 200%. */
-export function weekForBump(bumpPercent: number): number {
-  const b = Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 0);
-  return b <= 100 ? 12 + 28 * (b / 100) : 40 + 2 * (Math.min(200, b) - 100) / 100;
+export function weekForBump(bumpPercent: number, babies = 1): number {
+  const b = Math.min(200, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 0));
+  const t = BUMP_WEEKS[Math.round(babies)] ?? BUMP_WEEKS[1];
+  for (let i = 1; i < t.length; i++) if (b <= t[i][0]) { const [b0, w0] = t[i - 1], [b1, w1] = t[i]; return w0 + (w1 - w0) * (b - b0) / (b1 - b0); }
+  return t[t.length - 1][1];
 }
+
+/**
+ * The week her belly stands for, by how many babies are in it: [belly %, week]. A twin belly runs ahead of a single
+ * baby's -- it measures what a full-term one does by about week 32 -- and twins are born around 36-37 weeks, triplets
+ * around 33-35 (Joshua, 2026-10-30: "the babies slow down in size so more can fit in the same area"). So the same belly
+ * holds twins at an earlier week, each smaller. BIOLOGICAL SHAPE (fundal height, delivery), GAME TUNING (the lines).
+ */
+export const BUMP_WEEKS: Readonly<Record<number, readonly (readonly [number, number])[]>> = Object.freeze({
+  1: [[0, 12], [100, 40], [200, 42]],
+  2: [[0, 12], [100, 32], [150, 36], [200, 38]],
+  3: [[0, 12], [100, 29], [150, 32.5], [200, 35]],
+});
 
 export interface BabySize {
   readonly week: number;
@@ -51,8 +65,23 @@ export interface BabySize {
   readonly avg: number;
 }
 
-/** The chart at a (fractional) week and BABY WEIGHT (-100 10th percentile, 0 average, +100 90th); past week 41, its last week's growth carried on. */
-export function babySize(week: number, weightPercent = 0): BabySize {
+/**
+ * TWINS AND TRIPLETS grow as singletons do until the womb is shared, then slower: twins from about weeks 30-32 (some
+ * 12% below a singleton by week 38), triplets from about 27-28 (some 10% below by 34: 1.9 kg at the 50th percentile,
+ * against 2.1). [from week, share at week 40, the line carried on]. BIOLOGICAL SHAPE (twin and triplet growth curves:
+ * The Bump/ACOG; triplet EFW, Associates in Advanced Maternal-Fetal Medicine), GAME TUNING (the straight line).
+ */
+export const MULTIPLE_GROWTH: Readonly<Record<number, readonly [number, number]>> = Object.freeze({ 2: [31, 0.84], 3: [28, 0.78] });
+/** A twin's or triplet's share of a singleton's weight at a week (1 for one baby). */
+export function multipleShare(week: number, babies = 1): number {
+  const m = MULTIPLE_GROWTH[Math.round(babies)];
+  if (!m) return 1;
+  const [from, at40] = m;
+  return week <= from ? 1 : 1 - (1 - at40) * Math.min(1, (week - from) / (40 - from));
+}
+
+/** The chart at a (fractional) week and BABY WEIGHT (-100 10th percentile, 0 average, +100 90th); past week 41, its last week's growth carried on. Each of twins or triplets weighs its share (`multipleShare`) and is drawn that much smaller. */
+export function babySize(week: number, weightPercent = 0, babies = 1): BabySize {
   const c = FETAL_CHART, first = c[0], last = c[c.length - 1], prev = c[c.length - 2];
   const len = (r: ChartWeek) => (r.crownRump ? r.cm / MODEL_CROWN_RUMP : r.cm);
   const at = (f: (r: ChartWeek) => number): number => {
@@ -62,8 +91,10 @@ export function babySize(week: number, weightPercent = 0): BabySize {
     return f(c[i]) + (f(c[i + 1]) - f(c[i])) * t;
   };
   const w = Math.min(100, Math.max(-100, Number.isFinite(weightPercent) ? weightPercent : 0)) / 100;
-  const avg = at((r) => r.g), g = w < 0 ? avg + w * (avg - at((r) => r.lo)) : avg + w * (at((r) => r.hi) - avg);
-  return { week, cm: at(len), g, avg };
+  const avg = at((r) => r.g), single = w < 0 ? avg + w * (avg - at((r) => r.lo)) : avg + w * (at((r) => r.hi) - avg);
+  const share = multipleShare(week, babies);
+  // a twin's length: the singleton's, by the same root its weight is drawn by
+  return { week, cm: at(len) * Math.pow(share, WEIGHT_SIZE_POWER), g: single * share, avg: avg * share };
 }
 
 /** How much bigger the model is drawn for its weight against the week's average: a fourth root (a heavier baby is mostly plumper, a little longer). GAME TUNING. */
@@ -77,10 +108,12 @@ export function weighs(g: number): string {
   return `${(g / 1000).toFixed(2)} kg (${Math.floor(whole / 16)} lb ${whole % 16} oz)`;
 }
 
-/** The baby's line: its week, length and weight now. */
-export function babyLine(bumpPercent: number, weightPercent: number): string {
-  const s = babySize(weekForBump(bumpPercent), weightPercent);
-  return `week ${s.week.toFixed(s.week % 1 < 0.05 || s.week % 1 > 0.95 ? 0 : 1)} · ${s.cm.toFixed(1)} cm (${(s.cm / 2.54).toFixed(1)} in) · ${weighs(s.g)}`;
+export const BABIES_NAME: Readonly<Record<number, string>> = Object.freeze({ 1: 'ONE', 2: 'TWINS', 3: 'TRIPLETS' });
+
+/** The baby's line: its week, length and weight now (each, for twins or triplets). */
+export function babyLine(bumpPercent: number, weightPercent: number, babies = 1): string {
+  const s = babySize(weekForBump(bumpPercent, babies), weightPercent, babies);
+  return `${babies > 1 ? `${BABIES_NAME[babies] ?? babies} · ` : ''}week ${s.week.toFixed(s.week % 1 < 0.05 || s.week % 1 > 0.95 ? 0 : 1)} · ${babies > 1 ? 'each ' : ''}${s.cm.toFixed(1)} cm (${(s.cm / 2.54).toFixed(1)} in) · ${weighs(s.g)}`;
 }
 
 // ------------------------------------------------------------------------------------------------------------- womb
@@ -187,8 +220,9 @@ export interface BabyPlace { readonly position: THREE.Vector3; readonly quaterni
  * long axis (tipped forward with her belly, and by BABY WEIGHT), its back to her front and left; scaled to the chart.
  * `fitInSac` then keeps all of it inside the sac.
  */
-export function babyPlace(bumpPercent: number, weightPercent: number, curl: CurlFrame, womb: { readonly centre: THREE.Vector3; readonly axis: THREE.Vector3 }, backToLeft = BACK_TO_LEFT_RAD): BabyPlace {
-  const s = babySize(weekForBump(bumpPercent), weightPercent);
+export function babyPlace(bumpPercent: number, weightPercent: number, curl: CurlFrame, womb: { readonly centre: THREE.Vector3; readonly axis: THREE.Vector3 }, backToLeft = BACK_TO_LEFT_RAD, babies = 1): BabyPlace {
+  const s = babySize(weekForBump(bumpPercent, babies), weightPercent, babies);
+  // (cm already carries a twin's share; the weight's own root is against the week's average for so many)
   const scale = (s.cm / 100 / BABY_MODEL_LENGTH) * Math.pow(s.g / s.avg, WEIGHT_SIZE_POWER);
   // its long axis (head end) down the sac's; its back to her front and left
   const down = womb.axis.clone().negate();
@@ -230,6 +264,11 @@ export interface WombShape {
   readonly axis: THREE.Vector3;
   /** her skin's nearest distance from the middle in each cell (Infinity where her belly's skin is not that way) */
   readonly skin: Float32Array;
+  /**
+   * how much her belly can give that way (0..1): how far her DEPTH field moves her skin out there against where it moves
+   * it most -- 0 behind, below and wherever her skin is not. Absent: 1 wherever there is skin.
+   */
+  readonly give?: Float32Array;
 }
 
 const lerpTable = (t: readonly (readonly number[])[], x: number, col: number): number => {
@@ -255,7 +294,7 @@ export function sacRadius(w: WombShape, dx: number, dy: number, dz: number): num
  * week: inside the skin by the tissue, inside its cap (pelvic floor, fundus, a womb's width, in front of her spine), the
  * two joined softly so no crease shows, and smoothed.
  */
-export function wombFromSkin(skin: ArrayLike<number>, week: number): WombShape {
+export function wombFromSkin(skin: ArrayLike<number>, week: number, backShift = 0, depth?: ArrayLike<number>): WombShape {
   const top = lerpTable(FUNDUS, week, 1), half = lerpTable(FUNDUS, week, 2), n = Math.floor(skin.length / 3);
   // her skin's front at mid-height, near her middle: how deep the womb may be
   const midY = (WOMB_FLOOR_Y + top) / 2;
@@ -267,7 +306,7 @@ export function wombFromSkin(skin: ArrayLike<number>, week: number): WombShape {
   const backWall = (dy: number, dz: number): number => {
     if (dz >= -1e-6) return Infinity;
     let lo = 0, hi = 0.6;
-    for (let k = 0; k < 24; k++) { const m = (lo + hi) / 2; if (centre.z + m * dz > womBackAt(centre.y + m * dy)) lo = m; else hi = m; }
+    for (let k = 0; k < 24; k++) { const m = (lo + hi) / 2; if (centre.z + m * dz > womBackAt(centre.y + m * dy) - backShift) lo = m; else hi = m; }
     return lo;
   };
   // the skin less its tissue, per direction: the nearest skin point in each cell
@@ -279,6 +318,20 @@ export function wombFromSkin(skin: ArrayLike<number>, week: number): WombShape {
     skinR[k] = Math.min(skinR[k], r - WOMB_TISSUE_M);
   }
   const skinRaw = skinR.map((x) => x + WOMB_TISSUE_M);
+  // how far her DEPTH field moves her skin out in each cell (the most of its points there), against the most anywhere
+  let give: Float32Array | undefined;
+  if (depth && depth.length >= n * 3) {
+    give = new Float32Array(NT * NP);
+    let most = 0;
+    for (let i = 0; i < n; i++) {
+      const x = skin[i * 3] - centre.x, y = skin[i * 3 + 1] - centre.y, z = skin[i * 3 + 2] - centre.z, r = Math.hypot(x, y, z);
+      if (r < 1e-6) continue;
+      const out = (depth[i * 3] * x + depth[i * 3 + 1] * y + depth[i * 3 + 2] * z) / r;
+      const [ft, fp] = binOf(x / r, y / r, z / r), k = Math.round(ft) * NP + (Math.floor(fp + 0.5) % NP);
+      give[k] = Math.max(give[k], out); most = Math.max(most, out);
+    }
+    if (most > 0) for (let k = 0; k < give.length; k++) give[k] = Math.max(0, give[k] / most);
+  }
   // cells the skin does not reach next to ones it does (where her belly's skin ends, under her breasts and at her
   // sides; above its middle: below, her pelvis is room, not a gap) take their neighbours' nearest: no gap for the sac to spike through
   for (let pass = 0; pass < 4; pass++) {
@@ -332,7 +385,7 @@ export function wombFromSkin(skin: ArrayLike<number>, week: number): WombShape {
   const axis = new THREE.Vector3(0, 1, 0);
   for (let k = 0; k < 64; k++) axis.set(C[0] * axis.x + C[1] * axis.y + C[2] * axis.z, C[1] * axis.x + C[3] * axis.y + C[4] * axis.z, C[2] * axis.x + C[4] * axis.y + C[5] * axis.z).normalize();
   if (axis.y < 0) axis.negate();
-  return { centre, r, axis, skin: skinRaw };
+  return { centre, r, axis, skin: skinRaw, give };
 }
 
 /** How much of the sac the baby may fill: a little fluid round it at term. GAME TUNING. */
@@ -505,23 +558,64 @@ export function growSac(w: WombShape, past: Float32Array): WombShape {
 }
 
 /** HER BELLY'S PUSH: how far her skin must move out in each cell (rest metres), spread smoothly; and where her skin is. */
-export interface BellyPush { readonly centre: THREE.Vector3; readonly out: Float32Array; readonly skin: Float32Array; readonly most: number }
+export interface BellyPush {
+  readonly centre: THREE.Vector3; readonly out: Float32Array; readonly skin: Float32Array;
+  /** the dome's height at its crown (rest metres): 0, nothing moves */
+  readonly most: number;
+  /** the dome: its crown's height (y), and the point behind her it swells away from */
+  readonly crownY: number; readonly pivot: THREE.Vector3;
+  /** its half widths (rest metres) and how far it sags below her pubic bone's usual edge */
+  readonly across: number; readonly up: number; readonly sag: number;
+}
 
-/** Where the womb (the sac, its wall) and the tissue over it would stand past her skin, how far: spread so it swells, not dents. */
-export function bellyPush(w: WombShape): BellyPush {
+/**
+ * THE DOME (Joshua, 2026-10-30, of twins: "the belly from the front view looks too wide and flat... keep it more
+ * smooth/rounded and not so wide"): her belly grows as one rounded swell -- tallest at its middle, falling away toward
+ * her sides, ribs and pubic bone like a bell -- away from a point behind her, so mostly forward. Its half widths
+ * (rest metres) across and up, how far behind her belly's middle it swells from, and how much of the dome a need must
+ * stand in to set its height (needs further out it rounds over). GAME TUNING.
+ */
+export const DOME = Object.freeze({ across: 0.12, up: 0.15, pivotBack: 0.32, sets: 0.5 });
+/** The dome's share at a point of her (0..1). */
+export const domeAt = (f: Pick<BellyPush, 'crownY' | 'across' | 'up'>, x: number, y: number): number => Math.exp(-((x / f.across) ** 2) - (((y - f.crownY) / f.up) ** 2));
+
+/**
+ * Where the womb (the sac, its wall) and the tissue over it would stand past her skin, how far -- and then THE HYBRID
+ * (Joshua, 2026-10-30: "a Hybrid belly of the approved shape + the baby's belly shape deformation as it is too lumpy"):
+ * her approved belly grown by one rounded dome (`DOME`), not a bump over every knee and head -- the dome as low as it can
+ * be and still clear every need, so the babies stay inside her and her belly stays one rounded belly. Left and right
+ * alike, whichever side a baby lies on.
+ */
+export function bellyPush(w: WombShape, babies = 1): BellyPush {
   const raw = new Float32Array(NT * NP);
   for (let k = 0; k < raw.length; k++) if (Number.isFinite(w.skin[k])) raw[k] = Math.max(0, w.r[k] + WOMB_WALL_M + WOMB_TISSUE_M - w.skin[k]);
-  const out = raw.slice(), tmp = new Float32Array(raw.length);
-  for (let pass = 0; pass < 16; pass++) {
-    for (let t = 0; t < NT; t++) for (let p = 0; p < NP; p++) {
-      let sum = 0, n = 0;
-      for (let dt = -1; dt <= 1; dt++) for (let dp = -1; dp <= 1; dp++) { const tt = t + dt; if (tt < 0 || tt >= NT) continue; sum += out[tt * NP + ((p + dp + NP) % NP)]; n++; }
-      tmp[t * NP + p] = Math.max(raw[t * NP + p], sum / n);
-    }
-    out.set(tmp);
+  // her belly grows evenly, left and right, whichever side a baby lies on
+  for (let t = 0; t < NT; t++) for (let p = 1; p < NP / 2; p++) {
+    const a = t * NP + p, b = t * NP + ((NP - p) % NP), m = Math.max(raw[a], raw[b]); raw[a] = m; raw[b] = m;
   }
-  let most = 0; for (const x of out) most = Math.max(most, x);
-  return { centre: w.centre.clone(), out, skin: w.skin, most };
+  // the dome: as low as it can be and still clear every need, seen along each need's own direction
+  // more than one: the dome on her belly only, her pubic area and hips left as they are (their sag is the BABY WEIGHT
+  // shapes', carried heavy -- SarahLabScene's carriedWeight)
+  const firm = babies >= 2 ? 1 : 0, across = DOME.across, up = DOME.up, sag = -firm * FIRM_LIFT;
+  const crownY = w.centre.y, pivot = new THREE.Vector3(0, crownY, w.centre.z - DOME.pivotBack), dir = new THREE.Vector3(), at = new THREE.Vector3(), n = new THREE.Vector3();
+  const shape = { crownY, across, up };
+  let most = 0;
+  for (let t = 0; t < NT; t++) for (let p = 0; p < NP; p++) {
+    const k = t * NP + p, need = raw[k];
+    if (!(need > 0) || !Number.isFinite(w.skin[k])) continue;
+    const th = (t / (NT - 1)) * Math.PI, ph = (p / NP) * 2 * Math.PI;
+    dir.set(Math.sin(th) * Math.sin(ph), Math.cos(th), Math.sin(th) * Math.cos(ph));
+    at.copy(w.centre).addScaledVector(dir, w.skin[k]);
+    const d = domeAt(shape, at.x, at.y) * pushZone(at.x, at.y, 0, at.z, sag, firm);
+    if (d < DOME.sets) continue;   // a need out toward her edges is the dome's to round over, not to raise it for
+    n.copy(at).sub(pivot).normalize();
+    most = Math.max(most, need / (d * Math.max(0.3, n.dot(dir))));
+  }
+  // never more than half again the largest need: a dome, not a tower
+  let largest = 0; for (const x of raw) largest = Math.max(largest, x);
+  most = Math.min(most, 1.5 * largest);
+  const out = raw;
+  return { centre: w.centre.clone(), out, skin: w.skin, most, crownY, pivot, across, up, sag };
 }
 
 const gridAt = (g: Float32Array, dx: number, dy: number, dz: number): number => {
@@ -533,10 +627,16 @@ const gridAt = (g: Float32Array, dx: number, dy: number, dz: number): number => 
 };
 
 /** Where on her the push may fall (rest metres): full between, fading over each pair. GAME TUNING (her anatomy). */
-export const PUSH_ZONE = Object.freeze({ low: [0.84, 0.96] as const, high: [1.10, 1.23] as const, side: [0.13, 0.24] as const });
+export const PUSH_ZONE = Object.freeze({ low: [0.84, 0.96] as const, high: [1.10, 1.23] as const, side: [0.18, 0.30] as const, back: [-0.11, -0.03] as const });
 const ss01 = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
 /** How much of the push may fall at a point of her (rest metres): 1 on her belly, 0 off it. */
-export const pushZone = (x: number, y: number): number => ss01(PUSH_ZONE.low[0], PUSH_ZONE.low[1], y) * (1 - ss01(PUSH_ZONE.high[0], PUSH_ZONE.high[1], y)) * (1 - ss01(PUSH_ZONE.side[0], PUSH_ZONE.side[1], Math.abs(x)));
+export const pushZone = (x: number, y: number, most = 0, z = 1, sag = 0, firm = 0): number => ss01(PUSH_ZONE.low[0] - sag, PUSH_ZONE.low[1] - sag, y) * (1 - ss01(PUSH_ZONE.high[0], PUSH_ZONE.high[1], y)) * (1 - ss01(PUSH_ZONE.side[0] - firm * FIRM_NARROW, Math.min(PUSH_SIDE_MOST, PUSH_ZONE.side[1] - firm * FIRM_NARROW + PUSH_SIDE_GROW * most), Math.abs(x))) * ss01(PUSH_ZONE.back[0], PUSH_ZONE.back[1], z);
+/** More than one baby: the push kept off her pubic area (its lower edge lifted) and her hips (its sides drawn in). Rest metres. GAME TUNING. */
+export const FIRM_LIFT = 0.06, FIRM_NARROW = 0.05;
+/** However big the push, it is gone by here out at her sides (rest metres): well inside what is laid. GAME TUNING. */
+export const PUSH_SIDE_MOST = 0.36;
+/** A bigger push fades out over more of her flank (metres of fade per metre of push), so it rounds her sides, not cuts them. GAME TUNING. */
+export const PUSH_SIDE_GROW = 0;
 
 /**
  * The push at a point of her (rest metres): straight out from the womb's middle by the cell's amount -- on her belly's
@@ -544,17 +644,509 @@ export const pushZone = (x: number, y: number): number => ss01(PUSH_ZONE.low[0],
  * her arms, anything further out is not her belly). `out` gets it; returns false where there is none.
  */
 export function pushAt(f: BellyPush, x: number, y: number, z: number, out: THREE.Vector3): boolean {
+  if (!(f.most > 0)) return false;
   const dx = x - f.centre.x, dy = y - f.centre.y, dz = z - f.centre.z, r = Math.hypot(dx, dy, dz);
-  if (r < 1e-6 || f.most <= 0) return false;
-  const ux = dx / r, uy = dy / r, uz = dz / r, amount = gridAt(f.out, ux, uy, uz);
-  if (!(amount > 1e-5)) return false;
-  const have = gridAt(f.skin, ux, uy, uz);
+  if (r < 1e-6) return false;
+  const have = gridAt(f.skin, dx / r, dy / r, dz / r);
   if (!Number.isFinite(have)) return false;
   const ss = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
-  // and only her belly: none below her pubic bone (her thighs, her groin), under her breasts, or out at her flanks and arms
-  const zone = pushZone(x, y);
-  const k = zone * ss(have - 0.08, have - 0.01, r) * (1 - ss(have + 0.03, have + 0.07, r));
-  if (k <= 0) return false;
-  out.set(ux, uy, uz).multiplyScalar(amount * k);
+  // on her belly's skin and what she wears just over it; only her belly (the zone), as the dome falls away
+  const k = domeAt(f, x, y) * pushZone(x, y, 0, z, f.sag, f.sag < 0 ? 1 : 0) * ss(have - 0.08, have - 0.01, r) * (1 - ss(have + 0.03, have + 0.07, r));
+  if (k <= 1e-4) return false;
+  out.set(x, y, z).sub(f.pivot).normalize().multiplyScalar(f.most * k);
   return true;
+}
+
+// ------------------------------------------------------------------------------------------ twins, triplets, and lie
+
+/**
+ * HOW EACH BABY LIES (Joshua, 2026-10-30: "more than one baby, the cord(s), positions, and kicks"). Head down (vertex,
+ * most babies by week 36), breech (bottom down), or sideways (transverse, across her). AUTO is what is commonest: one
+ * baby head down; twins the first (lowest) head down and the second breech; triplets two head down low, side by side, and
+ * the third breech above them in front (of the layouts measured, the one her belly holds with least growth).
+ */
+export type Lie = 'head' | 'breech' | 'side';
+export const LIE_NAME: Readonly<Record<Lie, string>> = Object.freeze({ head: 'head down', breech: 'breech', side: 'sideways' });
+export const AUTO_LIES: Readonly<Record<number, readonly Lie[]>> = Object.freeze({ 1: ['head'], 2: ['head', 'breech'], 3: ['head', 'head', 'breech'] });
+
+/**
+ * Where in her womb each of so many babies starts (rest metres from its middle: x her left): the first (the one to be
+ * born first) lowest, on her right; the second higher, on her left; a third across the top. GAME TUNING.
+ */
+export const BABY_SPOTS: Readonly<Record<number, readonly (readonly [number, number, number])[]>> = Object.freeze({
+  1: [[0, 0, 0]],
+  2: [[-0.02, -0.065, -0.015], [0.02, 0.065, 0.035]],
+  3: [[-0.06, -0.05, -0.01], [0.06, -0.05, -0.01], [0, 0.07, 0.07]],
+});
+
+/** The axes a baby's long axis is tried along for a lie (its head toward -axis), each tipped a little. */
+function lieAxes(lie: Lie, x: number): THREE.Vector3[] {
+  if (lie === 'side') {
+    // across her: its head toward the side it is nearer (her left for one in the middle)
+    const toLeft = x >= 0 ? 1 : -1;
+    return [0, 0.25, -0.25].map((t) => new THREE.Vector3(-toLeft * Math.cos(t), Math.sin(t), 0));
+  }
+  const up = lie === 'head' ? 1 : -1;
+  return FIT_TILTS.map((t) => new THREE.Vector3(0, Math.cos(t), Math.sin(t)).multiplyScalar(up));
+}
+
+/** A placed baby's body as an ellipsoid (its curl's box, a little inside it): for keeping babies out of one another. */
+export interface BabyBody { readonly centre: THREE.Vector3; readonly axes: readonly THREE.Vector3[]; readonly half: readonly number[] }
+export function babyBody(place: BabyPlace, curl: CurlFrame): BabyBody {
+  const centre = curl.centre.clone().multiplyScalar(place.scale).applyQuaternion(place.quaternion).add(place.position);
+  const axes = [curl.side, curl.long, curl.back].map((a) => a.clone().applyQuaternion(place.quaternion));
+  const half = [curl.size.x, curl.size.y, curl.size.z].map((v) => v * place.scale * 0.42);
+  return { centre, axes, half };
+}
+
+/**
+ * THEM ALL TOGETHER (Joshua, 2026-10-30: "keep the approved body shape, see if the womb area could be any bigger to allow
+ * more room without changing the belly shape much"). The babies -- one, two or three -- are PACKED: moved and turned all
+ * together, not laid one after another, until they fill her womb the way real ones do (a head in the hollow of another's
+ * knees, a back along a back), with as little of any of them past her womb's wall as can be and none inside another.
+ * Where some must still stand past the wall, it is where her belly can give (`WombShape.give`: her DEPTH), never through
+ * her spine, her pelvic floor or under her ribs.
+ */
+
+/**
+ * A curled baby's body as a solid (its curl's model units, about the curl's middle): a grid of small cubes, each holding
+ * how deep inside the body its middle is (0 outside) -- found from its skin's points, everything the outside cannot reach
+ * being inside. What keeps one baby out of another, nested into its hollows as they lie, not kept off by them.
+ */
+export interface BabySolid { readonly min: THREE.Vector3; readonly cube: number; readonly dims: readonly [number, number, number]; readonly deep: Float32Array }
+/** The solid's cube, in the model's units (about a centimetre at term). GAME TUNING. */
+export const SOLID_CUBE = 0.03;
+export function babySolid(points: ArrayLike<number>, curl: CurlFrame, cube = SOLID_CUBE): BabySolid {
+  const n = Math.floor(points.length / 3), lo = new THREE.Vector3(Infinity, Infinity, Infinity), hi = new THREE.Vector3(-Infinity, -Infinity, -Infinity), q = new THREE.Vector3();
+  for (let i = 0; i < n; i++) { q.set(points[i * 3], points[i * 3 + 1], points[i * 3 + 2]).sub(curl.centre); lo.min(q); hi.max(q); }
+  const min = lo.subScalar(2 * cube), nx = Math.ceil((hi.x - min.x) / cube) + 2, ny = Math.ceil((hi.y - min.y) / cube) + 2, nz = Math.ceil((hi.z - min.z) / cube) + 2;
+  const at = (x: number, y: number, z: number) => (z * ny + y) * nx + x, cells = nx * ny * nz;
+  // its skin
+  const skin = new Uint8Array(cells);
+  for (let i = 0; i < n; i++) {
+    const x = Math.floor((points[i * 3] - curl.centre.x - min.x) / cube), y = Math.floor((points[i * 3 + 1] - curl.centre.y - min.y) / cube), z = Math.floor((points[i * 3 + 2] - curl.centre.z - min.z) / cube);
+    skin[at(x, y, z)] = 1;
+  }
+  // the outside: all the outside can reach without crossing its skin
+  const out = new Uint8Array(cells), queue = new Int32Array(cells);
+  let head = 0, tail = 0;
+  out[0] = 1; queue[tail++] = 0;
+  while (head < tail) {
+    const c = queue[head++], x = c % nx, y = Math.floor(c / nx) % ny, z = Math.floor(c / (nx * ny));
+    for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+      const X = x + dx, Y = y + dy, Z = z + dz;
+      if (X < 0 || Y < 0 || Z < 0 || X >= nx || Y >= ny || Z >= nz) continue;
+      const k = at(X, Y, Z);
+      if (out[k] || skin[k]) continue;
+      out[k] = 1; queue[tail++] = k;
+    }
+  }
+  // how deep each cube inside is: its distance from the outside (two sweeps over the grid, each cube from its neighbours)
+  const deep = new Float32Array(cells);
+  for (let k = 0; k < cells; k++) deep[k] = out[k] ? 0 : Infinity;
+  const steps: [number, number, number, number][] = [];
+  for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy || dz) steps.push([dx, dy, dz, Math.hypot(dx, dy, dz)]);
+  const fwd = steps.filter(([dx, dy, dz]) => dz < 0 || (dz === 0 && (dy < 0 || (dy === 0 && dx < 0)))), back = steps.filter((s) => !fwd.includes(s));
+  for (let pass = 0; pass < 2; pass++) {
+    for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
+      const k = at(x, y, z); if (!deep[k]) continue;
+      for (const [dx, dy, dz, d] of fwd) { const X = x + dx, Y = y + dy, Z = z + dz; if (X < 0 || Y < 0 || Z < 0 || X >= nx || Y >= ny || Z >= nz) continue; deep[k] = Math.min(deep[k], deep[at(X, Y, Z)] + d); }
+    }
+    for (let z = nz - 1; z >= 0; z--) for (let y = ny - 1; y >= 0; y--) for (let x = nx - 1; x >= 0; x--) {
+      const k = at(x, y, z); if (!deep[k]) continue;
+      for (const [dx, dy, dz, d] of back) { const X = x + dx, Y = y + dy, Z = z + dz; if (X < 0 || Y < 0 || Z < 0 || X >= nx || Y >= ny || Z >= nz) continue; deep[k] = Math.min(deep[k], deep[at(X, Y, Z)] + d); }
+    }
+  }
+  // in the model's units, from its skin (a skin cube's middle is about half a cube in)
+  for (let k = 0; k < cells; k++) deep[k] = Number.isFinite(deep[k]) && deep[k] > 0 ? (deep[k] - 0.5) * cube : 0;
+  return { min, cube, dims: [nx, ny, nz], deep };
+}
+/** How deep a point (model units, about the curl's middle) is inside the solid (model units; 0 outside), blended between cubes. */
+export function solidDeep(b: BabySolid, x: number, y: number, z: number): number {
+  const [nx, ny, nz] = b.dims;
+  const fx = (x - b.min.x) / b.cube - 0.5, fy = (y - b.min.y) / b.cube - 0.5, fz = (z - b.min.z) / b.cube - 0.5;
+  const x0 = Math.floor(fx), y0 = Math.floor(fy), z0 = Math.floor(fz);
+  if (x0 < 0 || y0 < 0 || z0 < 0 || x0 >= nx - 1 || y0 >= ny - 1 || z0 >= nz - 1) return 0;
+  const u = fx - x0, v = fy - y0, w = fz - z0, D = b.deep, k = (z0 * ny + y0) * nx + x0, sy = nx, sz = nx * ny;
+  const c00 = D[k] * (1 - u) + D[k + 1] * u, c10 = D[k + sy] * (1 - u) + D[k + sy + 1] * u;
+  const c01 = D[k + sz] * (1 - u) + D[k + sz + 1] * u, c11 = D[k + sz + sy] * (1 - u) + D[k + sz + sy + 1] * u;
+  return (c00 * (1 - v) + c10 * v) * (1 - w) + (c01 * (1 - v) + c11 * v) * w;
+}
+
+/** The points a packing is scored on (its curl's model units, about the curl's middle): this many, spread evenly over the baby. GAME TUNING. */
+export const PACK_POINTS = 220;
+const packSamples = new WeakMap<object, Float32Array>();
+function packSample(points: ArrayLike<number>, curl: CurlFrame): Float32Array {
+  const hit = packSamples.get(points as object);
+  if (hit) return hit;
+  const n = Math.floor(points.length / 3), k = Math.min(PACK_POINTS, n), out = new Float32Array(k * 3), d = new Float32Array(n).fill(Infinity);
+  // farthest-point sampling, from the point furthest from its middle
+  let pick = 0, far = -1;
+  for (let i = 0; i < n; i++) { const r = Math.hypot(points[i * 3] - curl.centre.x, points[i * 3 + 1] - curl.centre.y, points[i * 3 + 2] - curl.centre.z); if (r > far) { far = r; pick = i; } }
+  for (let j = 0; j < k; j++) {
+    out[j * 3] = points[pick * 3] - curl.centre.x; out[j * 3 + 1] = points[pick * 3 + 1] - curl.centre.y; out[j * 3 + 2] = points[pick * 3 + 2] - curl.centre.z;
+    let next = 0, best = -1;
+    for (let i = 0; i < n; i++) {
+      const e = Math.hypot(points[i * 3] - points[pick * 3], points[i * 3 + 1] - points[pick * 3 + 1], points[i * 3 + 2] - points[pick * 3 + 2]);
+      if (e < d[i]) d[i] = e;
+      if (d[i] > best) { best = d[i]; next = i; }
+    }
+    pick = next;
+  }
+  packSamples.set(points as object, out);
+  return out;
+}
+
+/** A radial grid's radius along a direction (bilinear), for grids that are not a womb. */
+const radialAt = (r: Float32Array, dx: number, dy: number, dz: number): number => {
+  const [ft, fp] = binOf(dx, dy, dz);
+  const t0 = Math.min(NT - 2, Math.floor(ft)), a = ft - t0, p0 = Math.floor(fp) % NP, p1 = (p0 + 1) % NP, b = fp - Math.floor(fp);
+  return (r[t0 * NP + p0] * (1 - b) + r[t0 * NP + p1] * b) * (1 - a) + (r[(t0 + 1) * NP + p0] * (1 - b) + r[(t0 + 1) * NP + p1] * b) * a;
+};
+
+/**
+ * What a packing weighs (GAME TUNING): a point past her womb's wall costs as the square of how far, more by `PACK_STIFF`
+ * where her belly cannot give; a point inside another baby by `PACK_APART`; a baby lying further from its lie than
+ * `LIE_CONE_DEG` by `PACK_LIE`; and each a little by how high it floats (`PACK_SETTLE`: they settle).
+ */
+export const PACK_STIFF = 8, PACK_APART = 10, PACK_LIE = 0.5, PACK_SETTLE = 0, LIE_CONE_DEG = 50;
+/** How willing a packing is, early on, to take a step that weighs a little more (so it is not stuck in the first hollow it finds). GAME TUNING. */
+export const PACK_WARMTH = 1e-4;
+/** How deep into one another two babies may press before it counts (rest metres: they are soft). GAME TUNING. */
+export const PACK_SOFT = 0.004;
+
+interface Pose { c: THREE.Vector3; q: THREE.Quaternion }
+export interface Packing {
+  readonly fits: BabyFit[];
+  /** how far the furthest point stands past the wall where her belly is (rest metres; negative inside) */
+  readonly over: number;
+  /** ... and where she is not (behind, below, under her ribs) */
+  readonly hard: number;
+  /** how deep the deepest point stands inside another baby */
+  readonly inside: number;
+  readonly energy: number;
+}
+
+/** How far a placed baby's furthest point stands past the sac's wall: where her belly's skin is that way, and where it is not. */
+export function pastWall(points: ArrayLike<number>, place: BabyPlace, w: WombShape): { belly: number; inside: number } {
+  const q = new THREE.Vector3(); let belly = -Infinity, inside = -Infinity;
+  for (let i = 0; i < points.length / 3; i++) {
+    q.set(points[i * 3], points[i * 3 + 1], points[i * 3 + 2]).multiplyScalar(place.scale).applyQuaternion(place.quaternion).add(place.position).sub(w.centre);
+    const r = q.length();
+    if (r < 1e-9) continue;
+    const over = r - sacRadius(w, q.x / r, q.y / r, q.z / r) * SAC_FILL;
+    if (Number.isFinite(gridAt(w.skin, q.x / r, q.y / r, q.z / r))) belly = Math.max(belly, over); else inside = Math.max(inside, over);
+  }
+  return { belly, inside };
+}
+
+/**
+ * What standing past her womb's wall costs at a point (rest metres): as the square of how far, more by `PACK_STIFF` where
+ * her belly cannot give. Worked out once a womb on a grid of small cubes round it and blended between them (a packing
+ * asks it hundreds of thousands of times); straight from the womb outside the grid.
+ */
+interface WallField { readonly min: THREE.Vector3; readonly cube: number; readonly dims: readonly [number, number, number]; readonly cost: Float32Array }
+const wallFields = new WeakMap<WombShape, WallField>();
+function wallAt(w: WombShape, x: number, y: number, z: number): number {
+  const dx = x - w.centre.x, dy = y - w.centre.y, dz = z - w.centre.z, r = Math.hypot(dx, dy, dz);
+  if (r < 1e-9) return 0;
+  const over = r - sacRadius(w, dx / r, dy / r, dz / r) * SAC_FILL;
+  if (over <= 0) return 0;
+  const g = w.give ? radialAt(w.give, dx / r, dy / r, dz / r) : 1;
+  return over * over * (1 + PACK_STIFF * (1 - Math.min(1, Math.max(0, g))));
+}
+function wallField(w: WombShape): WallField {
+  const hit = wallFields.get(w);
+  if (hit) return hit;
+  let most = 0; for (const r of w.r) most = Math.max(most, r);
+  const half = most + 0.05, cube = 0.008, n = Math.ceil((2 * half) / cube) + 1;
+  // each cube worked out the first time it is asked for (a packing only ever goes near a few of them)
+  const min = w.centre.clone().subScalar(half), cost = new Float32Array(n * n * n).fill(NaN);
+  const f: WallField = { min, cube, dims: [n, n, n], cost };
+  wallFields.set(w, f);
+  return f;
+}
+function wallCost(f: WallField, w: WombShape, x: number, y: number, z: number): number {
+  const [nx, ny, nz] = f.dims, fx = (x - f.min.x) / f.cube, fy = (y - f.min.y) / f.cube, fz = (z - f.min.z) / f.cube;
+  const x0 = Math.floor(fx), y0 = Math.floor(fy), z0 = Math.floor(fz);
+  if (x0 < 0 || y0 < 0 || z0 < 0 || x0 >= nx - 1 || y0 >= ny - 1 || z0 >= nz - 1) return wallAt(w, x, y, z);
+  const u = fx - x0, v = fy - y0, t = fz - z0, C = f.cost, k = (z0 * ny + y0) * nx + x0, sy = nx, sz = nx * ny;
+  if (C[k] !== C[k] || C[k + 1] !== C[k + 1] || C[k + sy] !== C[k + sy] || C[k + sy + 1] !== C[k + sy + 1] || C[k + sz] !== C[k + sz] || C[k + sz + 1] !== C[k + sz + 1] || C[k + sz + sy] !== C[k + sz + sy] || C[k + sz + sy + 1] !== C[k + sz + sy + 1]) {
+    for (let dz = 0; dz < 2; dz++) for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+      const c = k + dz * sz + dy * sy + dx;
+      if (C[c] === C[c]) continue;
+      C[c] = wallAt(w, f.min.x + (x0 + dx) * f.cube, f.min.y + (y0 + dy) * f.cube, f.min.z + (z0 + dz) * f.cube);
+    }
+  }
+  const c00 = C[k] * (1 - u) + C[k + 1] * u, c10 = C[k + sy] * (1 - u) + C[k + sy + 1] * u;
+  const c01 = C[k + sz] * (1 - u) + C[k + sz + 1] * u, c11 = C[k + sz + sy] * (1 - u) + C[k + sz + sy + 1] * u;
+  return (c00 * (1 - v) + c10 * v) * (1 - t) + (c01 * (1 - v) + c11 * v) * t;
+}
+
+/** A tiny seeded random source, so a packing is the same every time it is asked for. */
+function seeded(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const gauss = (rnd: () => number) => Math.sqrt(-2 * Math.log(Math.max(1e-12, rnd()))) * Math.cos(2 * Math.PI * rnd());
+
+/** A fit as its curl's middle and its turn. */
+function poseOf(f: BabyPlace, curl: CurlFrame): Pose {
+  return { c: curl.centre.clone().multiplyScalar(f.scale).applyQuaternion(f.quaternion).add(f.position), q: f.quaternion.clone() };
+}
+
+/**
+ * The babies packed in her womb at the chart's size for so many (times `shrink`), each lying as asked: from a few starts
+ * (and from `warm`, a packing a moment ago, when given), moved and turned a little at a time, keeping every step that
+ * weighs less, a few hundred steps a baby. `over`: how far the furthest point of any stands past the wall (rest metres;
+ * negative inside); `inside`: how deep the deepest stands in another.
+ */
+export function packBabies(points: ArrayLike<number>, solid: BabySolid, bumpPercent: number, weightPercent: number, curl: CurlFrame, womb: WombShape, lies: readonly Lie[], shrink = 1, opts: { warm?: readonly BabyFit[]; effort?: number; seed?: number } = {}): Packing {
+  const n = lies.length, sample = packSample(points, curl), m = sample.length / 3;
+  const s0 = babyPlace(bumpPercent, weightPercent, curl, { centre: womb.centre, axis: new THREE.Vector3(0, 1, 0) }, BACK_TO_LEFT_RAD, n).scale, s = s0 * shrink;
+  const field = wallField(womb), cone = Math.cos((LIE_CONE_DEG * Math.PI) / 180), sideCone = Math.cos(((LIE_CONE_DEG - 10) * Math.PI) / 180);   // sideways: across her, left to right
+  const floorY = womb.centre.y - sacRadius(womb, 0, -1, 0);
+  const qi = new THREE.Quaternion(), v = new THREE.Vector3(), h = new THREE.Vector3(), bk = new THREE.Vector3();
+  // each baby's points as placed (rest metres)
+  const turn = new THREE.Matrix4(), t3 = turn.elements;
+  const place = (p: Pose, out: Float32Array) => {
+    turn.makeRotationFromQuaternion(p.q);
+    for (let i = 0; i < m; i++) {
+      const x = sample[i * 3] * s, y = sample[i * 3 + 1] * s, z = sample[i * 3 + 2] * s;
+      out[i * 3] = t3[0] * x + t3[4] * y + t3[8] * z + p.c.x; out[i * 3 + 1] = t3[1] * x + t3[5] * y + t3[9] * z + p.c.y; out[i * 3 + 2] = t3[2] * x + t3[6] * y + t3[10] * z + p.c.z;
+    }
+  };
+  /** its own weight: past the wall, its lie, how high it floats */
+  const own = (p: Pose, at: Float32Array, lie: Lie): number => {
+    let e = 0;
+    for (let i = 0; i < m; i++) e += wallCost(field, womb, at[i * 3], at[i * 3 + 1], at[i * 3 + 2]);
+    h.copy(curl.long).applyQuaternion(p.q);
+    const pen = lie === 'head' ? Math.max(0, cone + h.y) : lie === 'breech' ? Math.max(0, cone - h.y) : Math.max(0, sideCone - Math.abs(h.x));
+    // its back a little toward her front, as most settle (never against its lie)
+    bk.copy(curl.back).applyQuaternion(p.q);
+    return e + PACK_LIE * pen * pen + 0.002 * PACK_LIE * Math.max(0, -bk.z) ** 2 + PACK_SETTLE * (p.c.y - floorY);
+  };
+  /** how deep `at` (one baby's points) stands inside the baby posed `p`, squared, summed; and the deepest */
+  let deepest = 0;
+  // (the solid's reach from its middle: a point further than this from a baby is not in it)
+  let solidReach = 0;
+  { const [nx, ny, nz] = solid.dims; for (const c of [solid.min, solid.min.clone().add(new THREE.Vector3(nx, ny, nz).multiplyScalar(solid.cube))]) solidReach = Math.max(solidReach, c.length()); }
+  const rot = new THREE.Matrix4(), e3 = rot.elements, reach2 = (solidReach * s) ** 2;
+  const into = (at: Float32Array, p: Pose): number => {
+    // into its own frame (its turn undone, its size taken off): one matrix, its rows by hand
+    rot.makeRotationFromQuaternion(qi.copy(p.q).invert());
+    const cx = p.c.x, cy = p.c.y, cz = p.c.z;
+    let e = 0;
+    // (every other point: plenty to keep two apart)
+    for (let i = 0; i < m; i += 2) {
+      const x = at[i * 3] - cx, y = at[i * 3 + 1] - cy, z = at[i * 3 + 2] - cz;
+      if (x * x + y * y + z * z > reach2) continue;
+      const pen = solidDeep(solid, (e3[0] * x + e3[4] * y + e3[8] * z) / s, (e3[1] * x + e3[5] * y + e3[9] * z) / s, (e3[2] * x + e3[6] * y + e3[10] * z) / s) * s - PACK_SOFT;
+      if (pen > 0) { e += pen * pen; if (pen > deepest) deepest = pen; }
+    }
+    return e;
+  };
+  const pair = (a: number, b: number, poses: Pose[], ats: Float32Array[]) => PACK_APART * (into(ats[a], poses[b]) + into(ats[b], poses[a]));
+
+  /** the starts: as asked (`warm`), the commonest spots for so many, and some of them turned and shifted */
+  const rnd = seeded(opts.seed ?? 7);
+  const starts: Pose[][] = [];
+  if (opts.warm && opts.warm.length === n) starts.push(opts.warm.map((f) => poseOf(f, curl)));
+  const spots = BABY_SPOTS[n] ?? BABY_SPOTS[1];
+  const restarts = opts.warm ? 1 : n === 1 ? 2 : 3;
+  for (let r = 0; r < restarts; r++) {
+    const set: Pose[] = [];
+    for (let b = 0; b < n; b++) {
+      const sp = spots[b] ?? [0, 0, 0], jitter = r === 0 ? 0 : 0.03;
+      const at = new THREE.Vector3(sp[0] + jitter * gauss(rnd), sp[1] + jitter * gauss(rnd), sp[2] + jitter * gauss(rnd)).add(womb.centre);
+      const axis = lieAxes(lies[b], sp[0])[r === 0 ? (lies[b] === 'side' ? 0 : FIT_TILTS.indexOf(0)) : Math.floor(rnd() * (lies[b] === 'side' ? 3 : FIT_TILTS.length))];
+      const p = babyPlace(bumpPercent, weightPercent, curl, { centre: at, axis }, (b % 2 ? -1 : 1) * BACK_TO_LEFT_RAD + (r === 0 ? 0 : (rnd() - 0.5) * 1.5), n);
+      set.push({ c: at, q: p.quaternion });
+    }
+    starts.push(set);
+  }
+  if (n === 1 && lies[0] === 'head' && !opts.warm) { const f = placeBaby(points, bumpPercent, weightPercent, curl, womb); starts.unshift([poseOf(f, curl)]); }
+
+  const steps = Math.round((opts.effort ?? 1) * 400 * n);
+  let bestPoses: Pose[] = starts[0], bestE = Infinity;
+  for (const start of starts) {
+    const poses = start.map((p) => ({ c: p.c.clone(), q: p.q.clone() }));
+    const ats = poses.map((p) => { const a = new Float32Array(m * 3); place(p, a); return a; });
+    const owns = poses.map((p, b) => own(p, ats[b], lies[b]));
+    const pairs = new Float64Array(n * n);
+    for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) pairs[a * n + b] = pair(a, b, poses, ats);
+    let total = owns.reduce((x, y) => x + y, 0) + pairs.reduce((x, y) => x + y, 0);
+    const trial = new Float32Array(m * 3), dq = new THREE.Quaternion(), ax = new THREE.Vector3();
+    for (let it = 0; it < steps; it++) {
+      const b = it % n, k = 1 - it / steps, cur = poses[b];
+      const next: Pose = { c: cur.c.clone(), q: cur.q.clone() };
+      if (rnd() < 0.55) next.c.add(v.set(gauss(rnd), gauss(rnd), gauss(rnd)).multiplyScalar(0.001 + 0.012 * k));
+      else { ax.set(gauss(rnd), gauss(rnd), gauss(rnd)).normalize(); dq.setFromAxisAngle(ax, gauss(rnd) * (0.02 + 0.25 * k)); next.q.premultiply(dq).normalize(); }
+      place(next, trial);
+      const o = own(next, trial, lies[b]);
+      let d = o - owns[b];
+      const saved = ats[b]; ats[b] = trial; poses[b] = next;
+      const np: number[] = [];
+      for (let a = 0; a < n; a++) if (a !== b) { const lo = Math.min(a, b), hi = Math.max(a, b), e = pair(lo, hi, poses, ats); np.push(e); d += e - pairs[lo * n + hi]; }
+      if (d < 0 || (k > 0.15 && rnd() < Math.exp(-d / (PACK_WARMTH * k * k * (opts.warm ? 0.2 : 1))))) {
+        owns[b] = o; total += d; ats[b] = saved; ats[b].set(trial);
+        let j = 0; for (let a = 0; a < n; a++) if (a !== b) { pairs[Math.min(a, b) * n + Math.max(a, b)] = np[j++]; }
+      } else { ats[b] = saved; poses[b] = cur; }
+    }
+    if (total < bestE) { bestE = total; bestPoses = poses.map((p) => ({ c: p.c.clone(), q: p.q.clone() })); }
+  }
+  const fits: BabyFit[] = bestPoses.map((p) => {
+    h.copy(curl.long).applyQuaternion(p.q);
+    return { position: p.c.clone().sub(curl.centre.clone().multiplyScalar(s).applyQuaternion(p.q)), quaternion: p.q, scale: s, squeezed: shrink, tilt: Math.atan2(-h.z, -h.y) };
+  });
+  // how it came out: the furthest of all of each past the wall where her belly is (all its points) and where she is not
+  // (behind, below, under her ribs: inside her, unseen, but not to be more than a little), the deepest one in another
+  let over = -Infinity, hard = -Infinity;
+  for (const f of fits) { const w = pastWall(points, f, womb); over = Math.max(over, w.belly); hard = Math.max(hard, w.inside); }
+  deepest = 0;
+  const ats = bestPoses.map((p) => { const a = new Float32Array(m * 3); place(p, a); return a; });
+  for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) if (a !== b) into(ats[a], bestPoses[b]);
+  return { fits, over, hard, inside: deepest, energy: bestE };
+}
+
+/** The babies packed (`packBabies`) where nothing else is wanted of them: the chart's size times `shrink`. */
+export function placeBabies(points: ArrayLike<number>, bumpPercent: number, weightPercent: number, curl: CurlFrame, womb: WombShape, lies: readonly Lie[], shrink = 1): BabyFit[] {
+  return packBabies(points, babySolid(points, curl), bumpPercent, weightPercent, curl, womb, lies, shrink).fits;
+}
+
+
+/** Each of several babies' own sac: round it, with a little fluid, its own middle (rest metres). */
+export function sacAround(points: ArrayLike<number>, place: BabyPlace, curl: CurlFrame): WombShape {
+  const centre = curl.centre.clone().multiplyScalar(place.scale).applyQuaternion(place.quaternion).add(place.position);
+  const reach = new Float32Array(NT * NP), q = new THREE.Vector3();
+  for (let i = 0; i < points.length / 3; i++) {
+    q.set(points[i * 3], points[i * 3 + 1], points[i * 3 + 2]).multiplyScalar(place.scale).applyQuaternion(place.quaternion).add(place.position).sub(centre);
+    const r = q.length();
+    if (r < 1e-9) continue;
+    const [ft, fp] = binOf(q.x / r, q.y / r, q.z / r), t0 = Math.min(NT - 2, Math.floor(ft)), p0 = Math.floor(fp) % NP, p1 = (p0 + 1) % NP;
+    for (const k of [t0 * NP + p0, t0 * NP + p1, (t0 + 1) * NP + p0, (t0 + 1) * NP + p1]) reach[k] = Math.max(reach[k], r / 0.93);
+  }
+  // rounded over its folds (never inside where it reaches)
+  const r = reach.slice(), tmp = new Float32Array(r.length);
+  for (let pass = 0; pass < 10; pass++) {
+    for (let t = 0; t < NT; t++) for (let p = 0; p < NP; p++) {
+      let sum = 0, k = 0;
+      for (let dt = -1; dt <= 1; dt++) for (let dp = -1; dp <= 1; dp++) { const tt = t + dt; if (tt < 0 || tt >= NT) continue; sum += r[tt * NP + ((p + dp + NP) % NP)]; k++; }
+      tmp[t * NP + p] = Math.max(reach[t * NP + p], sum / k);
+    }
+    r.set(tmp);
+  }
+  return { centre, r, axis: new THREE.Vector3(0, 1, 0), skin: new Float32Array(NT * NP).fill(Infinity) };
+}
+
+/** How far any of the babies stands past the womb, per cell (the largest of `babyPast` over them). */
+export function babiesPast(points: ArrayLike<number>, places: readonly BabyPlace[], w: WombShape): Float32Array {
+  const out = new Float32Array(NT * NP);
+  for (const p of places) { const one = babyPast(points, p, w); for (let k = 0; k < out.length; k++) out[k] = Math.max(out[k], one[k]); }
+  return out;
+}
+
+/**
+ * HOW MUCH SMALLER, AT MOST (Joshua, 2026-10-30: "can we just scale the babies a little bit smaller? How much off would
+ * that be realistically?"): a tenth -- 51 cm to 46 cm at term, still a healthy newborn near the 10th percentile; twins and
+ * triplets run that much smaller anyway. Only where they do not fit as they are, and only as much as they need. GAME TUNING.
+ */
+export const SHRINK_MOST = 0.10;
+/**
+ * AUTO DEPTH (Joshua, 2026-10-30, of whether her DEPTH control should make room: "yes... which should automatically give
+ * the needed space for more babies"): what room the babies still need after that comes from her own approved DEPTH shape,
+ * added to hers, up to this (percent of DEPTH) -- her belly deeper, never wider, never lower, her pubic area and hips as
+ * they are. Past even this the last of it is the dome (`bellyPush`). GAME TUNING.
+ */
+export const AUTO_DEPTH_MOST = 45;
+/** How far past her womb's wall the furthest point of a baby may stand and still fit (rest metres): within the fluid. GAME TUNING. */
+export const FIT_TOLERANCE = 0.002;
+/** ...and inside her, where there is no belly to see it (behind, below, under her ribs). GAME TUNING. */
+export const FIT_TOLERANCE_INSIDE = 0.008;
+
+/**
+ * THE BALANCE (Joshua, 2026-10-30: "the middle bottom of the belly... is like a balancing scale. If only one and closer to
+ * the body, would be closer to 0°, if the baby moves midway... about 7-8°, if the baby is all the way forward, will do max
+ * tilt"): the most her belly sags (degrees on her TILT scale, on its sag shape) for so many babies all the way forward.
+ */
+export const BALANCE_MOST_DEG: Readonly<Record<number, number>> = Object.freeze({ 1: 15, 2: 25, 3: 35 });
+/** The weight that sags her as far as the balance says (g): a baby at term. Lighter, less; heavier, no more. BIOLOGICAL SHAPE. */
+export const BALANCE_FULL_G = 3460;
+
+/**
+ * How far her belly sags for where her babies lie (degrees): how far forward in her womb their middle (all of them,
+ * together) sits -- against her spine 0, at the front of her womb all of it -- times the most for so many, times how heavy
+ * they are against a baby at term (no more than all).
+ */
+export function balanceDeg(fits: readonly BabyPlace[], curl: CurlFrame, womb: WombShape, grams: number): number {
+  const n = fits.length;
+  if (!n) return 0;
+  let z = 0;
+  for (const f of fits) z += curl.centre.clone().multiplyScalar(f.scale).applyQuaternion(f.quaternion).add(f.position).z;
+  z /= n;
+  const back = womb.centre.z - sacRadius(womb, 0, 0, -1), front = womb.centre.z + sacRadius(womb, 0, 0, 1);
+  const forward = Math.min(1, Math.max(0, (z - back) / Math.max(1e-3, front - back)));
+  return forward * (BALANCE_MOST_DEG[Math.min(3, n)] ?? BALANCE_MOST_DEG[3]) * Math.min(1, Math.max(0, grams / BALANCE_FULL_G));
+}
+
+export interface HerBabies {
+  readonly fits: BabyFit[]; readonly womb: WombShape; readonly push: BellyPush;
+  /** how much smaller than the chart they are drawn (1: as the chart) */
+  readonly shrink: number;
+  /** AUTO DEPTH: percent of DEPTH added to hers */
+  readonly depth: number;
+  /** THE BALANCE: degrees of sag */
+  readonly balance: number;
+  /** how far past her womb's wall the furthest of them stands (rest metres) as packed, before the dome */
+  readonly over: number;
+}
+
+/**
+ * Her babies, their womb and her belly (Joshua's plan, 2026-10-30): her approved belly as it is; the babies at the chart's
+ * size, packed together (`packBabies`). If they do not fit: a little smaller first, up to `SHRINK_MOST` (her belly left
+ * exactly as approved); then her own DEPTH deepened, as little as fits them (`AUTO_DEPTH_MOST` at most); the last of it,
+ * if any, the dome. Then THE BALANCE from where they lie. `skin` is her belly's skin as drawn (`depth`: each point's move
+ * for one unit of her DEPTH field, `unit` that field's weight per percent); `warm`, the packing a moment ago.
+ */
+export function babiesInHer(points: ArrayLike<number>, all: ArrayLike<number>, solid: BabySolid, bumpPercent: number, weightPercent: number, curl: CurlFrame, skin: ArrayLike<number>, depth: ArrayLike<number> | null, unit: number, lies: readonly Lie[], warm?: readonly BabyFit[]): HerBabies {
+  const n = lies.length, week = weekForBump(bumpPercent);
+  const roomAt = (pct: number): WombShape => {
+    if (!pct || !depth) return wombFromSkin(skin, week, 0, depth ?? undefined);
+    const k = pct * unit, moved = new Float32Array(skin.length);
+    for (let i = 0; i < moved.length; i++) moved[i] = skin[i] + k * depth[i];
+    return wombFromSkin(moved, week, 0, depth);
+  };
+  type Try = Packing & { room: WombShape; pct: number; shrink: number };
+  const tryAt = (pct: number, shrink: number, from?: readonly BabyFit[], effort = 1): Try => {
+    const room = roomAt(pct);
+    return { ...packBabies(points, solid, bumpPercent, weightPercent, curl, room, lies, shrink, { warm: from, effort }), room, pct, shrink };
+  };
+  // (inside her, only their size can help; at her belly, her DEPTH can too)
+  const fits = (t: Try) => t.over <= FIT_TOLERANCE && t.hard <= FIT_TOLERANCE_INSIDE, fitsBelly = (t: Try) => t.over <= FIT_TOLERANCE;
+  let best = tryAt(0, 1, warm && warm.length === n ? warm : undefined, warm ? 0.6 : 1);
+  // a fresh look too when warm (a packing a moment ago may be the wrong one for the size now)
+  if (warm && !fits(best)) { const fresh = tryAt(0, 1); if (fresh.energy < best.energy) best = fresh; }
+  if (!fits(best)) {
+    const smallest = tryAt(0, 1 - SHRINK_MOST, best.fits, 0.6);
+    if (fits(smallest)) {
+      let lo = smallest, hi = 1;
+      for (let k = 0; k < 4; k++) { const mid = (lo.shrink + hi) / 2, t = tryAt(0, mid, lo.fits, 0.4); if (fits(t)) lo = t; else hi = mid; }
+      best = lo;
+    } else {
+      if (fitsBelly(smallest)) best = smallest;
+      else {
+        const deepest = tryAt(AUTO_DEPTH_MOST, 1 - SHRINK_MOST, smallest.fits, 0.6);
+        if (!fitsBelly(deepest)) best = deepest.over < smallest.over ? deepest : smallest;
+        else {
+          let lo = 0, hi = deepest;
+          for (let k = 0; k < 5; k++) { const mid = (lo + hi.pct) / 2, t = tryAt(mid, 1 - SHRINK_MOST, hi.fits, 0.4); if (fitsBelly(t)) hi = t; else lo = mid; }
+          best = hi;
+        }
+      }
+    }
+  }
+  // whatever still stands past the wall, the dome makes room for
+  const womb = growSac(best.room, babiesPast(all, best.fits, best.room));
+  const grams = n * babySize(weekForBump(bumpPercent, n), weightPercent, n).g * best.shrink ** 3;
+  return { fits: best.fits, womb, push: bellyPush(womb, n), shrink: best.shrink, depth: best.pct, balance: balanceDeg(best.fits, curl, best.room, grams), over: best.over };
 }

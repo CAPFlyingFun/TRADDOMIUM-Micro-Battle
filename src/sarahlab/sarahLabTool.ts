@@ -111,6 +111,9 @@ export const SARAH_LAB_ACTION = Object.freeze({
   bounce: 'sarahlab:bounce',
   /** SEE BABY: her baby in her womb, her body seen through (baby.ts) */
   baby: 'sarahlab:baby',
+  /** BABIES (one, twins, triplets) and how each LIES (auto, head down, breech, sideways, random) */
+  babies: 'sarahlab:babies',
+  babyLie: 'sarahlab:baby-lie',
   outfit: 'sarahlab:outfit',
   model: 'sarahlab:model',
   refine: 'sarahlab:refine',
