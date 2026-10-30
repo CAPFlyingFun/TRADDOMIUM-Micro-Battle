@@ -24,6 +24,7 @@
  * `morphTargetInfluences` and her `position` attribute.
  */
 import * as THREE from 'three';
+import { jiggleAt, jiggleOf, type Jiggle } from './softBody';
 
 type Attr = THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
 
@@ -53,6 +54,9 @@ export class SkinPose {
   private posAttr: Attr | null = null;
   // the morph targets with a non-zero influence this refresh
   private morphN = 0;
+  /** Her belly and breasts as the masses have them this frame (softBody.ts), added after the morphs as the shader adds them. */
+  private jig: Jiggle | null = null;
+  private readonly jigAt = { x: 0, y: 0, z: 0 };
   private morphArr: (Float32Array | null)[] = [];
   private morphAttr: (Attr | null)[] = [];
   private morphStride = new Int32Array(0);
@@ -112,6 +116,7 @@ export class SkinPose {
       }
     }
     this.morphN = k;
+    this.jig = jiggleOf(m);
     this.morphRelative = g.morphTargetsRelative;
 
     // bones: boneWorld · boneInverse · bindMatrix, once each
@@ -178,6 +183,7 @@ export class SkinPose {
       }
       x += dx; y += dy; z += dz;
     }
+    if (this.jig) { const J = this.jigAt; jiggleAt(this.jig, v, J); x += J.x; y += J.y; z += J.z; }
     if (this.skinned) {
       const SI = this.skinIndex!, SW = this.skinWeight!, n = this.boneCount;
       let sx = 0, sy = 0, sz = 0;

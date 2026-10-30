@@ -51,9 +51,10 @@ import { IRIS_CHOICES, browsLine, eyesLine, lipsLine, mouthLine, nextEyeMode } f
  *             her bust grows from the normal model at 0% to 1.5× at 100% and 2× at 200%. Every primitive that
  *             carries the target follows it, so the clothes grown from her
  *             body shrink with it.
- *   (weight)  past full term the bump sags by its size, and two springs let the
- *             bump and the breasts lag and settle as she moves (the bake's motion
- *             targets, `stepBellySpring`, `stepBreastSpring`); BOUNCE nudges both.
+ *   (weight)  past full term the bump sags by its size, and her belly and each
+ *             breast are simulated masses that lag and settle as she moves
+ *             (softBody.ts: the womb's, her left breast's, her right breast's);
+ *             BOUNCE nudges all three.
  *   FINGERS   all ten curled together, toward the palm: the master's own
  *             finger chains, found from the bind pose, never by name.
  *   OUTFIT    cycles the garments (`scripts/growClothes.mjs`), by material:
@@ -78,13 +79,14 @@ import { applyShapeFields, baseShapeFields, liftShapeFields, type ShapeFields, t
 import { BUILD_PROFILES, buildAmounts, buildKey, heightLine, heldSegments, profileOf, withProfile, type BuildAmounts, type BuildSegment } from '../actor/bodyBuild';
 import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields, prepareBuildRig, standingLift, type BuildMeshFields, type BuildRig } from '../view/bodyBuild';
 import { dropIdleMorphs } from '../view/morphPrune';
+import { attachJiggle, bellyTune, breastTune, createJiggleUniforms, feltAcceleration, restingMass, stepMass } from './softBody';
 import { applyMilk, applyWomb, applyZeroRefine, babyAnchors, babyWeightState, chestAnchors, chestFieldWeights, groinAnchors, groinFieldWeights, loadMilk, milkAnchors, milkBalanceState, milkFieldWeights, milkState, MILK_PATH, babyFieldWeights, loadWomb, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, WOMB_PATH, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
 import { NAVEL_MORPHS, type NavelPiece } from './navelPiece';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
   SARAH_V2_HAIR_MODEL, BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, teeLengthParts, sleevesLine, necklineLine, neckShapeLine, CLOTH_NECKLINE_DEFAULT, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, CLOTH_TEE_LENGTH_DEFAULT, clothTuning, clothRestScale, type ClothTune,
-  labTitle, CLOTH_SEATED_LINE, bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatFor, navelState, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
+  labTitle, CLOTH_SEATED_LINE, bellyMotionWeights, bellyWeights, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatFor, navelState, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, walkBounceAccel, walkSwayAccel,
   offeredOutfits, outfitThumbPath,
   type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, SARAH_DEFAULT_OUTFIT, SIM_TEE_OUTFIT, RECOVERED_GARMENTS,
 } from './sarahLabTool';
@@ -300,11 +302,15 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   // bump's weight is its size's own (`bellyMotionWeights`): the WEIGHT slider that
   // added to it is gone (Joshua, 2026-10-08: "keep the current weights... just not
   // have that slider option").
+  // Her belly and breasts are simulated (softBody.ts, Joshua 2026-10-29: "do belly and breast simulation"): three masses
+  // -- the womb's, and each breast's own -- moving every patched mesh through `jiggle`. The baked motion shapes they
+  // replaced are held at rest: the belly's tilt (its size's own weight, standing and seated) still comes from them.
   const spring = restingBellySpring();
-  const breastSpring = restingBellySpring();
-  /** A point at the front of her middle, in the spine bone's frame: what the spring feels move. */
-  let feel: { bone: THREE.Bone; local: THREE.Vector3 } | null = null;
-  const felt = { p: new THREE.Vector3(), v: new THREE.Vector3(), primed: 0 };
+  const masses = { belly: restingMass(), breastL: restingMass(), breastR: restingMass() };
+  const jiggle = createJiggleUniforms();
+  /** Where each mass hangs from, in a bone's frame: what it feels move. The belly in front of her spine, each breast on her chest. */
+  type Anchor = { bone: THREE.Bone; local: THREE.Vector3; bind: THREE.Quaternion; p: THREE.Vector3; v: THREE.Vector3; primed: number };
+  let anchors: { belly: Anchor; breastL: Anchor; breastR: Anchor } | null = null;
   const tmp = new THREE.Vector3();
   // she opens in her red light spandex tee over painted leggings (Joshua, 2026-10-23), one small file; a model without
   // the v2 clothes (v1) falls back to the first modelled outfit it has as it loads
@@ -912,7 +918,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
 
   /** The bump's weight, every frame: its resting tilt and where the spring has it. */
   function applyMotion(): void {
-    const w: Record<string, number> = { ...bellyMotionWeights(bump, 0, spring, effectiveTiltDeg(body.bellyTilt, seated)), [BREAST_TARGETS.bob]: breastBobWeight(bump, breastSpring) };
+    // the bump's resting tilt from its shapes; its bounce and sway, and the breasts', are the masses' (`feelMotion`)
+    const w: Record<string, number> = { ...bellyMotionWeights(bump, 0, spring, effectiveTiltDeg(body.bellyTilt, seated)), [BREAST_TARGETS.bob]: 0 };
     // on the way between standing and seated, her seated shapes come and go with her (`applyLook` sets them otherwise)
     const names: string[] = [BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway, BREAST_TARGETS.bob];
     if (sitMoving) { w[SEAT_TARGET] = seatCorrectiveWeight(seatShare(), bump); w[SEAT_V2_TARGET] = seatCorrectiveV2Weight(seatShare(), bump); names.push(SEAT_TARGET, SEAT_V2_TARGET); }
@@ -1264,6 +1271,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const fields = liftShapeFields(mesh) ?? (recovered ? baseShapeFields(mesh) : null);
       if (fields) shaped.push({ mesh, fields });
       dropIdleMorphs(mesh);
+      attachJiggle(mesh, jiggle);
     }
     partMeshes.set(part, meshes);
   }
@@ -1709,7 +1717,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     buttons.armSide = btn('ARMS · both', SARAH_LAB_ACTION.armSide, () => { armSide = (armSide + 1) % ARM_SIDES.length; applyLook(); refresh(); });
     buttons.turn = btn('TURN', SARAH_LAB_ACTION.turn, () => { turning = !turning; });
     // a nudge up, as a hop would: the bump lags, drops and settles
-    buttons.bounce = btn('BOUNCE', SARAH_LAB_ACTION.bounce, () => { spring.vy += 0.3; breastSpring.vy += 0.3; });
+    buttons.bounce = btn('BOUNCE', SARAH_LAB_ACTION.bounce, () => { masses.belly.vy -= 0.3; masses.breastL.vy -= 0.3; masses.breastR.vy -= 0.3; });
     for (const b of [buttons.model, buttons.refine, buttons.bellyCurve, buttons.outfit, buttons.armSide, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
     for (const [b, tab] of [[buttons.model, 'body'], [buttons.refine, 'body'], [buttons.bellyCurve, 'body'], [buttons.outfit, 'outfit'], [buttons.armSide, 'pose'], [buttons.bounce, 'pose']] as const) b.dataset.tab = tab;
     right.appendChild(row);
@@ -2246,7 +2254,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       clothWanted = false;
       if (clothOn) await toggleCloth();
       pose = 'tpose'; armsDeg = 0; armsOverride = false; curl = 0; faceOn = false; seated = 0; sitAmount = 0; sitMoving = false;
-      Object.assign(spring, restingBellySpring()); Object.assign(breastSpring, restingBellySpring()); felt.primed = 0;
+      settleMasses();
       applyLook(); refresh();
       for (let k = 0; k < 120; k++) advance(1 / 60);
       model.updateMatrixWorld(true);
@@ -2265,7 +2273,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           cloth: { on: clothOn, wanted: clothWanted, made: !!cloth }, fittedTee: !!fittedTee(), fittedLaid, keep,
           teeDetail: fitted ? fitted.spots.fitted(keep, fitted.navel) : null,
           face: { on: faceOn, laid: !!faceMaterial }, hair: hairOn, pose, armsDeg, armsOverride, curl, garmentView, skinBare,
-          springs: { belly: { ...spring }, breast: { ...breastSpring } },
+          springs: { belly: { ...masses.belly }, breastL: { ...masses.breastL }, breastR: { ...masses.breastR } },
           drawn: (() => { const out: string[] = []; three.traverseVisible((n) => { const m = n as THREE.Mesh; if (m.isMesh) out.push(`${m.name}|${(Array.isArray(m.material) ? m.material[0] : m.material).name}|${m.geometry.getAttribute('position')?.count}`); }); return out; })(),
         },
       });
@@ -2425,31 +2433,59 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     orbit.target.z = ORBIT_START.target.z + (model.position.z + now.hips.z - (stand.hips.z + (-0.04 * M - stand.hips.z) * e));
   }
 
+  /** The masses at rest, and their anchors to be read afresh (a jump, a new body, a bake). */
+  function settleMasses(): void {
+    for (const m of Object.values(masses)) Object.assign(m, restingMass());
+    if (anchors) for (const a of Object.values(anchors)) a.primed = 0;
+    for (const u of Object.values(jiggle)) u.value.set(0, 0, 0);
+  }
+
   /**
-   * The body's acceleration at her middle, from where that point is frame to frame
-   * (metres), plus a walk's own bounce, which this walk-on-the-spot leaves out; the
-   * spring takes it from there.
+   * Her belly and breasts, every frame (softBody.ts): what her body does at each mass's anchor -- its acceleration from
+   * where it is frame to frame, plus a walk's own bounce, which this walk-on-the-spot leaves out, and gravity as her
+   * body leans -- in her own frame, steps each mass, and hands the shaders what her skin shows of it.
    */
   function feelMotion(dt: number): void {
     seated = sitMoving ? seatShare() : stepSeated(seated, pose === 'sit' ? 1 : 0, dt);
-    if (!feel || !(dt > 0)) { applyMotion(); return; }
-    feel.bone.localToWorld(tmp.copy(feel.local)).multiplyScalar(1 / M);
-    let up = 0, left = 0;
-    if (felt.primed >= 1) {
-      const vx = (tmp.x - felt.p.x) / dt, vy = (tmp.y - felt.p.y) / dt;
-      if (felt.primed >= 2) { up = (vy - felt.v.y) / dt; left = (vx - felt.v.x) / dt; }
-      felt.v.set(vx, vy, 0);
-      felt.primed = Math.min(2, felt.primed + 1);
-    } else felt.primed = 1;
-    felt.p.copy(tmp);
+    applyMotion();
+    const b = bodyOf();
+    if (!anchors || !b || !(dt > 0)) return;
+    const meshQ = b.mesh.getWorldQuaternion(qMesh).invert();
+    let walkUp = 0, walkSide = 0;
     if (pose === 'walk' && measure && rig) {
       const stride = humanStride(measure, 'walk', bump / 100) / rig.bindScale; // metres
-      up += walkBounceAccel((walked / stride) % 1, stride / WALK_SPEED);
+      walkUp = walkBounceAccel((walked / stride) % 1, stride / WALK_SPEED);
+      walkSide = walkSwayAccel((walked / stride) % 1, stride / WALK_SPEED);
     }
-    stepBellySpring(spring, dt, up, left);
-    stepBreastSpring(breastSpring, dt, up, left);
-    applyMotion();
+    // her left in the world, for the sway
+    side.set(1, 0, 0).applyQuaternion(qSide.copy(meshQ).invert());
+    const volume = bustVolume(bump, body.breastSize), milkL = body.milk * (body.milkBalance < 0 ? 1 + 0.4 * body.milkBalance / 100 : 1), milkR = body.milk * (body.milkBalance > 0 ? 1 - 0.4 * body.milkBalance / 100 : 1);
+    const tunes = { belly: bellyTune(bump, body.bellyFirmness, body.babyWeight, body.bellyBounce), breastL: breastTune(volume, milkL, body.breastFirmness, 'left', body.breastBounce), breastR: breastTune(volume, milkR, body.breastFirmness, 'right', body.breastBounce) };
+    for (const key of ['belly', 'breastL', 'breastR'] as const) {
+      const a = anchors[key];
+      a.bone.localToWorld(tmp.copy(a.local)).multiplyScalar(1 / M);
+      accel.set(0, 0, 0);
+      if (a.primed >= 1) {
+        vel.copy(tmp).sub(a.p).divideScalar(dt);
+        if (a.primed >= 2) accel.copy(vel).sub(a.v).divideScalar(dt);
+        a.v.copy(vel);
+        a.primed = Math.min(2, a.primed + 1);
+      } else a.primed = 1;
+      a.p.copy(tmp);
+      accel.y += walkUp;
+      accel.addScaledVector(side, walkSide);
+      // world to her frame: the bone's turn since it was bound, and her mesh's own
+      a.bone.getWorldQuaternion(qBone);
+      toBody.copy(meshQ).multiply(qBone).multiply(qBind.copy(a.bind).invert()).invert().multiply(meshQ);
+      feltAcceleration(accel, toBody, felt);
+      const m = masses[key], t = tunes[key];
+      stepMass(m, dt, felt.x, felt.y, felt.z, t);
+      // the shaders get metres in her frame; the follow weights turn them into each mesh's units
+      jiggle[key].value.set(m.x, m.y, m.z).multiplyScalar(t.gain);
+    }
   }
+  const qMesh = new THREE.Quaternion(), qBone = new THREE.Quaternion(), qBind = new THREE.Quaternion(), toBody = new THREE.Quaternion();
+  const accel = new THREE.Vector3(), vel = new THREE.Vector3(), felt = new THREE.Vector3(), side = new THREE.Vector3(), qSide = new THREE.Quaternion();
 
   /** Load the chosen model, putting away the one shown (MODEL switches v1 and v2). */
   function loadSarah(): void {
@@ -2459,13 +2495,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // her hair goes with her body (it is in her model's tree); a request still under way is no longer wanted
     hairMeshes = []; hairRequest++;
     if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
-    rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null; navel = null; sidesAt = []; babyAt = []; chestAt = []; milkAt = []; groinAt = [];
+    rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; anchors = null; navel = null; sidesAt = []; babyAt = []; chestAt = []; milkAt = []; groinAt = [];
     buildRig = null; bonesBuilt = ''; standLift = 0;
     crease.reset(); if (creaseTimer) { clearTimeout(creaseTimer); creaseTimer = 0; }
     recovered = false; partMeshes.clear(); wantedOutfit = null; outfitRequest++;
     for (const run of inflight.values()) run.abort.abort();
     inflight.clear();
-    felt.primed = 0; loaded = false; failed = false;
+    settleMasses(); loaded = false; failed = false;
     const entry = SARAH_LAB_MODELS[modelIndex], skin = hooks.skin ?? null, path = sarahModelPath(entry, skin);
     if (skin === 'ktx2') assets.enableKtx2(ctx.renderer.gl);
     // THE ORDER (Joshua, 2026-10-20): the room, then her, then what she has on -- only that outfit, its files asked for
@@ -2528,6 +2564,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // shapes that move nothing on this part are not sent to the GPU (morphPrune.ts)
         dropIdleMorphs(mesh);
         if (mesh.morphTargetDictionary?.[BELLY_TARGET] !== undefined) hasBelly = true;
+        // her belly and breasts move it as the masses swing (softBody.ts)
+        attachJiggle(mesh, jiggle);
         const name = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name;
         if (([...GARMENTS, ...RECOVERED_SHIRTS] as readonly string[]).includes(name)) found.add(name as Garment);
 
@@ -2581,12 +2619,20 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       // she stays out of sight until what she has on is on: never undressed, then dressed a moment later
       loadedModel.visible = !recovered;
       three.add(loadedModel);
-      // the spring feels a point at the front of her middle, carried by her spine
+      // the masses' anchors: the belly in front of her spine, each breast on her chest (rest metres, x her left)
       const skinMesh = findSkinnedMesh(loadedModel);
       if (skinMesh && measure) {
         loadedModel.updateMatrixWorld(true);
-        const bone = skinMesh.skeleton.bones[measure.joints.spine];
-        if (bone) feel = { bone, local: bone.worldToLocal(new THREE.Vector3(0, 1.0 * M, 0.2 * M)) };
+        const bones = skinMesh.skeleton.bones, spine = bones[measure.joints.spine], chest = bones[measure.joints.chest];
+        const bindOf = (bone: THREE.Bone) => {
+          const k = bones.indexOf(bone), world = new THREE.Matrix4().copy(skinMesh.skeleton.boneInverses[k]).invert();
+          const qb = new THREE.Quaternion(), qm = new THREE.Quaternion(), sc = new THREE.Vector3(), at = new THREE.Vector3();
+          world.decompose(at, qb, sc); skinMesh.bindMatrix.decompose(at, qm, sc);
+          return qm.invert().multiply(qb);
+        };
+        const at = (bone: THREE.Bone, x: number, y: number, z: number): Anchor => ({ bone, local: bone.worldToLocal(new THREE.Vector3(x * M, y * M, z * M)), bind: bindOf(bone), p: new THREE.Vector3(), v: new THREE.Vector3(), primed: 0 });
+        if (spine && chest) anchors = { belly: at(spine, 0, 1.0, 0.2), breastL: at(chest, 0.088, 1.27, 0.08), breastR: at(chest, -0.088, 1.27, 0.08) };
+        settleMasses();
       }
       loaded = true;
       dress(outfit, true);
@@ -2719,6 +2765,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (new URLSearchParams(globalThis.location?.search ?? '').get('bake') === 'story') (globalThis as unknown as Record<string, unknown>).__sarahLabStory = { ready: storyReady, bake: bakeForStory };
       // ?probe=cloth: run the cloth tee N frames at a fixed step between pictures (a software renderer draws ~1 a second)
       if (new URLSearchParams(globalThis.location?.search ?? '').get('probe') === 'cloth') (globalThis as unknown as Record<string, unknown>).__sarahLabCloth = {
+        // the three masses (softBody.ts): where each is, and what her skin shows of it (metres)
+        masses: () => ({ belly: { ...masses.belly }, breastL: { ...masses.breastL }, breastR: { ...masses.breastR }, shown: { belly: jiggle.belly.value.toArray(), breastL: jiggle.breastL.value.toArray(), breastR: jiggle.breastR.value.toArray() }, anchored: !!anchors }),
+        kick: (vy: number, vx = 0, vz = 0) => { for (const m of Object.values(masses)) { m.vy += vy; m.vx += vx; m.vz += vz; } },
         settle: (frames: number, dt = 1 / 60) => { if (!cloth || !model) return null; for (let k = 0; k < frames; k++) { model.updateMatrixWorld(true); if (clothRefit) { refitCloth(cloth); clothRefit = false; } cloth.frame(dt); } return cloth.stats(); },
         settings: () => cloth?.simSettings ?? null,
         // her own frame run `seconds` at a fixed step -- walk, springs, the cloth -- between pictures (a software renderer

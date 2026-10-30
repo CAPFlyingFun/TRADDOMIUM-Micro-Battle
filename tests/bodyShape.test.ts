@@ -60,6 +60,8 @@ describe('a body shape, as numbers', () => {
   it('prints a control the way the HUD shows it', () => {
     expect(controlLine('bellyHeight', 1.5)).toBe('HEIGHT · +1.5 cm');
     expect(controlLine('bellyTilt', 20)).toBe('TILT · 20.0° (approved)');
+    expect(controlLine('bellyBounce', 100)).toBe('BOUNCE · 100% (approved)');
+    expect(controlLine('milk', 50)).toBe('MILK · 50%');
   });
 });
 

@@ -25,8 +25,8 @@
  */
 
 export type BodyControl =
-  | 'bellyTilt' | 'bellyHeight' | 'bellyWidth' | 'bellyDepth' | 'bellyUpper' | 'bellyLower' | 'navel' | 'babyWeight'
-  | 'breastSize' | 'breastWidth' | 'breastHeight' | 'breastDepth' | 'breastSpacing' | 'breastPosition' | 'breastDroop' | 'breastUpper' | 'breastLower' | 'milk' | 'milkBalance'
+  | 'bellyTilt' | 'bellyHeight' | 'bellyWidth' | 'bellyDepth' | 'bellyUpper' | 'bellyLower' | 'navel' | 'babyWeight' | 'bellyFirmness' | 'bellyBounce'
+  | 'breastSize' | 'breastWidth' | 'breastHeight' | 'breastDepth' | 'breastSpacing' | 'breastPosition' | 'breastDroop' | 'breastUpper' | 'breastLower' | 'milk' | 'milkBalance' | 'breastFirmness' | 'breastBounce'
   | 'height' | 'upperLeg' | 'lowerLeg' | 'torso' | 'neck' | 'upperArm' | 'forearm' | 'shoulders' | 'waist' | 'hips' | 'head' | 'hands' | 'feet';
 
 export interface BodyControlSpec {
@@ -63,6 +63,10 @@ export const BODY_CONTROLS: readonly BodyControlSpec[] = Object.freeze([
   // follows it: heavy drops lower and forward, fuller below; light sits higher and tighter, up to her ribs. 0 is her
   // approved belly exactly. Needs her v2 body's womb file (sarah-v2-body-womb.bin); on another body it does nothing.
   { key: 'babyWeight', group: 'belly', label: 'Baby weight', unit: '%', min: -100, max: 100, step: 1, fallback: 0, spread: 25, help: 'light (higher, tighter) to heavy (lower, fuller below): the womb inside her moves and her belly follows it' },
+  // Joshua, 2026-10-29: the belly and breasts simulated, "the bigger the belly gets the less (tighter) the skin moves"
+  // (sarahlab/softBody.ts). 50 is the tuning as made; lower is softer and moves more, higher is tighter and settles sooner.
+  { key: 'bellyFirmness', group: 'belly', label: 'Firmness', unit: '%', min: 0, max: 100, step: 1, fallback: 50, spread: 15, help: 'how the belly moves with her: lower is softer and swings more, higher is tighter and settles sooner' },
+  { key: 'bellyBounce', group: 'belly', label: 'Bounce', unit: '%', min: 0, max: 200, step: 5, fallback: 100, spread: 20, help: 'how much of that motion shows: 0 holds the belly still, 100 is as tuned, 200 twice as much' },
   { key: 'breastSize', group: 'breasts', label: 'Size', unit: '%', min: -100, max: 100, step: 1, fallback: 0, spread: 10, help: 'volume from the bust the belly slider gives: +100% is 2.0x, -100% is 0.5x, at any belly size' },
   { key: 'breastWidth', group: 'breasts', label: 'Width', unit: '%', min: -25, max: 25, step: 1, fallback: 0, spread: 4, help: 'side to side' },
   { key: 'breastHeight', group: 'breasts', label: 'Height', unit: '%', min: -25, max: 25, step: 1, fallback: 0, spread: 4, help: 'top to bottom' },
@@ -77,6 +81,8 @@ export const BODY_CONTROLS: readonly BodyControlSpec[] = Object.freeze([
   // nothing. RANDOMIZE varies it within its RANGES like every control (0 to 50% by default; a lock or a range keeps it).
   { key: 'milk', group: 'breasts', label: 'Milk', unit: '%', min: 0, max: 100, step: 1, fallback: 0, spread: 25, help: 'both breasts filled with milk: fuller, rounder above the nipple, lifted a little (around 50% is a typical full feed)' },
   { key: 'milkBalance', group: 'breasts', label: 'Milk balance', unit: '%', min: -100, max: 100, step: 1, fallback: 0, spread: 10, help: 'one breast a little fuller than the other: above 0 her left, below 0 her right' },
+  { key: 'breastFirmness', group: 'breasts', label: 'Firmness', unit: '%', min: 0, max: 100, step: 1, fallback: 50, spread: 15, help: 'how the breasts move with her: lower is softer and swings more, higher is tighter and settles sooner (milk firms them too)' },
+  { key: 'breastBounce', group: 'breasts', label: 'Bounce', unit: '%', min: 0, max: 200, step: 5, fallback: 100, spread: 20, help: 'how much of that motion shows: 0 holds the breasts still, 100 is as tuned, 200 twice as much' },
   // Joshua, 2026-10-26: "add a height adjuster so you can raise or shorten the length of the legs, hips, arms, hands and
   // more basic body controls... I would say maybe the max/min per section is +/-30cm from the default positions".
   // What `bodyBuild.ts` turns into lengths and scales. The LENGTH ranges are MEASURED on sarah-v2-body-slim.glb: a
@@ -225,6 +231,7 @@ export function controlLine(key: BodyControl, value: number): string {
   const s = controlSpec(key);
   // a linked move can leave a whole-number control between whole numbers: show the tenth then
   const shown = s.step < 1 || Math.abs(value - Math.round(value)) > 0.05 ? value.toFixed(1) : value.toFixed(0);
-  const signed = s.unit !== '°' && value > 0 ? `+${shown}` : shown;
+  // a plus sign only where the control runs both ways from its middle: an amount (milk, firmness, bounce) has no minus
+  const signed = s.unit !== '°' && s.min < 0 && value > 0 ? `+${shown}` : shown;
   return `${s.label.toUpperCase()} · ${signed}${s.unit === '%' ? '%' : s.unit === 'cm' ? ' cm' : '°'}${value === s.fallback ? ' (approved)' : ''}`;
 }

@@ -1004,6 +1004,20 @@ export function walkBounceAccel(phase: number, strideSeconds: number): number {
   return -w * w * WALK_BOUNCE_M * Math.cos(4 * Math.PI * phase);
 }
 
+/**
+ * How far a walk carries the hips side to side, metres: a real walk shifts the pelvis about 2.5 cm over the standing
+ * foot, once each way a stride, and the walk-on-the-spot leaves that out too. Cut to 40% like the bounce, for the same
+ * reason. GAME TUNING.
+ */
+export const WALK_SWAY_M = 0.025 * 0.4;
+
+/** The sideways acceleration of that sway, m/s², toward her left (+x) -- one full cycle a stride. */
+export function walkSwayAccel(phase: number, strideSeconds: number): number {
+  if (!(strideSeconds > 0)) return 0;
+  const w = (2 * Math.PI) / strideSeconds; // one sway a stride
+  return -w * w * WALK_SWAY_M * Math.sin(2 * Math.PI * phase);
+}
+
 /** How much of the spring's travel the bump shows. GAME TUNING. */
 export const BELLY_SWING = 0.45;
 
