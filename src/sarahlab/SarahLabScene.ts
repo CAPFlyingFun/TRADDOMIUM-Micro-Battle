@@ -78,7 +78,7 @@ import { applyShapeFields, baseShapeFields, liftShapeFields, type ShapeFields, t
 import { BUILD_PROFILES, buildAmounts, buildKey, heightLine, heldSegments, profileOf, withProfile, type BuildAmounts, type BuildSegment } from '../actor/bodyBuild';
 import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields, prepareBuildRig, standingLift, type BuildMeshFields, type BuildRig } from '../view/bodyBuild';
 import { dropIdleMorphs } from '../view/morphPrune';
-import { applyMilk, applyWomb, applyZeroRefine, babyAnchors, babyWeightState, chestAnchors, chestFieldWeights, loadMilk, milkAnchors, milkBalanceState, milkFieldWeights, milkState, MILK_PATH, babyFieldWeights, loadWomb, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, WOMB_PATH, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
+import { applyMilk, applyWomb, applyZeroRefine, babyAnchors, babyWeightState, chestAnchors, chestFieldWeights, groinAnchors, groinFieldWeights, loadMilk, milkAnchors, milkBalanceState, milkFieldWeights, milkState, MILK_PATH, babyFieldWeights, loadWomb, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, WOMB_PATH, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
 import { NAVEL_MORPHS, type NavelPiece } from './navelPiece';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
@@ -641,7 +641,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** The belly sizes her baby-weight shapes were baked at, once their file is in (zeroRefine.ts). */
   let babyAt: number[] = [];
   /** The belly sizes her cleavage smoothing and her milk shapes were baked at, once their files are in (zeroRefine.ts). */
-  let chestAt: number[] = [], milkAt: number[] = [];
+  let chestAt: number[] = [], milkAt: number[] = [], groinAt: number[] = [];
   const fields: Record<string, HTMLElement> = {};
   const buttons: Record<string, HTMLButtonElement> = {};
   /** FACE's own controls: the held-open mouth, and the eye-colour swatches. */
@@ -1041,6 +1041,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     Object.assign(out, babyFieldWeights(b, body.babyWeight, babyAt, bellyCurve));
     // her cleavage smoothed, and milk in her breasts, once its file is in (zeroRefine.ts)
     Object.assign(out, chestFieldWeights(b, chestAt, bellyCurve));
+    Object.assign(out, groinFieldWeights(b, groinAt, bellyCurve));
     Object.assign(out, milkFieldWeights(b, body.milk, body.milkBalance, milkAt, bellyCurve));
     return out;
   }
@@ -2458,7 +2459,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // her hair goes with her body (it is in her model's tree); a request still under way is no longer wanted
     hairMeshes = []; hairRequest++;
     if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
-    rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null; navel = null; sidesAt = []; babyAt = []; chestAt = []; milkAt = [];
+    rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null; navel = null; sidesAt = []; babyAt = []; chestAt = []; milkAt = []; groinAt = [];
     buildRig = null; bonesBuilt = ''; standLift = 0;
     crease.reset(); if (creaseTimer) { clearTimeout(creaseTimer); creaseTimer = 0; }
     recovered = false; partMeshes.clear(); wantedOutfit = null; outfitRequest++;
@@ -2548,7 +2549,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         if (!zero || disposed || model !== loadedModel || !b || !s) return;
         const z = applyZeroRefine(s.mesh, s.fields, zero);
         if (!z) return;
-        s.fields = z.fields; navel = { mesh: b.mesh, piece: z.navel }; sidesAt = sidesAnchors(z.fields); chestAt = chestAnchors(z.fields);
+        s.fields = z.fields; navel = { mesh: b.mesh, piece: z.navel }; sidesAt = sidesAnchors(z.fields); chestAt = chestAnchors(z.fields); groinAt = groinAnchors(z.fields);
         applyLook();
         // then her baby-weight shapes, in the background: at 0 she is her approved belly, so nothing waits for them
         void loadWomb(assets.assetUrl(WOMB_PATH)).then((womb) => {

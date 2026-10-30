@@ -17,7 +17,7 @@ import * as THREE from 'three';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { applyShapeFields, liftShapeFields } from '../src/view/bodyShapeView';
 import { navelHeight, smallestAxis } from '../src/sarahlab/navelPiece';
-import { anchorWeights, applyMilk, babyWeightKg, chestAnchors, chestFieldWeights, CHEST_FIELD_PREFIX, milkAnchors, milkFieldWeights, milkShares, MILK_FIELD_PREFIX, parseMilkFile, applyWomb, applyZeroRefine, babyAnchors, babyFieldWeights, babyWeightShares, BABY_FIELD_PREFIX, parseWombFile, fitsZeroRefine, parseZeroRefine, SIDES_FIELD_PREFIX, sidesAnchors, sidesFieldWeights, UPPER_FIELD_PREFIX, ZERO_FIELD, zeroRefineWeight, type ZeroRefine } from '../src/sarahlab/zeroRefine';
+import { anchorWeights, GROIN_FIELD_PREFIX, groinAnchors, groinFieldWeights, applyMilk, babyWeightKg, chestAnchors, chestFieldWeights, CHEST_FIELD_PREFIX, milkAnchors, milkFieldWeights, milkShares, MILK_FIELD_PREFIX, parseMilkFile, applyWomb, applyZeroRefine, babyAnchors, babyFieldWeights, babyWeightShares, BABY_FIELD_PREFIX, parseWombFile, fitsZeroRefine, parseZeroRefine, SIDES_FIELD_PREFIX, sidesAnchors, sidesFieldWeights, UPPER_FIELD_PREFIX, ZERO_FIELD, zeroRefineWeight, type ZeroRefine } from '../src/sarahlab/zeroRefine';
 import { bellyWeights } from '../src/sarahlab/sarahLabTool';
 import { loadSarahMesh } from './garmentSarahBody';
 
@@ -209,5 +209,23 @@ describe('her cleavage smoothed, and milk', () => {
   });
   it('reads the baby\'s weight at full term from 2.5 to 4.5 kg, 3.4 at normal', () => {
     expect(babyWeightKg(-100)).toBeCloseTo(2.5); expect(babyWeightKg(0)).toBeCloseTo(3.4); expect(babyWeightKg(100)).toBeCloseTo(4.5);
+  });
+});
+
+describe('the crease at her groin smoothed', () => {
+  const at = [0, 25, 50, 75, 100, 125, 150, 175, 200];
+  it('is baked at every quarter from 0% to 200%, on at 0%, on HYBRID only', () => {
+    expect(data.groin.map((p) => p.slider)).toEqual(at);
+    for (const p of data.groin) {
+      let max = 0;
+      for (let i = 0; i < p.index.length; i += 1) max = Math.max(max, Math.hypot(p.pos[i * 3], p.pos[i * 3 + 1], p.pos[i * 3 + 2]));
+      expect(max).toBeLessThan(0.02);   // geometry units: under 2 cm
+    }
+    expect(groinFieldWeights(0, at, 'hybrid')).toEqual({ [`${GROIN_FIELD_PREFIX}0`]: 1 });
+    expect(groinFieldWeights(50, at, 'approved')).toEqual({});
+  });
+  it('goes on her approved body', () => {
+    const m = mesh.clone(); m.geometry = mesh.geometry.clone();
+    expect(groinAnchors(applyZeroRefine(m, liftShapeFields(m)!, data)!.fields)).toEqual(at);
   });
 });

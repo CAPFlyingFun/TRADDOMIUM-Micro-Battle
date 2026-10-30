@@ -69,9 +69,16 @@ export const SIDES_FIELD_PREFIX = 'shape:sides:';
  * `shape:chest:<percent>`, a tent over them, on HYBRID only.
  */
 export const CHEST_FIELD_PREFIX = 'shape:chest:';
+/**
+ * The crease between her pubic area and her thighs smoothed (Joshua, 2026-10-29, circled on his phone from 0% to 100%:
+ * "looks like a tear between the belly/pubic area and legs/hips... need to smooth that area"; of the renders, "Yes, do
+ * C" -- the strongest). Her model folds sharply along it; where it does, the skin and eight rings round it are smoothed,
+ * the crease itself kept as a fold, her vulva held. One field per belly size from 0% to 200%, `shape:groin:<percent>`.
+ */
+export const GROIN_FIELD_PREFIX = 'shape:groin:';
 
 /** What an anchored field carries (the file's own numbers). */
-export const ANCHOR_KIND = { sides: 0, light: 1, heavyHalf: 2, heavy: 3, chest: 4, milkLeft: 5, milkRight: 6, milkBoth: 7 } as const;
+export const ANCHOR_KIND = { sides: 0, light: 1, heavyHalf: 2, heavy: 3, chest: 4, milkLeft: 5, milkRight: 6, milkBoth: 7, groin: 8 } as const;
 export interface AnchoredPart extends Part { readonly kind: number; readonly slider: number }
 
 /**
@@ -140,6 +147,8 @@ export interface ZeroRefine {
   readonly sides: readonly AnchoredPart[];
   /** Her cleavage's rough skin smoothed, by belly size from 0% (SZR5; empty when the file has none). */
   readonly chest: readonly AnchoredPart[];
+  /** The crease between her pubic area and her thighs smoothed, by belly size from 0% (SZR5; empty when the file has none). */
+  readonly groin: readonly AnchoredPart[];
   /** The file's own navelFlat as it was baked against: how many vertices it moves, and its largest move. */
   readonly flatMoved: number;
   readonly flatMax: number;
@@ -173,17 +182,18 @@ export function parseZeroRefine(buffer: ArrayBuffer): ZeroRefine {
     const m = u32();
     upper.set(name, { index: take((b) => new Uint32Array(b), m * 4), pos: take((b) => new Float32Array(b), m * 12), nrm: take((b) => new Float32Array(b), m * 12) });
   }
-  let sides: AnchoredPart[] = [], chest: AnchoredPart[] = [];
+  let sides: AnchoredPart[] = [], chest: AnchoredPart[] = [], groin: AnchoredPart[] = [];
   if (magic === 'SZR5') {
     const read = readAnchoredParts(buffer, at, vertices);
     sides = read.parts.filter((p) => p.kind === ANCHOR_KIND.sides).sort((p, q) => p.slider - q.slider);
     chest = read.parts.filter((p) => p.kind === ANCHOR_KIND.chest).sort((p, q) => p.slider - q.slider);
+    groin = read.parts.filter((p) => p.kind === ANCHOR_KIND.groin).sort((p, q) => p.slider - q.slider);
     at = read.at;
   }
   if (at !== buffer.byteLength) throw new Error(`zero refine: ${buffer.byteLength - at} bytes left over`);
-  for (const p of [body, ...upper.values(), ...sides, ...chest]) for (const i of p.index) if (i >= vertices) throw new Error('zero refine: a vertex past the mesh');
+  for (const p of [body, ...upper.values(), ...sides, ...chest, ...groin]) for (const i of p.index) if (i >= vertices) throw new Error('zero refine: a vertex past the mesh');
   for (const i of splits) if (i >= vertices) throw new Error('zero refine: a navel vertex past the mesh');
-  return { vertices, body, upper, sides, chest, flatMoved, flatMax, navel: { count, flags, splitStart, splits, neighbourStart, neighbours, triangles, seed, grid, gridRadius, outie, bowl } };
+  return { vertices, body, upper, sides, chest, groin, flatMoved, flatMax, navel: { count, flags, splitStart, splits, neighbourStart, neighbours, triangles, seed, grid, gridRadius, outie, bowl } };
 }
 
 /**
@@ -216,6 +226,7 @@ export function applyZeroRefine(mesh: THREE.Mesh, fields: ShapeFields, data: Zer
   for (const [key, p] of data.upper) map.set(UPPER_FIELD_PREFIX + key, { index: p.index, pos: p.pos, nrm: p.nrm });
   for (const p of data.sides) map.set(SIDES_FIELD_PREFIX + p.slider, { index: p.index, pos: p.pos, nrm: p.nrm });
   for (const p of data.chest) map.set(CHEST_FIELD_PREFIX + p.slider, { index: p.index, pos: p.pos, nrm: p.nrm });
+  for (const p of data.groin) map.set(GROIN_FIELD_PREFIX + p.slider, { index: p.index, pos: p.pos, nrm: p.nrm });
   return { fields: { ...fields, fields: map, last: '' }, navel: new NavelPiece(data.navel) };
 }
 
@@ -236,6 +247,20 @@ export function chestFieldWeights(bumpPercent: number, anchors: readonly number[
   const out: Record<string, number> = {};
   if (curve !== 'hybrid') return out;
   for (const [s, w] of anchorWeights(bumpPercent, anchors, false)) out[CHEST_FIELD_PREFIX + s] = w;
+  return out;
+}
+
+/** The sizes the crease at her groin was smoothed at, from a field set (ascending). */
+export function groinAnchors(fields: ShapeFields | null | undefined): number[] {
+  if (!fields) return [];
+  return [...fields.fields.keys()].filter((n) => n.startsWith(GROIN_FIELD_PREFIX)).map((n) => Number(n.slice(GROIN_FIELD_PREFIX.length))).filter(Number.isFinite).sort((a, b) => a - b);
+}
+
+/** The groin crease smoothing's field weights at a belly size: a tent over the baked sizes (from 0%), on HYBRID only. */
+export function groinFieldWeights(bumpPercent: number, anchors: readonly number[], curve: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (curve !== 'hybrid') return out;
+  for (const [s, w] of anchorWeights(bumpPercent, anchors, false)) out[GROIN_FIELD_PREFIX + s] = w;
   return out;
 }
 
