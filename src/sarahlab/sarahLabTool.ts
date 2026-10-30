@@ -109,6 +109,8 @@ export const SARAH_LAB_ACTION = Object.freeze({
   tpose: 'sarahlab:tpose',
   turn: 'sarahlab:turn',
   bounce: 'sarahlab:bounce',
+  /** SEE BABY: her baby in her womb, her body seen through (baby.ts) */
+  baby: 'sarahlab:baby',
   outfit: 'sarahlab:outfit',
   model: 'sarahlab:model',
   refine: 'sarahlab:refine',
@@ -172,6 +174,8 @@ export const SARAH_LAB_FIELD = Object.freeze({
   /** the room's name and build at the top (`labTitle`) */
   title: 'sarahlab-title',
   status: 'sarahlab-status',
+  /** the baby's week, length and weight while SEE BABY is on */
+  baby: 'sarahlab-baby',
   bump: 'sarahlab-bump',
   fingers: 'sarahlab-fingers',
   arms: 'sarahlab-arms',
