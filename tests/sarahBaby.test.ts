@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { Cord, cordLength, cordRadius, placentaSpots, placentaSize, kickOnSkin, KICK_FELT_M, KICK_MOST_M, kicksShare, liningPast, moveEnvelope, moveLength, MOVES, MOVE_SOONEST_S, nextMove, turnToward, carriedShare, floatDrift, floatTune, fluidMl, FLUID, AUTO_DEPTH_MOST, babiesInHer, babyBody, babySolid, balanceDeg, BALANCE_MOST_DEG, FIT_TOLERANCE, PACK_SOFT, SHRINK_MOST, solidDeep, type BabyPlace, multipleShare, placeBabies, sacAround, babyPast, bellyPush, growSac, placeBaby, pushAt, pushZone, babyLine, babyPlace, babySize, curlFrame, FETAL_CHART, fitInSac, MODEL_CROWN_RUMP, sacRadius, SAC_FILL, weekForBump, wombAt, wombFromSkin, wombRadius, WOMB_BACK_Z, WOMB_FLOOR_Y, WOMB_TISSUE_M } from '../src/sarahlab/baby';
+import { awayFromHead, KICK_AWAY, Cord, cordLength, cordRadius, placentaSpots, placentaSize, kickOnSkin, KICK_FELT_M, KICK_MOST_M, kicksShare, liningPast, moveEnvelope, moveLength, MOVES, MOVE_SOONEST_S, nextMove, turnToward, carriedShare, floatDrift, floatTune, fluidMl, FLUID, AUTO_DEPTH_MOST, babiesInHer, babyBody, babySolid, balanceDeg, BALANCE_MOST_DEG, FIT_TOLERANCE, PACK_SOFT, SHRINK_MOST, solidDeep, type BabyPlace, multipleShare, placeBabies, sacAround, babyPast, bellyPush, growSac, placeBaby, pushAt, pushZone, babyLine, babyPlace, babySize, curlFrame, FETAL_CHART, fitInSac, MODEL_CROWN_RUMP, sacRadius, SAC_FILL, weekForBump, wombAt, wombFromSkin, wombRadius, WOMB_BACK_Z, WOMB_FLOOR_Y, WOMB_TISSUE_M } from '../src/sarahlab/baby';
 
 describe('her baby: the chart', () => {
   it('runs weeks 12 to 41 in order, every weight inside its 10th to 90th', () => {
@@ -311,6 +311,18 @@ describe('her babies: kicks and moves', () => {
     // a kick sometimes comes straight after another
     const r2 = seeded(7); let again = 0; for (let i = 0; i < 1000; i++) if (nextMove(r2, 100, 'kick').inS < MOVE_SOONEST_S) again++;
     expect(again).toBeGreaterThan(250); expect(again).toBeLessThan(450);
+  });
+
+  it('a kick never aims a leg at the baby\'s own chest: always well toward its feet, however its legs lie', () => {
+    const long = new THREE.Vector3(0, 1, 0);
+    for (const aim of [[0, 1, 0], [0.3, 0.9, 0.2], [1, 0, 0], [0, 0, 1], [0, -1, 0], [0.5, -0.2, 0.8]]) {
+      const v = awayFromHead(new THREE.Vector3(...aim), long);
+      expect(v.length()).toBeCloseTo(1, 6);
+      expect(v.dot(long)).toBeLessThanOrEqual(-KICK_AWAY + 0.02);
+    }
+    // an aim already toward its feet is left as it is
+    const down = new THREE.Vector3(0.2, -0.9, 0.1).normalize(), kept = awayFromHead(down.clone(), long);
+    expect(kept.distanceTo(down)).toBeLessThan(1e-9);
   });
 
   it('a bone turns toward where it is sent, by as much as asked', () => {

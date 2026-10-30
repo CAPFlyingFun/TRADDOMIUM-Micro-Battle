@@ -1317,12 +1317,15 @@ export function poseMove(bones: ReadonlyMap<string, THREE.Bone>, rest: ReadonlyM
   };
   const v = new THREE.Vector3();
   // (as far as asked: the lining stops it -- the scene holds the move short where it would reach past)
-  if (kind === 'kick') return limb(BABY_BONES.leg[side], v.copy(f.out).multiplyScalar(0.85).addScaledVector(f.long, -0.3).addScaledVector(f.left, side === 'left' ? 0.15 : -0.15).normalize(), 0.8, 0.9);
+  // A KICK STRAIGHTENS THE LEG AWAY FROM ITS CHEST (Joshua, 2026-10-30: "some are going the wrong way and the knees end
+  // up in the chest"): out toward her belly, but never toward its own head -- the leg's aim held at least `KICK_AWAY` of
+  // the way toward its feet, whichever way its legs lie
+  if (kind === 'kick') return limb(BABY_BONES.leg[side], awayFromHead(v.copy(f.out).multiplyScalar(0.85).addScaledVector(f.long, -0.3).addScaledVector(f.left, side === 'left' ? 0.15 : -0.15), f.long), 0.8, 0.9);
   if (kind === 'punch') return limb(BABY_BONES.arm[side], v.copy(f.out).multiplyScalar(0.8).addScaledVector(f.front, 0.25).addScaledVector(f.long, 0.15).normalize(), 0.7, 0.85);
   // a stretch: both legs and arms part of the way, its back and head arched back
   let tipBone: THREE.Bone | null = null;
   for (const s of ['left', 'right'] as const) {
-    tipBone = limb(BABY_BONES.leg[s], v.copy(f.long).multiplyScalar(-1).addScaledVector(f.out, 0.4).normalize(), 0.35, 0.5) ?? tipBone;
+    tipBone = limb(BABY_BONES.leg[s], awayFromHead(v.copy(f.long).multiplyScalar(-1).addScaledVector(f.out, 0.4), f.long), 0.35, 0.5) ?? tipBone;
     limb(BABY_BONES.arm[s], v.copy(f.long).multiplyScalar(0.6).addScaledVector(f.left, s === 'left' ? 0.6 : -0.6).normalize(), 0.3, 0.5);
   }
   for (const n of [...BABY_BONES.back, BABY_BONES.neck]) {
@@ -1332,6 +1335,19 @@ export function poseMove(bones: ReadonlyMap<string, THREE.Bone>, rest: ReadonlyM
     b.quaternion.copy(tP.multiply(tQ)); b.updateMatrixWorld(true);
   }
   return tipBone;
+}
+
+/** How far toward its feet (of its length) a leg's aim always is, kicking or stretching. GAME TUNING. */
+export const KICK_AWAY = 0.45;
+/** An aim (any length) held at least `KICK_AWAY` toward the feet (against `long`, toward the head), as a unit vector. */
+export function awayFromHead(aim: THREE.Vector3, long: THREE.Vector3): THREE.Vector3 {
+  aim.normalize();
+  const toHead = aim.dot(long);
+  if (toHead > -KICK_AWAY) aim.addScaledVector(long, -KICK_AWAY - toHead).normalize();
+  // (renormalised, it can come back a little short of the line: once more is enough)
+  const again = aim.dot(long);
+  if (again > -KICK_AWAY) aim.addScaledVector(long, -KICK_AWAY - again).normalize();
+  return aim;
 }
 
 /** How far a roll turns a baby about its length at the height of it (radians). GAME TUNING. */

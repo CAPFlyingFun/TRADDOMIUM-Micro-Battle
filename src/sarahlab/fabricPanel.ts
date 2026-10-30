@@ -188,6 +188,8 @@ export interface FabricPanel {
   setBare(on: boolean): void;
   /** Her painted bottoms and one-pieces hidden (true; her birth positions), every other layer as it was; nothing is lost. */
   setLowerBare(on: boolean): void;
+  /** Whether a painted bottom or one-piece is on her (whatever is shown now). */
+  coversLower(): boolean;
   /** The shared BREAST and NAVEL DETAIL as saved, and a way to set either (null: AUTO). */
   detail(): DetailOverride;
   /** How much of her shows through a modelled garment: the MANUAL values where set, else AUTO from its fabric. */
@@ -1084,6 +1086,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     setActive(on) { if (on === active) return; active = on; updateView(); draw(); },
     setBare(on) { if (on === bare) return; bare = on; sync(); },
     setLowerBare(on) { if (on === lowerBare) return; lowerBare = on; sync(); },
+    coversLower() { return templates.some((t) => !!t && LOWER_KINDS.includes(pieceKind(t.id) ?? 'top')); },
     detail: () => override,
     garmentDetail,
     setDetail: setDetailValue,
