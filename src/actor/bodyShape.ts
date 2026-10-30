@@ -26,7 +26,7 @@
 
 export type BodyControl =
   | 'bellyTilt' | 'bellyHeight' | 'bellyWidth' | 'bellyDepth' | 'bellyUpper' | 'bellyLower' | 'navel' | 'babyWeight'
-  | 'breastSize' | 'breastWidth' | 'breastHeight' | 'breastDepth' | 'breastSpacing' | 'breastPosition' | 'breastDroop' | 'breastUpper' | 'breastLower'
+  | 'breastSize' | 'breastWidth' | 'breastHeight' | 'breastDepth' | 'breastSpacing' | 'breastPosition' | 'breastDroop' | 'breastUpper' | 'breastLower' | 'milk' | 'milkBalance'
   | 'height' | 'upperLeg' | 'lowerLeg' | 'torso' | 'neck' | 'upperArm' | 'forearm' | 'shoulders' | 'waist' | 'hips' | 'head' | 'hands' | 'feet';
 
 export interface BodyControlSpec {
@@ -72,6 +72,11 @@ export const BODY_CONTROLS: readonly BodyControlSpec[] = Object.freeze([
   { key: 'breastDroop', group: 'breasts', label: 'Droop', unit: '°', min: -5, max: 15, step: 0.5, fallback: 0, spread: 3, help: 'natural downward tilt' },
   { key: 'breastUpper', group: 'breasts', label: 'Upper fullness', unit: '%', min: -20, max: 20, step: 1, fallback: 0, spread: 5, help: 'the upper pole' },
   { key: 'breastLower', group: 'breasts', label: 'Lower fullness', unit: '%', min: -20, max: 20, step: 1, fallback: 0, spread: 5, help: 'the lower pole' },
+  // Joshua, 2026-10-29: "something similar for the breasts like filled with milk? Both can be synced with the same amount
+  // or you can tweak each one slightly". Needs her v2 body's milk file (sarah-v2-body-milk.bin); elsewhere it does
+  // nothing. RANDOMIZE varies it within its RANGES like every control (0 to 50% by default; a lock or a range keeps it).
+  { key: 'milk', group: 'breasts', label: 'Milk', unit: '%', min: 0, max: 100, step: 1, fallback: 0, spread: 25, help: 'both breasts filled with milk: fuller, rounder above the nipple, lifted a little (around 50% is a typical full feed)' },
+  { key: 'milkBalance', group: 'breasts', label: 'Milk balance', unit: '%', min: -100, max: 100, step: 1, fallback: 0, spread: 10, help: 'one breast a little fuller than the other: above 0 her left, below 0 her right' },
   // Joshua, 2026-10-26: "add a height adjuster so you can raise or shorten the length of the legs, hips, arms, hands and
   // more basic body controls... I would say maybe the max/min per section is +/-30cm from the default positions".
   // What `bodyBuild.ts` turns into lengths and scales. The LENGTH ranges are MEASURED on sarah-v2-body-slim.glb: a

@@ -17,7 +17,7 @@ import * as THREE from 'three';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { applyShapeFields, liftShapeFields } from '../src/view/bodyShapeView';
 import { navelHeight, smallestAxis } from '../src/sarahlab/navelPiece';
-import { anchorWeights, applyWomb, applyZeroRefine, babyAnchors, babyFieldWeights, babyWeightShares, BABY_FIELD_PREFIX, parseWombFile, fitsZeroRefine, parseZeroRefine, SIDES_FIELD_PREFIX, sidesAnchors, sidesFieldWeights, UPPER_FIELD_PREFIX, ZERO_FIELD, zeroRefineWeight, type ZeroRefine } from '../src/sarahlab/zeroRefine';
+import { anchorWeights, applyMilk, babyWeightKg, chestAnchors, chestFieldWeights, CHEST_FIELD_PREFIX, milkAnchors, milkFieldWeights, milkShares, MILK_FIELD_PREFIX, parseMilkFile, applyWomb, applyZeroRefine, babyAnchors, babyFieldWeights, babyWeightShares, BABY_FIELD_PREFIX, parseWombFile, fitsZeroRefine, parseZeroRefine, SIDES_FIELD_PREFIX, sidesAnchors, sidesFieldWeights, UPPER_FIELD_PREFIX, ZERO_FIELD, zeroRefineWeight, type ZeroRefine } from '../src/sarahlab/zeroRefine';
 import { bellyWeights } from '../src/sarahlab/sarahLabTool';
 import { loadSarahMesh } from './garmentSarahBody';
 
@@ -174,5 +174,40 @@ describe('her baby\'s weight', () => {
     expect(babyAnchors(f)).toEqual([25, 50, 75, 100, 125, 150, 175, 200]);
     const small = new THREE.Mesh(new THREE.BoxGeometry());
     expect(applyWomb(small, { fields: new Map(), basePos: new Float32Array(), baseNrm: null, last: '' }, womb)).toBeNull();
+  });
+});
+
+describe('her cleavage smoothed, and milk', () => {
+  const b = readFileSync('public/models/sarah-v2-body-milk.bin');
+  const milk = parseMilkFile(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+  const at = [0, 25, 50, 75, 100, 125, 150, 175, 200];
+  it('her cleavage is smoothed at every quarter from 0% to 200%, and on at 0%', () => {
+    expect(data.chest.map((p) => p.slider)).toEqual(at);
+    expect(chestFieldWeights(0, at, 'hybrid')).toEqual({ [`${CHEST_FIELD_PREFIX}0`]: 1 });
+    expect(chestFieldWeights(0, at, 'approved')).toEqual({});
+  });
+  it('milk is baked for each breast and for both at once, at every size', () => {
+    for (const kind of [5, 6, 7]) expect(milk.parts.filter((p) => p.kind === kind).map((p) => p.slider)).toEqual(at);
+  });
+  it('fills both alike, and balance takes from one side only', () => {
+    expect(milkShares(0, 0)).toEqual({ left: 0, right: 0 });
+    expect(milkShares(100, 0)).toEqual({ left: 1, right: 1 });
+    expect(milkShares(100, 100)).toEqual({ left: 1, right: 0.6 });
+    const r = milkShares(50, -100); expect(r.left).toBeCloseTo(0.3); expect(r.right).toBeCloseTo(0.5);
+  });
+  it('weighs in by size and fill, with both-at-once by the two fills multiplied; nothing at 0', () => {
+    expect(milkFieldWeights(100, 0, 0, at, 'hybrid')).toEqual({});
+    const w = milkFieldWeights(100, 100, 100, at, 'hybrid');
+    expect(w[`${MILK_FIELD_PREFIX}5:100`]).toBe(1); expect(w[`${MILK_FIELD_PREFIX}6:100`]).toBeCloseTo(0.6); expect(w[`${MILK_FIELD_PREFIX}7:100`]).toBeCloseTo(0.6);
+    expect(milkFieldWeights(100, 100, 0, at, 'approved')).toEqual({});
+  });
+  it('goes on her approved body', () => {
+    const m = mesh.clone(); m.geometry = mesh.geometry.clone();
+    const lifted = liftShapeFields(m)!, z = applyZeroRefine(m, lifted, data)!;
+    expect(chestAnchors(z.fields)).toEqual(at);
+    expect(milkAnchors(applyMilk(m, z.fields, milk))).toEqual(at);
+  });
+  it('reads the baby\'s weight at full term from 2.5 to 4.5 kg, 3.4 at normal', () => {
+    expect(babyWeightKg(-100)).toBeCloseTo(2.5); expect(babyWeightKg(0)).toBeCloseTo(3.4); expect(babyWeightKg(100)).toBeCloseTo(4.5);
   });
 });

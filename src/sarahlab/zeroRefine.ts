@@ -62,9 +62,16 @@ interface Part { readonly index: Uint32Array; readonly pos: Float32Array; readon
  * is nothing: her approved 0% body is left as it is.
  */
 export const SIDES_FIELD_PREFIX = 'shape:sides:';
+/**
+ * Her cleavage's rough skin smoothed (Joshua, 2026-10-29, circling the skin between her breasts: "Yes, circled the area
+ * between the two breasts"): where her surface folds sharply between and round the tops of her breasts, smoothed; the
+ * valley between them, her nipples and the crease under her breasts kept. One field per belly size from 0% to 200%,
+ * `shape:chest:<percent>`, a tent over them, on HYBRID only.
+ */
+export const CHEST_FIELD_PREFIX = 'shape:chest:';
 
 /** What an anchored field carries (the file's own numbers). */
-export const ANCHOR_KIND = { sides: 0, light: 1, heavyHalf: 2, heavy: 3 } as const;
+export const ANCHOR_KIND = { sides: 0, light: 1, heavyHalf: 2, heavy: 3, chest: 4, milkLeft: 5, milkRight: 6, milkBoth: 7 } as const;
 export interface AnchoredPart extends Part { readonly kind: number; readonly slider: number }
 
 /**
@@ -131,6 +138,8 @@ export interface ZeroRefine {
   readonly upper: ReadonlyMap<string, Part>;
   /** Her sides and underside smoothed, by belly size (SZR5; empty in an SZR4 file). */
   readonly sides: readonly AnchoredPart[];
+  /** Her cleavage's rough skin smoothed, by belly size from 0% (SZR5; empty when the file has none). */
+  readonly chest: readonly AnchoredPart[];
   /** The file's own navelFlat as it was baked against: how many vertices it moves, and its largest move. */
   readonly flatMoved: number;
   readonly flatMax: number;
@@ -164,16 +173,17 @@ export function parseZeroRefine(buffer: ArrayBuffer): ZeroRefine {
     const m = u32();
     upper.set(name, { index: take((b) => new Uint32Array(b), m * 4), pos: take((b) => new Float32Array(b), m * 12), nrm: take((b) => new Float32Array(b), m * 12) });
   }
-  let sides: AnchoredPart[] = [];
+  let sides: AnchoredPart[] = [], chest: AnchoredPart[] = [];
   if (magic === 'SZR5') {
     const read = readAnchoredParts(buffer, at, vertices);
     sides = read.parts.filter((p) => p.kind === ANCHOR_KIND.sides).sort((p, q) => p.slider - q.slider);
+    chest = read.parts.filter((p) => p.kind === ANCHOR_KIND.chest).sort((p, q) => p.slider - q.slider);
     at = read.at;
   }
   if (at !== buffer.byteLength) throw new Error(`zero refine: ${buffer.byteLength - at} bytes left over`);
-  for (const p of [body, ...upper.values(), ...sides]) for (const i of p.index) if (i >= vertices) throw new Error('zero refine: a vertex past the mesh');
+  for (const p of [body, ...upper.values(), ...sides, ...chest]) for (const i of p.index) if (i >= vertices) throw new Error('zero refine: a vertex past the mesh');
   for (const i of splits) if (i >= vertices) throw new Error('zero refine: a navel vertex past the mesh');
-  return { vertices, body, upper, sides, flatMoved, flatMax, navel: { count, flags, splitStart, splits, neighbourStart, neighbours, triangles, seed, grid, gridRadius, outie, bowl } };
+  return { vertices, body, upper, sides, chest, flatMoved, flatMax, navel: { count, flags, splitStart, splits, neighbourStart, neighbours, triangles, seed, grid, gridRadius, outie, bowl } };
 }
 
 /**
@@ -205,6 +215,7 @@ export function applyZeroRefine(mesh: THREE.Mesh, fields: ShapeFields, data: Zer
   map.set(ZERO_FIELD, { index: data.body.index, pos: data.body.pos, nrm: data.body.nrm });
   for (const [key, p] of data.upper) map.set(UPPER_FIELD_PREFIX + key, { index: p.index, pos: p.pos, nrm: p.nrm });
   for (const p of data.sides) map.set(SIDES_FIELD_PREFIX + p.slider, { index: p.index, pos: p.pos, nrm: p.nrm });
+  for (const p of data.chest) map.set(CHEST_FIELD_PREFIX + p.slider, { index: p.index, pos: p.pos, nrm: p.nrm });
   return { fields: { ...fields, fields: map, last: '' }, navel: new NavelPiece(data.navel) };
 }
 
@@ -212,6 +223,20 @@ export function applyZeroRefine(mesh: THREE.Mesh, fields: ShapeFields, data: Zer
 export function sidesAnchors(fields: ShapeFields | null | undefined): number[] {
   if (!fields) return [];
   return [...fields.fields.keys()].filter((n) => n.startsWith(SIDES_FIELD_PREFIX)).map((n) => Number(n.slice(SIDES_FIELD_PREFIX.length))).filter(Number.isFinite).sort((a, b) => a - b);
+}
+
+/** The sizes her cleavage smoothing was baked at, from a field set (ascending). */
+export function chestAnchors(fields: ShapeFields | null | undefined): number[] {
+  if (!fields) return [];
+  return [...fields.fields.keys()].filter((n) => n.startsWith(CHEST_FIELD_PREFIX)).map((n) => Number(n.slice(CHEST_FIELD_PREFIX.length))).filter(Number.isFinite).sort((a, b) => a - b);
+}
+
+/** Her cleavage smoothing's field weights at a belly size: a tent over the baked sizes (from 0%), on HYBRID only. */
+export function chestFieldWeights(bumpPercent: number, anchors: readonly number[], curve: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (curve !== 'hybrid') return out;
+  for (const [s, w] of anchorWeights(bumpPercent, anchors, false)) out[CHEST_FIELD_PREFIX + s] = w;
+  return out;
 }
 
 /** Her sides smoothing's field weights at a belly size: a tent over the baked sizes, on HYBRID only. */
@@ -317,13 +342,127 @@ export async function loadWomb(url: string): Promise<WombFile | null> {
   }
 }
 
-/** What the BABY WEIGHT line adds: how her baby sits, or why the control does nothing here. */
+/**
+ * The baby's weight at full term a BABY WEIGHT reads as (Joshua, 2026-10-29: "might as well check for baby(s) weight"):
+ * about 3.4 kg at 0, the middle of the usual full-term range; 2.5 kg at -100, a small baby; 4.5 kg at +100, a large one
+ * (over 4 to 4.5 kg is what obstetrics calls macrosomia). A label for the slider, not a measurement: a real belly's
+ * size and carry depend on far more than the baby's weight.
+ */
+export function babyWeightKg(weightPercent: number): number {
+  const w = Math.min(100, Math.max(-100, Number.isFinite(weightPercent) ? weightPercent : 0)) / 100;
+  return w < 0 ? 3.4 + 0.9 * w : 3.4 + 1.1 * w;
+}
+const lbOz = (kg: number): string => { const oz = Math.round(kg * 35.274); return `${Math.floor(oz / 16)} lb ${oz % 16} oz`; };
+
+/** What the BABY WEIGHT line adds: how her baby sits and about what it weighs at full term, or why the control does nothing here. */
 export function babyWeightState(weightPercent: number, ready: boolean, curve: string): string {
   if (!ready) return 'her v2 body only (loading or not this body)';
   if (curve !== 'hybrid') return 'HYBRID belly curve only';
   const w = Number.isFinite(weightPercent) ? weightPercent : 0;
-  if (w === 0) return 'normal';
+  const kg = babyWeightKg(w), weighs = `about ${kg.toFixed(1)} kg (${lbOz(kg)}) at full term`;
+  if (w === 0) return `normal · ${weighs}`;
   const a = Math.abs(w);
   const how = a < 35 ? 'a little ' : a < 75 ? '' : 'very ';
-  return w < 0 ? `${how}light · sits higher` : `${how}heavy · drops lower`;
+  return w < 0 ? `${how}light · sits higher · ${weighs}` : `${how}heavy · drops lower · ${weighs}`;
+}
+
+/**
+ * MILK (Joshua, 2026-10-29: "something similar for the breasts like filled with milk? Both can be synced with the same
+ * amount or you can tweak each one slightly"; of the renders, "Try twice as much", then "Looks good").
+ *
+ * Each breast filled from a gland behind its nipple: fuller all over and most in its upper pole, lifted a little, its
+ * nipple and areola riding on it whole, her cleavage kept smooth. MILK fills both; MILK BALANCE takes some from one
+ * side, so the two can differ a little. Baked per belly size, 0% to 200%, in its own file: her left breast full, her
+ * right, and what both full at once differ from the two added. At 100% each breast holds about a third of a litre more
+ * -- the generous end of what a breast is measured to hold (roughly 80 to 600 mL), above the typical growth of early
+ * breastfeeding (about 210 mL a breast); around half is a typical full feed.
+ */
+export const MILK_PATH = 'models/sarah-v2-body-milk.bin';
+export const MILK_FIELD_PREFIX = 'shape:milk:';
+/** How much of a breast MILK BALANCE can take away at full turn (GAME TUNING: the approved render was 100% and 60%). */
+export const MILK_BALANCE_SHARE = 0.4;
+/** About how much milk a full breast holds, for the line (measured on her shapes: 265 to 400 cm3 a breast with the belly size). */
+export const MILK_FULL_ML = 330;
+
+/** Read the milk file ('SZK1'). Throws on anything else. */
+export function parseMilkFile(buffer: ArrayBuffer): WombFile {
+  const view = new DataView(buffer);
+  const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  if (magic !== 'SZK1') throw new Error(`milk: not a milk file (${magic})`);
+  const vertices = view.getUint32(4, true);
+  const { parts, at } = readAnchoredParts(buffer, 8, vertices);
+  if (at !== buffer.byteLength) throw new Error(`milk: ${buffer.byteLength - at} bytes left over`);
+  for (const p of parts) {
+    if (p.kind !== ANCHOR_KIND.milkLeft && p.kind !== ANCHOR_KIND.milkRight && p.kind !== ANCHOR_KIND.milkBoth) throw new Error(`milk: a field of kind ${p.kind}`);
+    for (const i of p.index) if (i >= vertices) throw new Error('milk: a vertex past the mesh');
+  }
+  return { vertices, parts };
+}
+
+/** Put the milk fields into a field set (returned as a new one); null when the mesh is not the body they were baked for. */
+export function applyMilk(mesh: THREE.Mesh, fields: ShapeFields, data: WombFile): ShapeFields | null {
+  const geom = mesh.geometry as THREE.BufferGeometry;
+  if (geom.getAttribute('position')?.count !== data.vertices || data.vertices !== ZERO_REFINE_VERTICES) return null;
+  const map = new Map(fields.fields);
+  for (const p of data.parts) map.set(`${MILK_FIELD_PREFIX}${p.kind}:${p.slider}`, { index: p.index, pos: p.pos, nrm: p.nrm });
+  return { ...fields, fields: map, last: '' };
+}
+
+/** The belly sizes the milk fields were baked at, from a field set (ascending). */
+export function milkAnchors(fields: ShapeFields | null | undefined): number[] {
+  if (!fields) return [];
+  const at = new Set<number>();
+  for (const n of fields.fields.keys()) if (n.startsWith(MILK_FIELD_PREFIX)) { const v = Number(n.split(':').pop()); if (Number.isFinite(v)) at.add(v); }
+  return [...at].sort((a, b) => a - b);
+}
+
+/** How full each breast is (0..1) for MILK (0..100) and MILK BALANCE (-100 her right fuller .. +100 her left fuller). */
+export function milkShares(milkPercent: number, balancePercent: number): { left: number; right: number } {
+  const m = Math.min(1, Math.max(0, (Number.isFinite(milkPercent) ? milkPercent : 0) / 100));
+  const b = Math.min(1, Math.max(-1, (Number.isFinite(balancePercent) ? balancePercent : 0) / 100));
+  return { left: m * (b < 0 ? 1 + MILK_BALANCE_SHARE * b : 1), right: m * (b > 0 ? 1 - MILK_BALANCE_SHARE * b : 1) };
+}
+
+/** The milk fields' weights: a tent over the baked sizes (from 0%) times each breast's share, on HYBRID only. */
+export function milkFieldWeights(bumpPercent: number, milkPercent: number, balancePercent: number, anchors: readonly number[], curve: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (curve !== 'hybrid' || !anchors.length) return out;
+  const { left, right } = milkShares(milkPercent, balancePercent);
+  if (!left && !right) return out;
+  for (const [s, t] of anchorWeights(bumpPercent, anchors, false)) {
+    if (left) out[`${MILK_FIELD_PREFIX}${ANCHOR_KIND.milkLeft}:${s}`] = t * left;
+    if (right) out[`${MILK_FIELD_PREFIX}${ANCHOR_KIND.milkRight}:${s}`] = t * right;
+    if (left && right) out[`${MILK_FIELD_PREFIX}${ANCHOR_KIND.milkBoth}:${s}`] = t * left * right;
+  }
+  return out;
+}
+
+/** What the MILK line adds: how full, about how much a breast, or why the control does nothing here. */
+export function milkState(milkPercent: number, balancePercent: number, ready: boolean, curve: string): string {
+  if (!ready) return 'her v2 body only (loading or not this body)';
+  if (curve !== 'hybrid') return 'HYBRID belly curve only';
+  const m = Number.isFinite(milkPercent) ? milkPercent : 0;
+  if (m <= 0) return 'none';
+  const how = m < 35 ? 'a little' : m < 70 ? 'typical full' : 'very full';
+  const { left, right } = milkShares(m, balancePercent);
+  const ml = (x: number) => Math.round((x * MILK_FULL_ML) / 10) * 10;
+  return left === right ? `${how} · about ${ml(left)} mL a breast` : `${how} · about ${ml(left)} mL her left, ${ml(right)} mL her right`;
+}
+
+/** What the MILK BALANCE line adds. */
+export function milkBalanceState(balancePercent: number): string {
+  const b = Number.isFinite(balancePercent) ? balancePercent : 0;
+  return b === 0 ? 'even' : b > 0 ? 'her left fuller' : 'her right fuller';
+}
+
+/** Fetch and read the milk file; null (MILK does nothing) when it cannot be had. */
+export async function loadMilk(url: string): Promise<WombFile | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return parseMilkFile(await res.arrayBuffer());
+  } catch (error) {
+    console.warn('[sarahlab] her milk shapes could not be loaded; MILK does nothing', error);
+    return null;
+  }
 }

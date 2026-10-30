@@ -78,7 +78,7 @@ import { applyShapeFields, baseShapeFields, liftShapeFields, type ShapeFields, t
 import { BUILD_PROFILES, buildAmounts, buildKey, heightLine, heldSegments, profileOf, withProfile, type BuildAmounts, type BuildSegment } from '../actor/bodyBuild';
 import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields, prepareBuildRig, standingLift, type BuildMeshFields, type BuildRig } from '../view/bodyBuild';
 import { dropIdleMorphs } from '../view/morphPrune';
-import { applyWomb, applyZeroRefine, babyAnchors, babyWeightState, babyFieldWeights, loadWomb, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, WOMB_PATH, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
+import { applyMilk, applyWomb, applyZeroRefine, babyAnchors, babyWeightState, chestAnchors, chestFieldWeights, loadMilk, milkAnchors, milkBalanceState, milkFieldWeights, milkState, MILK_PATH, babyFieldWeights, loadWomb, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, WOMB_PATH, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
 import { NAVEL_MORPHS, type NavelPiece } from './navelPiece';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
@@ -640,6 +640,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let sidesAt: number[] = [];
   /** The belly sizes her baby-weight shapes were baked at, once their file is in (zeroRefine.ts). */
   let babyAt: number[] = [];
+  /** The belly sizes her cleavage smoothing and her milk shapes were baked at, once their files are in (zeroRefine.ts). */
+  let chestAt: number[] = [], milkAt: number[] = [];
   const fields: Record<string, HTMLElement> = {};
   const buttons: Record<string, HTMLButtonElement> = {};
   /** FACE's own controls: the held-open mouth, and the eye-colour swatches. */
@@ -844,7 +846,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     for (const c of BODY_CONTROLS) {
       const line = fields[`${SARAH_LAB_FIELD.body}${c.key}`];
       // seated, the tilt in use is not the one chosen: say both, so a sitting body never reads as the slider's
-      if (line) line.textContent = controlLine(c.key, body[c.key]) + (c.key === 'bellyTilt' && pose === 'sit' ? ` · seated ${effectiveTiltDeg(body.bellyTilt, 1).toFixed(1)}°` : '') + (c.key === 'breastSize' ? ` · bust ${bustVolume(bump, body.breastSize).toFixed(2)}×` : '') + (c.key === 'navel' ? ` · ${navelState(bump, body.navel)}` : '') + (c.key === 'babyWeight' ? ` · ${babyWeightState(body.babyWeight, babyAt.length > 0, bellyCurve)}` : '') + buildNote(c.key);
+      if (line) line.textContent = controlLine(c.key, body[c.key]) + (c.key === 'bellyTilt' && pose === 'sit' ? ` · seated ${effectiveTiltDeg(body.bellyTilt, 1).toFixed(1)}°` : '') + (c.key === 'breastSize' ? ` · bust ${bustVolume(bump, body.breastSize).toFixed(2)}×` : '') + (c.key === 'navel' ? ` · ${navelState(bump, body.navel)}` : '') + (c.key === 'babyWeight' ? ` · ${babyWeightState(body.babyWeight, babyAt.length > 0, bellyCurve)}` : '') + (c.key === 'milk' ? ` · ${milkState(body.milk, body.milkBalance, milkAt.length > 0, bellyCurve)}` : '') + (c.key === 'milkBalance' ? ` · ${milkBalanceState(body.milkBalance)}` : '') + buildNote(c.key);
       const input = bodyInputs.get(c.key);
       if (input && Number(input.value) !== body[c.key]) input.value = String(body[c.key]);
     }
@@ -1037,6 +1039,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     Object.assign(out, sidesFieldWeights(b, sidesAt, bellyCurve));
     // her baby's weight: her belly carried by the womb inside it (zeroRefine.ts), once its file is in
     Object.assign(out, babyFieldWeights(b, body.babyWeight, babyAt, bellyCurve));
+    // her cleavage smoothed, and milk in her breasts, once its file is in (zeroRefine.ts)
+    Object.assign(out, chestFieldWeights(b, chestAt, bellyCurve));
+    Object.assign(out, milkFieldWeights(b, body.milk, body.milkBalance, milkAt, bellyCurve));
     return out;
   }
 
@@ -2453,7 +2458,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // her hair goes with her body (it is in her model's tree); a request still under way is no longer wanted
     hairMeshes = []; hairRequest++;
     if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
-    rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null; navel = null; sidesAt = []; babyAt = [];
+    rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null; navel = null; sidesAt = []; babyAt = []; chestAt = []; milkAt = [];
     buildRig = null; bonesBuilt = ''; standLift = 0;
     crease.reset(); if (creaseTimer) { clearTimeout(creaseTimer); creaseTimer = 0; }
     recovered = false; partMeshes.clear(); wantedOutfit = null; outfitRequest++;
@@ -2543,7 +2548,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         if (!zero || disposed || model !== loadedModel || !b || !s) return;
         const z = applyZeroRefine(s.mesh, s.fields, zero);
         if (!z) return;
-        s.fields = z.fields; navel = { mesh: b.mesh, piece: z.navel }; sidesAt = sidesAnchors(z.fields);
+        s.fields = z.fields; navel = { mesh: b.mesh, piece: z.navel }; sidesAt = sidesAnchors(z.fields); chestAt = chestAnchors(z.fields);
         applyLook();
         // then her baby-weight shapes, in the background: at 0 she is her approved belly, so nothing waits for them
         void loadWomb(assets.assetUrl(WOMB_PATH)).then((womb) => {
@@ -2552,6 +2557,16 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           const f = applyWomb(s2.mesh, s2.fields, womb);
           if (!f) return;
           s2.fields = f; babyAt = babyAnchors(f);
+          refresh();
+          applyLook();
+        });
+        // and her milk shapes, the same way: at 0 she is as approved
+        void loadMilk(assets.assetUrl(MILK_PATH)).then((milk) => {
+          const b2 = bodyOf(), s2 = b2 ? shaped.find((x) => x.mesh === b2.mesh) : undefined;
+          if (!milk || disposed || model !== loadedModel || !b2 || !s2) return;
+          const f = applyMilk(s2.mesh, s2.fields, milk);
+          if (!f) return;
+          s2.fields = f; milkAt = milkAnchors(f);
           refresh();
           applyLook();
         });
