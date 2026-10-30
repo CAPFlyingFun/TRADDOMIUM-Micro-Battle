@@ -126,11 +126,24 @@ describe('soft body: the skin', () => {
     const uniforms = createJiggleUniforms();
     uniforms.belly.value.set(0.001, -0.004, 0.002);
     uniforms.breastL.value.set(0, 0.003, 0);
-    const j = { weights: jiggleWeights(geometry, dictionary)!, uniforms }, out = { x: 0, y: 0, z: 0 };
+    const weights = jiggleWeights(geometry, dictionary)!, push = new Float32Array(weights.length);
+    const j = { weights, uniforms, push }, out = { x: 0, y: 0, z: 0 };
     jiggleAt(j, 0, out);
     expect(out.y).toBeCloseTo(-0.004 * UNITS_PER_METRE, 6);
     jiggleAt(j, 1, out);
     expect(out.y).toBeCloseTo(0.003 * UNITS_PER_METRE, 6);
+    // and the belly's push for the baby, added as it is
+    push[1] = 0.02; jiggleAt(j, 0, out);
+    expect(out.y).toBeCloseTo(0.02 - 0.004 * UNITS_PER_METRE, 6);
+  });
+
+  it('the push is its own attribute, added before skinning with the jiggle', () => {
+    const material = new THREE.MeshStandardMaterial(), uniforms = createJiggleUniforms();
+    patchJiggle(material, uniforms);
+    const shader = { uniforms: {} as Record<string, unknown>, vertexShader: '#include <common>\nvoid main(){\n#include <morphtarget_vertex>\n#include <skinning_vertex>\n}', fragmentShader: '' };
+    material.onBeforeCompile(shader as never, undefined as never);
+    expect(shader.vertexShader).toContain('attribute vec3 babyPush;');
+    expect(shader.vertexShader).toContain('transformed += babyPush');
   });
 
   it('the shader adds it after the morphs and before skinning, once, with its own program key', () => {
@@ -145,8 +158,8 @@ describe('soft body: the skin', () => {
     material.onBeforeCompile(shader as never, undefined as never);
     const v = shader.vertexShader;
     expect(v.match(/attribute vec3 jiggle/g)?.length).toBe(1);
-    expect(v.indexOf('transformed += jiggle.x')).toBeGreaterThan(v.indexOf('#include <morphtarget_vertex>'));
-    expect(v.indexOf('transformed += jiggle.x')).toBeLessThan(v.indexOf('#include <skinning_vertex>'));
+    expect(v.indexOf('transformed += babyPush + jiggle.x')).toBeGreaterThan(v.indexOf('#include <morphtarget_vertex>'));
+    expect(v.indexOf('transformed += babyPush + jiggle.x')).toBeLessThan(v.indexOf('#include <skinning_vertex>'));
     expect(shader.uniforms.uJiggleBelly).toBe(uniforms.belly);
     expect(material.customProgramCacheKey()).toContain('jiggle');
   });

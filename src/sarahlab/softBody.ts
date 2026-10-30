@@ -175,15 +175,22 @@ export function patchJiggle(material: THREE.Material, uniforms: JiggleUniforms):
     shader.uniforms.uJiggleBreastL = uniforms.breastL;
     shader.uniforms.uJiggleBreastR = uniforms.breastR;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec3 jiggle;\nuniform vec3 uJiggleBelly;\nuniform vec3 uJiggleBreastL;\nuniform vec3 uJiggleBreastR;')
-      .replace('#include <morphtarget_vertex>', '#include <morphtarget_vertex>\ntransformed += jiggle.x * uJiggleBelly + jiggle.y * uJiggleBreastL + jiggle.z * uJiggleBreastR;');
+      .replace('#include <common>', '#include <common>\nattribute vec3 jiggle;\nattribute vec3 babyPush;\nuniform vec3 uJiggleBelly;\nuniform vec3 uJiggleBreastL;\nuniform vec3 uJiggleBreastR;')
+      .replace('#include <morphtarget_vertex>', '#include <morphtarget_vertex>\ntransformed += babyPush + jiggle.x * uJiggleBelly + jiggle.y * uJiggleBreastL + jiggle.z * uJiggleBreastR;');
   };
   material.customProgramCacheKey = function () { return `${cacheKey ? cacheKey.call(this) : ''}|jiggle`; };
   material.needsUpdate = true;
 }
 
 /** What the CPU posers read: a mesh's follow weights and the uniforms they multiply. */
-export interface Jiggle { readonly weights: Float32Array; readonly uniforms: JiggleUniforms }
+/**
+ * `push`: HER BELLY MADE ROOM FOR (baby.ts, Joshua 2026-10-30: "the belly adjusting to the baby as in real life the skin
+ * changes with the baby"): where her baby, its sac and her womb need more room than her belly gives, her skin (and what
+ * she wears over it) is pushed out -- per vertex, geometry units, zero everywhere else. Its own attribute, beside the
+ * jiggle's, so the CPU posers read it the same way.
+ */
+export const PUSH_ATTRIBUTE = 'babyPush';
+export interface Jiggle { readonly weights: Float32Array; readonly uniforms: JiggleUniforms; readonly push: Float32Array }
 /** A mesh's jiggle, if it was given one. */
 export function jiggleOf(mesh: THREE.Object3D): Jiggle | null {
   const j = (mesh.userData as { jiggle?: Jiggle }).jiggle;
@@ -200,15 +207,27 @@ export function attachJiggle(mesh: THREE.Mesh, uniforms: JiggleUniforms): boolea
   const weights = jiggleWeights(g, mesh.morphTargetDictionary);
   if (!weights) return false;
   g.setAttribute(JIGGLE_ATTRIBUTE, new THREE.BufferAttribute(weights, 3));
-  (mesh.userData as { jiggle?: Jiggle }).jiggle = { weights, uniforms };
+  const push = new Float32Array(weights.length);
+  g.setAttribute(PUSH_ATTRIBUTE, new THREE.BufferAttribute(push, 3));
+  (mesh.userData as { jiggle?: Jiggle }).jiggle = { weights, uniforms, push };
   for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) patchJiggle(m, uniforms);
   return true;
 }
 
 /** A vertex's jiggle offset (geometry units) into `out`, as the shader adds it. */
+/** Lay `values` (geometry units, three a vertex; null clears it) as the mesh's push. False for a mesh with no jiggle. */
+export function setPush(mesh: THREE.Object3D, values: ArrayLike<number> | null): boolean {
+  const j = jiggleOf(mesh), g = (mesh as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
+  if (!j || !g) return false;
+  if (values) j.push.set(values); else j.push.fill(0);
+  const a = g.getAttribute(PUSH_ATTRIBUTE) as THREE.BufferAttribute | undefined;
+  if (a) a.needsUpdate = true;
+  return true;
+}
 export function jiggleAt(j: Jiggle, v: number, out: { x: number; y: number; z: number }): void {
   const w = j.weights, o = v * 3, b = j.uniforms.belly.value, l = j.uniforms.breastL.value, r = j.uniforms.breastR.value;
-  out.x = w[o] * b.x + w[o + 1] * l.x + w[o + 2] * r.x;
-  out.y = w[o] * b.y + w[o + 1] * l.y + w[o + 2] * r.y;
-  out.z = w[o] * b.z + w[o + 1] * l.z + w[o + 2] * r.z;
+  const p = j.push;
+  out.x = p[o] + w[o] * b.x + w[o + 1] * l.x + w[o + 2] * r.x;
+  out.y = p[o + 1] + w[o] * b.y + w[o + 1] * l.y + w[o + 2] * r.y;
+  out.z = p[o + 2] + w[o] * b.z + w[o + 1] * l.z + w[o + 2] * r.z;
 }

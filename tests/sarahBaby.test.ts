@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { babyLine, babyPlace, babySize, curlFrame, FETAL_CHART, fitInSac, MODEL_CROWN_RUMP, sacRadius, SAC_FILL, weekForBump, wombAt, wombFromSkin, wombRadius, WOMB_BACK_Z, WOMB_FLOOR_Y, WOMB_TISSUE_M } from '../src/sarahlab/baby';
+import { babyPast, bellyPush, growSac, placeBaby, pushAt, pushZone, babyLine, babyPlace, babySize, curlFrame, FETAL_CHART, fitInSac, MODEL_CROWN_RUMP, sacRadius, SAC_FILL, weekForBump, wombAt, wombFromSkin, wombRadius, WOMB_BACK_Z, WOMB_FLOOR_Y, WOMB_TISSUE_M } from '../src/sarahlab/baby';
 
 describe('her baby: the chart', () => {
   it('runs weeks 12 to 41 in order, every weight inside its 10th to 90th', () => {
@@ -101,6 +101,38 @@ describe('her baby: in her womb', () => {
       expect(inside(pts, p, fit.scale, w)).toBeLessThan(1e-3);
       expect(fit.scale).toBeLessThanOrEqual(p.scale);
     }
+  });
+
+  it('the baby first: where it fits, her belly is left exactly as it is', () => {
+    const pts = blob(), curl = curlFrame(pts, new THREE.Vector3(0, 1, 0));
+    const room = wombFromSkin(belly(0.3), weekForBump(60));
+    const fit = placeBaby(pts, 60, 0, curl, room);
+    expect(fit.squeezed).toBe(1);
+    const push = bellyPush(growSac(room, babyPast(pts, fit, room)));
+    expect(push.most).toBe(0);
+    expect(pushAt(push, 0, 1.0, 0.3, new THREE.Vector3())).toBe(false);
+  });
+
+  it('where it does not, the sac grows round it and her belly is pushed out -- on her belly only', () => {
+    const pts = blob().map((v) => v * 1.5), curl = curlFrame(pts, new THREE.Vector3(0, 1, 0));
+    const room = wombFromSkin(belly(0.1), weekForBump(100));
+    const fit = placeBaby(pts, 100, 0, curl, room);
+    expect(fit.scale).toBeCloseTo(babyPlace(100, 0, curl, room).scale, 9);   // never shrunk
+    const grown = growSac(room, babyPast(pts, fit, room));
+    // the whole baby inside the grown sac
+    const q = new THREE.Vector3();
+    for (let i = 0; i < pts.length / 3; i++) {
+      q.set(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]).multiplyScalar(fit.scale).applyQuaternion(fit.quaternion).add(fit.position).sub(grown.centre);
+      const r = q.length(); expect(r).toBeLessThanOrEqual(sacRadius(grown, q.x / r, q.y / r, q.z / r) * SAC_FILL + 2e-3);
+    }
+    const push = bellyPush(grown);
+    expect(push.most).toBeGreaterThan(0.005);
+    // on the front of her belly it moves out; under her breasts, at her groin and out at her sides it does not
+    const out = new THREE.Vector3();
+    let moved = 0;
+    for (let y = 0.92; y <= 1.1; y += 0.02) if (pushAt(push, 0, y, 0.05 + 0.1 * Math.sqrt(Math.max(0, 1 - ((y - 1.02) / 0.2) ** 2)), out)) moved = Math.max(moved, out.z);
+    expect(moved).toBeGreaterThan(0.002);
+    expect(pushZone(0, 1.25)).toBe(0); expect(pushZone(0, 0.83)).toBe(0); expect(pushZone(0.26, 1.0)).toBe(0); expect(pushZone(0, 1.0)).toBe(1);
   });
 
   it('a heavier baby is drawn bigger, a lighter one smaller', () => {

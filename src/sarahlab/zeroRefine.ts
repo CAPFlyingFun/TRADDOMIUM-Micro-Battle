@@ -16,6 +16,7 @@
  * Her approved body file is not changed: `models/sarah-v2-body-zero.bin` (baked from the approved renders by
  * `scripts/sarahV2ZeroRefine/`) carries both, put on her as she loads.
  */
+import { babySize } from './baby';
 import * as THREE from 'three';
 import type { ShapeFields } from '../view/bodyShapeView';
 import { NavelPiece, type NavelData } from './navelPiece';
@@ -369,13 +370,13 @@ export async function loadWomb(url: string): Promise<WombFile | null> {
 
 /**
  * The baby's weight at full term a BABY WEIGHT reads as (Joshua, 2026-10-29: "might as well check for baby(s) weight"):
- * about 3.4 kg at 0, the middle of the usual full-term range; 2.5 kg at -100, a small baby; 4.5 kg at +100, a large one
- * (over 4 to 4.5 kg is what obstetrics calls macrosomia). A label for the slider, not a measurement: a real belly's
- * size and carry depend on far more than the baby's weight.
+ * the fetal chart's week 40 (baby.ts) -- 3.46 kg at 0, the average; 2.60 kg at -100, its 10th percentile; 4.62 kg at
+ * +100, its 90th. A label for the slider, not a measurement: a real belly's size and carry depend on far more than the
+ * baby's weight.
  */
 export function babyWeightKg(weightPercent: number): number {
-  const w = Math.min(100, Math.max(-100, Number.isFinite(weightPercent) ? weightPercent : 0)) / 100;
-  return w < 0 ? 3.4 + 0.9 * w : 3.4 + 1.1 * w;
+  // the fetal chart at week 40 (baby.ts, Joshua 2026-10-30: "Yes" to the chart's numbers): 10th percentile, average, 90th
+  return babySize(40, weightPercent).g / 1000;
 }
 const lbOz = (kg: number): string => { const oz = Math.round(kg * 35.274); return `${Math.floor(oz / 16)} lb ${oz % 16} oz`; };
 
@@ -384,7 +385,7 @@ export function babyWeightState(weightPercent: number, ready: boolean, curve: st
   if (!ready) return 'her v2 body only (loading or not this body)';
   if (curve !== 'hybrid') return 'HYBRID belly curve only';
   const w = Number.isFinite(weightPercent) ? weightPercent : 0;
-  const kg = babyWeightKg(w), weighs = `about ${kg.toFixed(1)} kg (${lbOz(kg)}) at full term`;
+  const kg = babyWeightKg(w), weighs = `about ${kg.toFixed(2)} kg (${lbOz(kg)}) at full term`;
   if (w === 0) return `normal · ${weighs}`;
   const a = Math.abs(w);
   const how = a < 35 ? 'a little ' : a < 75 ? '' : 'very ';

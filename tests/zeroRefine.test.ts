@@ -207,8 +207,8 @@ describe('her cleavage smoothed, and milk', () => {
     expect(chestAnchors(z.fields)).toEqual(at);
     expect(milkAnchors(applyMilk(m, z.fields, milk))).toEqual(at);
   });
-  it('reads the baby\'s weight at full term from 2.5 to 4.5 kg, 3.4 at normal', () => {
-    expect(babyWeightKg(-100)).toBeCloseTo(2.5); expect(babyWeightKg(0)).toBeCloseTo(3.4); expect(babyWeightKg(100)).toBeCloseTo(4.5);
+  it('reads the baby\'s weight at full term from the chart: 2.60 kg, 3.46 at normal, 4.62', () => {
+    expect(babyWeightKg(-100)).toBeCloseTo(2.595, 6); expect(babyWeightKg(0)).toBeCloseTo(3.46, 6); expect(babyWeightKg(100)).toBeCloseTo(4.617, 6);
   });
 });
 

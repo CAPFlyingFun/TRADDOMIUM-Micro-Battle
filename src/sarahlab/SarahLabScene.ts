@@ -79,7 +79,8 @@ import { applyShapeFields, baseShapeFields, liftShapeFields, type ShapeFields, t
 import { BUILD_PROFILES, buildAmounts, buildKey, heightLine, heldSegments, profileOf, withProfile, type BuildAmounts, type BuildSegment } from '../actor/bodyBuild';
 import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields, prepareBuildRig, standingLift, type BuildMeshFields, type BuildRig } from '../view/bodyBuild';
 import { dropIdleMorphs } from '../view/morphPrune';
-import { BABY_MODEL, babyLine, curlFrame, fitBaby, sacRadius, weekForBump, wombFromSkin, WOMB_WALL_M, type CurlFrame, type WombShape } from './baby';
+import { BABY_MODEL, babyLine, babyPast, bellyPush, curlFrame, growSac, placeBaby as placeBabyIn, pushAt, sacRadius, weekForBump, wombFromSkin, WOMB_WALL_M, type BellyPush, type CurlFrame, type WombShape } from './baby';
+import { setPush, jiggleOf as jiggleOfMesh } from './softBody';
 import { attachJiggle, bellyTune, breastTune, createJiggleUniforms, feltAcceleration, restingMass, stepMass } from './softBody';
 import { applyMilk, applyWomb, applyZeroRefine, babyAnchors, babyWeightState, chestAnchors, chestFieldWeights, groinAnchors, groinFieldWeights, loadMilk, milkAnchors, milkBalanceState, milkFieldWeights, milkState, MILK_PATH, babyFieldWeights, loadWomb, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, WOMB_PATH, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
 import { NAVEL_MORPHS, type NavelPiece } from './navelPiece';
@@ -318,11 +319,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * belly's mass swinging them with her. Fetched the first time it is asked for.
    */
   let babyFrame: { bone: THREE.Bone; matrix: THREE.Matrix4; meshToRest: THREE.Matrix4 } | null = null;
-  let babyFitAt = -Infinity;
+  let babyFitAt = -Infinity, babyPushField: BellyPush | null = null, babyPushOff = false;
   let babyWall: THREE.Mesh | null = null, babyDirty = true, babySkinAt: Uint32Array | null = null, babyWomb: WombShape | null = null;
   let babyRoot: THREE.Object3D | null = null, babyHolder: THREE.Object3D | null = null, babySac: THREE.Mesh | null = null;
   let babyShown = false, babyLoading = false, babyKey = '';
-  let babyCurl: CurlFrame | null = null, babyPoints: Float32Array | null = null;
+  let babyCurl: CurlFrame | null = null, babyPoints: Float32Array | null = null, babyAll: Float32Array | null = null;
   const GHOST_OPACITY = 0.26;
   const tmp = new THREE.Vector3();
   // she opens in her red light spandex tee over painted leggings (Joshua, 2026-10-23), one small file; a model without
@@ -913,7 +914,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     if (buttons.outfit) buttons.outfit.textContent = `OUTFIT · ${outfitName(wantedOutfit ?? outfit)}${wantedOutfit !== null ? ' …' : ''}`;
     if (buttons.model) buttons.model.textContent = modelLine(modelIndex);
     if (buttons.baby) { buttons.baby.textContent = babyShown ? 'HIDE BABY' : 'SEE BABY'; lit(buttons.baby, babyShown); }
-    if (babyNote) { babyNote.textContent = babyShown ? `BABY · ${babyLoading ? 'loading…' : babyRoot ? babyLine(bump, body.babyWeight) + ((babyRoot.userData.squeezed ?? 1) < 0.98 ? ` · curled ${Math.round((1 - babyRoot.userData.squeezed) * 100)}% tighter to fit her belly` : '') : 'not loaded'}` : ''; babyNote.style.display = babyShown ? '' : 'none'; }
+    if (babyNote) { babyNote.textContent = babyShown ? `BABY · ${babyLoading ? 'loading…' : babyRoot ? babyLine(bump, body.babyWeight) : 'not loaded'}` : ''; babyNote.style.display = babyShown ? '' : 'none'; }
     if (buttons.refine) {
       // only v2 has the switchable curve: the button is not shown for v1
       buttons.refine.style.display = SARAH_LAB_MODELS[modelIndex].id.startsWith('v2') ? '' : 'none';
@@ -2533,9 +2534,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const isUnder = (o: THREE.Object3D, root: THREE.Object3D): boolean => { for (let p: THREE.Object3D | null = o; p; p = p.parent) if (p === root) return true; return false; };
 
   /** SEE BABY on or off: fetched the first time, laid in her womb, her seen through. */
-  function showBaby(on: boolean): void {
-    babyShown = on;
-    if (on && !babyRoot && !babyLoading) {
+  /** Her baby fetched (once): it is what her belly makes room for, seen or not. */
+  function loadBaby(): void {
+    if (babyRoot || babyLoading || disposed) return;
+    {
       babyLoading = true;
       void assets.loadModel(BABY_MODEL, () => new THREE.Object3D()).then((root) => {
         babyLoading = false;
@@ -2551,11 +2553,16 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         babyCurl = curlFrame(pts, head);
         // a sample of its points, to keep it inside her womb
         babyPoints = Float32Array.from(pts.filter((_, i) => Math.floor(i / 3) % 10 === 0));
-        babyRoot = root;
+        babyAll = Float32Array.from(pts);
+        babyRoot = root; babyDirty = true;
         if (babyShown) showBaby(true);
         refresh();
       });
     }
+  }
+  function showBaby(on: boolean): void {
+    babyShown = on;
+    if (on) loadBaby();
     if (on && babyRoot && babyFrame && !babyHolder) {
       babyHolder = new THREE.Object3D();
       babyHolder.matrixAutoUpdate = false; babyHolder.matrix.copy(babyFrame.matrix);
@@ -2566,7 +2573,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       babySac.renderOrder = 1; babyWall.renderOrder = 2;
       for (const m of [babySac, babyWall]) m.userData.unit = Float32Array.from(m.geometry.getAttribute('normal').array as Float32Array);
       babyHolder.add(babyRoot, babySac, babyWall);
-      babyKey = ''; babyDirty = true;
+      babyKey = ''; babyDirty = true; babyFitAt = -Infinity;
     }
     if (babyHolder) babyHolder.visible = on;
     ghost(on && !!babyHolder);
@@ -2575,7 +2582,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function dropBabyHolder(): void {
     if (babyRoot) babyRoot.removeFromParent();
     for (const m of [babySac, babyWall]) if (m) { m.removeFromParent(); m.geometry.dispose(); (m.material as THREE.Material).dispose(); }
-    babySac = null; babyWall = null; babyWomb = null;
+    babySac = null; babyWall = null; babyWomb = null; babyPushField = null;
     babyHolder?.removeFromParent(); babyHolder = null; babyFrame = null;
   }
   /**
@@ -2611,6 +2618,40 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const skin = new THREE.Matrix4().copy(mesh.bindMatrixInverse).multiply(bone.matrixWorld).multiply(sk.boneInverses[0]).multiply(mesh.bindMatrix);
     return new THREE.Matrix4().copy(root.matrixWorld).invert().multiply(mesh.matrixWorld).multiply(skin);
   }
+  /**
+   * Her belly made room for: each of her meshes that moves with her belly (her body and what she wears, all in her body's
+   * geometry) pushed out where the field says, in its own units; a field with nothing in it takes any old push off.
+   */
+  function layPush(f: BellyPush): void {
+    const frame = babyFrame;
+    if (!frame) return;
+    const toUnits = new THREE.Matrix3().setFromMatrix4(frame.meshToRest).invert();
+    const v = new THREE.Vector3(), u = new THREE.Vector3();
+    for (const mesh of skinned) {
+      const j = jiggleOfMesh(mesh);
+      if (!j) continue;
+      if (f.most <= 0 || babyPushOff) { if (mesh.userData.pushed) { setPush(mesh, null); mesh.userData.pushed = false; } continue; }
+      const g = mesh.geometry, pos = g.getAttribute('position') as THREE.BufferAttribute, mp = g.morphAttributes.position ?? [], inf = mesh.morphTargetInfluences ?? [];
+      // the points that could be on her belly, found once a mesh (generously: the push says where it is wanted)
+      let at = mesh.userData.pushAt as Uint32Array | undefined;
+      if (!at) {
+        const list: number[] = [];
+        for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i).applyMatrix4(frame.meshToRest); if (Math.abs(v.x) < 0.34 && v.y > 0.72 && v.y < 1.32 && v.z > -0.12) list.push(i); }
+        at = mesh.userData.pushAt = Uint32Array.from(list);
+      }
+      const live = inf.map((w, k) => [k, w] as const).filter(([k, w]) => w !== 0 && mp[k]);
+      const out = new Float32Array(pos.count * 3);
+      for (const i of at) {
+        v.fromBufferAttribute(pos, i);
+        for (const [k, w] of live) { const m = mp[k]; v.x += w * m.getX(i); v.y += w * m.getY(i); v.z += w * m.getZ(i); }
+        v.applyMatrix4(frame.meshToRest);
+        if (!pushAt(f, v.x, v.y, v.z, u)) continue;
+        u.applyMatrix3(toUnits);
+        out[i * 3] = u.x; out[i * 3 + 1] = u.y; out[i * 3 + 2] = u.z;
+      }
+      setPush(mesh, out); mesh.userData.pushed = true;
+    }
+  }
   /** A shell on the sphere grid laid round the womb's middle at the sac's radius (plus `grow`). */
   function layShell(mesh: THREE.Mesh, w: WombShape, grow: number): void {
     const pos = mesh.geometry.getAttribute('position') as THREE.BufferAttribute, unit = mesh.userData.unit as Float32Array;
@@ -2620,26 +2661,31 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     }
     pos.needsUpdate = true; mesh.geometry.computeVertexNormals(); mesh.geometry.computeBoundingSphere();
   }
-  /** The baby, its sac and her womb where her belly is now: her size and shape, BABY WEIGHT, and the belly's swing. */
+  /**
+   * The baby, its sac, her womb and her belly round them (baby.ts): the baby at the chart's size; the sac grown round it;
+   * her skin (and what she wears) pushed out where they need the room. Worked out again when her shape, size or BABY
+   * WEIGHT change -- a few times a second at most while a slider is dragged -- seen or not; drawn only while shown.
+   */
   function placeBaby(): void {
-    if (!babyShown || !babyRoot || !babyHolder || !babySac || !babyWall || !babyCurl) return;
+    if (!babyRoot || !babyCurl || !babyPoints || !babyFrame) return;
     const key = `${bump.toFixed(2)}|${body.babyWeight.toFixed(2)}`;
-    // laid again when her shape changes -- at most a few times a second while a slider is dragged
     if ((babyDirty || key !== babyKey) && performance.now() - babyFitAt > 120) {
       babyKey = key; babyDirty = false;
       const skin = bellySkin();
       if (!skin) return;
-      // her womb from her skin; the sac lines it; the baby in the sac, all of it
-      babyWomb = wombFromSkin(skin, weekForBump(bump));
-      layShell(babySac, babyWomb, 0); layShell(babyWall, babyWomb, WOMB_WALL_M);
       const fitStart = performance.now();
-      const fit = fitBaby(babyPoints ?? new Float32Array(0), bump, body.babyWeight, babyCurl, babyWomb);
+      const room = wombFromSkin(skin, weekForBump(bump));
+      const fit = placeBabyIn(babyPoints, bump, body.babyWeight, babyCurl, room);
+      babyWomb = growSac(room, babyPast(babyAll ?? babyPoints, fit, room));
+      babyPushField = bellyPush(babyWomb);
+      layPush(babyPushField);
       babyRoot.quaternion.copy(fit.quaternion); babyRoot.scale.setScalar(fit.scale);
       babyRoot.userData.at = fit.position;
-      babyRoot.userData.squeezed = fit.squeezed;
+      if (babySac && babyWall) { layShell(babySac, babyWomb, 0); layShell(babyWall, babyWomb, WOMB_WALL_M); }
       babyRoot.userData.fitMs = performance.now() - fitStart; babyFitAt = performance.now();
       refresh();
     }
+    if (!babyShown || !babyHolder || !babySac || !babyWall) return;
     // the belly's mass carries what is in it (her frame, metres)
     const at = babyRoot.userData.at as THREE.Vector3;
     babyRoot.position.copy(at).add(jiggle.belly.value);
@@ -2760,6 +2806,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           const f = applyWomb(s2.mesh, s2.fields, womb);
           if (!f) return;
           s2.fields = f; babyAt = babyAnchors(f);
+          // and her baby, which her belly makes room for
+          loadBaby();
           refresh();
           applyLook();
         });
@@ -2935,7 +2983,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (new URLSearchParams(globalThis.location?.search ?? '').get('probe') === 'cloth') (globalThis as unknown as Record<string, unknown>).__sarahLabCloth = {
         // the three masses (softBody.ts): where each is, and what her skin shows of it (metres)
         bellySkin: (all?: boolean) => { const k = bellySkin(); return k ? { n: k.length / 3, sample: Array.from(all ? k : k.slice(0, 30)), zmax: Math.max(...Array.from(k).filter((_, i) => i % 3 === 2)), baby: all && babyPoints ? Array.from(babyPoints) : null, curl: babyCurl ? { centre: babyCurl.centre.toArray(), long: babyCurl.long.toArray(), back: babyCurl.back.toArray(), side: babyCurl.side.toArray(), size: babyCurl.size.toArray() } : null } : null; },
-        baby: (on?: boolean) => { if (on !== undefined) { showBaby(on); refresh(); } return { shown: babyShown, loaded: !!babyRoot, held: !!babyHolder, line: babyLine(bump, body.babyWeight), at: babyRoot ? { position: babyRoot.position.toArray(), scale: babyRoot.scale.x, squeezed: babyRoot.userData.squeezed ?? 1, fitMs: babyRoot.userData.fitMs ?? null, womb: babyWomb ? { centre: babyWomb.centre.toArray(), top: babyWomb.centre.y + sacRadius(babyWomb, 0, 1, 0), bottom: babyWomb.centre.y - sacRadius(babyWomb, 0, -1, 0), front: babyWomb.centre.z + sacRadius(babyWomb, 0, 0, 1), back: babyWomb.centre.z - sacRadius(babyWomb, 0, 0, -1), half: sacRadius(babyWomb, 1, 0, 0) } : null } : null }; },
+        // a probe's comparison: her belly with the baby's push taken off, or back
+        pushOff: (off: boolean) => { babyPushOff = off; if (babyPushField) layPush(babyPushField); return true; },
+        baby: (on?: boolean) => { if (on !== undefined) { showBaby(on); refresh(); } return { shown: babyShown, loaded: !!babyRoot, held: !!babyHolder, line: babyLine(bump, body.babyWeight), at: babyRoot ? { position: babyRoot.position.toArray(), scale: babyRoot.scale.x, pushMm: babyPushField ? Math.round(babyPushField.most * 1000) : null, fitMs: babyRoot.userData.fitMs ?? null, womb: babyWomb ? { centre: babyWomb.centre.toArray(), top: babyWomb.centre.y + sacRadius(babyWomb, 0, 1, 0), bottom: babyWomb.centre.y - sacRadius(babyWomb, 0, -1, 0), front: babyWomb.centre.z + sacRadius(babyWomb, 0, 0, 1), back: babyWomb.centre.z - sacRadius(babyWomb, 0, 0, -1), half: sacRadius(babyWomb, 1, 0, 0) } : null } : null }; },
         masses: () => ({ belly: { ...masses.belly }, breastL: { ...masses.breastL }, breastR: { ...masses.breastR }, shown: { belly: jiggle.belly.value.toArray(), breastL: jiggle.breastL.value.toArray(), breastR: jiggle.breastR.value.toArray() }, anchored: !!anchors }),
         kick: (vy: number, vx = 0, vz = 0) => { for (const m of Object.values(masses)) { m.vy += vy; m.vx += vx; m.vz += vz; } },
         settle: (frames: number, dt = 1 / 60) => { if (!cloth || !model) return null; for (let k = 0; k < frames; k++) { model.updateMatrixWorld(true); if (clothRefit) { refitCloth(cloth); clothRefit = false; } cloth.frame(dt); } return cloth.stats(); },

@@ -228,6 +228,8 @@ export interface WombShape {
   readonly r: Float32Array;
   /** its long axis (the largest of its spread, pointing up her body) */
   readonly axis: THREE.Vector3;
+  /** her skin's nearest distance from the middle in each cell (Infinity where her belly's skin is not that way) */
+  readonly skin: Float32Array;
 }
 
 const lerpTable = (t: readonly (readonly number[])[], x: number, col: number): number => {
@@ -276,6 +278,7 @@ export function wombFromSkin(skin: ArrayLike<number>, week: number): WombShape {
     const [ft, fp] = binOf(x / r, y / r, z / r), k = Math.round(ft) * NP + (Math.floor(fp + 0.5) % NP);
     skinR[k] = Math.min(skinR[k], r - WOMB_TISSUE_M);
   }
+  const skinRaw = skinR.map((x) => x + WOMB_TISSUE_M);
   // cells the skin does not reach next to ones it does (where her belly's skin ends, under her breasts and at her
   // sides; above its middle: below, her pelvis is room, not a gap) take their neighbours' nearest: no gap for the sac to spike through
   for (let pass = 0; pass < 4; pass++) {
@@ -300,7 +303,8 @@ export function wombFromSkin(skin: ArrayLike<number>, week: number): WombShape {
     const cap = Number.isFinite(wall) ? -soft * Math.log(Math.exp(-egg / soft) + Math.exp(-Math.max(0.005, wall) / soft)) : egg;
     const sk = skinR[t * NP + p];
     // soft minimum of the two: they meet without a crease
-    r[t * NP + p] = Number.isFinite(sk) ? -soft * Math.log(Math.exp(-cap / soft) + Math.exp(-Math.max(0.005, sk) / soft)) : cap;
+    // (the skin cell holds skin less tissue: the womb's own wall comes off too, so the sac is inside all three)
+    r[t * NP + p] = Number.isFinite(sk) ? -soft * Math.log(Math.exp(-cap / soft) + Math.exp(-Math.max(0.005, sk - WOMB_WALL_M) / soft)) : cap;
   }
   // smoothed (each cell toward its neighbours, never past where it started: never further out than the skin allows)
   const tmp = new Float32Array(r.length);
@@ -312,9 +316,10 @@ export function wombFromSkin(skin: ArrayLike<number>, week: number): WombShape {
     }
     r.set(tmp);
   }
-  // at its top and bottom every column meets in one point: they take one radius there, eased into the rows next to it
+  // at its top and bottom every column meets in one point: they take one radius there (the least of them, so never past
+  // her skin), eased into the rows next to it
   for (const [pole, next] of [[0, 1], [NT - 1, NT - 2]] as const) {
-    let m = 0; for (let p = 0; p < NP; p++) m += r[pole * NP + p]; m /= NP;
+    let m = Infinity; for (let p = 0; p < NP; p++) m = Math.min(m, r[pole * NP + p]);
     for (let p = 0; p < NP; p++) { r[pole * NP + p] = m; r[next * NP + p] = Math.min(r[next * NP + p], 0.5 * r[next * NP + p] + 0.5 * m); }
   }
   // its long axis: the largest spread of its surface (area-weighted by sin of the polar angle)
@@ -327,7 +332,7 @@ export function wombFromSkin(skin: ArrayLike<number>, week: number): WombShape {
   const axis = new THREE.Vector3(0, 1, 0);
   for (let k = 0; k < 64; k++) axis.set(C[0] * axis.x + C[1] * axis.y + C[2] * axis.z, C[1] * axis.x + C[3] * axis.y + C[4] * axis.z, C[2] * axis.x + C[4] * axis.y + C[5] * axis.z).normalize();
   if (axis.y < 0) axis.negate();
-  return { centre, r, axis };
+  return { centre, r, axis, skin: skinRaw };
 }
 
 /** How much of the sac the baby may fill: a little fluid round it at term. GAME TUNING. */
@@ -423,4 +428,133 @@ export function fitBaby(points: ArrayLike<number>, bumpPercent: number, weightPe
   }
   const p = bestPlace as BabyPlace, f = fitInSac(points, p, womb);
   return { position: p.position.clone().add(f.move), quaternion: p.quaternion, scale: f.scale, squeezed: f.scale / p.scale, tilt: bestTilt };
+}
+
+// ------------------------------------------------------------------------------- the baby first, her belly round it
+
+/**
+ * THE ORDER, AS JOSHUA PUT IT (2026-10-30: "the belly adjusting to the baby as in real life the skin changes with the
+ * baby, not the baby to the skin"): the baby is the chart's size, always; the sac is grown round it where it needs more
+ * room than her womb gives; the womb's wall round the sac; and her belly's skin, less nothing, is pushed out where the
+ * womb and its tissue would stand past it. Where everything fits (most sizes), nothing moves.
+ */
+
+/**
+ * How much room the baby placed so would ask of her: each point past the sac, by how far -- four times as much where her
+ * belly cannot give it (under her breasts, down at her groin, out at her flanks) as where it can.
+ */
+export function roomNeeded(points: ArrayLike<number>, place: BabyPlace, w: WombShape): number {
+  const q = new THREE.Vector3(); let total = 0;
+  for (let i = 0; i < points.length / 3; i++) {
+    q.set(points[i * 3], points[i * 3 + 1], points[i * 3 + 2]).multiplyScalar(place.scale).applyQuaternion(place.quaternion).add(place.position);
+    const rel = q.clone().sub(w.centre), r = rel.length();
+    if (r < 1e-9) continue;
+    const over = r - sacRadius(w, rel.x / r, rel.y / r, rel.z / r) * SAC_FILL;
+    if (over > 0) total += over * over * (1 + 3 * (1 - pushZone(q.x, q.y)));
+  }
+  return total;
+}
+
+/** The baby at the chart's size, leaning the way her belly holds it best, its middle pushed toward room: never shrunk. */
+export function placeBaby(points: ArrayLike<number>, bumpPercent: number, weightPercent: number, curl: CurlFrame, womb: WombShape): BabyFit {
+  let bestTilt = 0, bestScore = Infinity, best: BabyPlace | null = null;
+  for (const t of FIT_TILTS) {
+    const p = babyPlace(bumpPercent, weightPercent, curl, { centre: womb.centre, axis: new THREE.Vector3(0, Math.cos(t), Math.sin(t)) });
+    const f = fitInSac(points, p, womb, true);
+    const placed = { ...p, position: p.position.clone().add(f.move) };
+    const score = roomNeeded(points, placed, womb);
+    if (score < bestScore - 1e-5) { bestScore = score; bestTilt = t; best = placed; }
+  }
+  const p = best as BabyPlace;
+  return { position: p.position, quaternion: p.quaternion, scale: p.scale, squeezed: 1, tilt: bestTilt };
+}
+
+/**
+ * How far the baby stands past the sac in each cell (its points as placed, all of them, each against the sac in its own
+ * direction, with a little fluid round it): zero where it is inside.
+ */
+export function babyPast(points: ArrayLike<number>, place: BabyPlace, w: WombShape): Float32Array {
+  const past = new Float32Array(NT * NP), q = new THREE.Vector3();
+  for (let i = 0; i < points.length / 3; i++) {
+    q.set(points[i * 3], points[i * 3 + 1], points[i * 3 + 2]).multiplyScalar(place.scale).applyQuaternion(place.quaternion).add(place.position).sub(w.centre);
+    const r = q.length();
+    if (r < 1e-9) continue;
+    const over = r / SAC_FILL - sacRadius(w, q.x / r, q.y / r, q.z / r);
+    if (over <= 0) continue;
+    // to all four cells the sac's radius there is blended from: then the grown sac clears it whatever the blend
+    const [ft, fp] = binOf(q.x / r, q.y / r, q.z / r), t0 = Math.min(NT - 2, Math.floor(ft)), p0 = Math.floor(fp) % NP, p1 = (p0 + 1) % NP;
+    for (const k of [t0 * NP + p0, t0 * NP + p1, (t0 + 1) * NP + p0, (t0 + 1) * NP + p1]) past[k] = Math.max(past[k], over);
+  }
+  return past;
+}
+
+/** The sac grown round the baby by how far it stands past it (`babyPast`): the growth spread smoothly round where it is, so it swells rather than bumps; no growth, no change. */
+export function growSac(w: WombShape, past: Float32Array): WombShape {
+  const grow = past.slice(), tmp = new Float32Array(grow.length);
+  for (let pass = 0; pass < 6; pass++) {
+    for (let t = 0; t < NT; t++) for (let p = 0; p < NP; p++) {
+      let sum = 0, n = 0;
+      for (let dt = -1; dt <= 1; dt++) for (let dp = -1; dp <= 1; dp++) { const tt = t + dt; if (tt < 0 || tt >= NT) continue; sum += grow[tt * NP + ((p + dp + NP) % NP)]; n++; }
+      tmp[t * NP + p] = Math.max(past[t * NP + p], sum / n);
+    }
+    grow.set(tmp);
+  }
+  const r = new Float32Array(w.r.length);
+  for (let k = 0; k < r.length; k++) r[k] = w.r[k] + grow[k];
+  return { ...w, r };
+}
+
+/** HER BELLY'S PUSH: how far her skin must move out in each cell (rest metres), spread smoothly; and where her skin is. */
+export interface BellyPush { readonly centre: THREE.Vector3; readonly out: Float32Array; readonly skin: Float32Array; readonly most: number }
+
+/** Where the womb (the sac, its wall) and the tissue over it would stand past her skin, how far: spread so it swells, not dents. */
+export function bellyPush(w: WombShape): BellyPush {
+  const raw = new Float32Array(NT * NP);
+  for (let k = 0; k < raw.length; k++) if (Number.isFinite(w.skin[k])) raw[k] = Math.max(0, w.r[k] + WOMB_WALL_M + WOMB_TISSUE_M - w.skin[k]);
+  const out = raw.slice(), tmp = new Float32Array(raw.length);
+  for (let pass = 0; pass < 16; pass++) {
+    for (let t = 0; t < NT; t++) for (let p = 0; p < NP; p++) {
+      let sum = 0, n = 0;
+      for (let dt = -1; dt <= 1; dt++) for (let dp = -1; dp <= 1; dp++) { const tt = t + dt; if (tt < 0 || tt >= NT) continue; sum += out[tt * NP + ((p + dp + NP) % NP)]; n++; }
+      tmp[t * NP + p] = Math.max(raw[t * NP + p], sum / n);
+    }
+    out.set(tmp);
+  }
+  let most = 0; for (const x of out) most = Math.max(most, x);
+  return { centre: w.centre.clone(), out, skin: w.skin, most };
+}
+
+const gridAt = (g: Float32Array, dx: number, dy: number, dz: number): number => {
+  const [ft, fp] = binOf(dx, dy, dz);
+  const t0 = Math.min(NT - 2, Math.floor(ft)), a = ft - t0, p0 = Math.floor(fp) % NP, p1 = (p0 + 1) % NP, b = fp - Math.floor(fp);
+  const v = [g[t0 * NP + p0], g[t0 * NP + p1], g[(t0 + 1) * NP + p0], g[(t0 + 1) * NP + p1]];
+  if (!v.every(Number.isFinite)) return Math.min(...v.filter(Number.isFinite), Infinity);
+  return (v[0] * (1 - b) + v[1] * b) * (1 - a) + (v[2] * (1 - b) + v[3] * b) * a;
+};
+
+/** Where on her the push may fall (rest metres): full between, fading over each pair. GAME TUNING (her anatomy). */
+export const PUSH_ZONE = Object.freeze({ low: [0.84, 0.96] as const, high: [1.10, 1.23] as const, side: [0.13, 0.24] as const });
+const ss01 = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+/** How much of the push may fall at a point of her (rest metres): 1 on her belly, 0 off it. */
+export const pushZone = (x: number, y: number): number => ss01(PUSH_ZONE.low[0], PUSH_ZONE.low[1], y) * (1 - ss01(PUSH_ZONE.high[0], PUSH_ZONE.high[1], y)) * (1 - ss01(PUSH_ZONE.side[0], PUSH_ZONE.side[1], Math.abs(x)));
+
+/**
+ * The push at a point of her (rest metres): straight out from the womb's middle by the cell's amount -- on her belly's
+ * skin and on what she wears just over it, fading to nothing a few centimetres inside it and a few outside (her breasts,
+ * her arms, anything further out is not her belly). `out` gets it; returns false where there is none.
+ */
+export function pushAt(f: BellyPush, x: number, y: number, z: number, out: THREE.Vector3): boolean {
+  const dx = x - f.centre.x, dy = y - f.centre.y, dz = z - f.centre.z, r = Math.hypot(dx, dy, dz);
+  if (r < 1e-6 || f.most <= 0) return false;
+  const ux = dx / r, uy = dy / r, uz = dz / r, amount = gridAt(f.out, ux, uy, uz);
+  if (!(amount > 1e-5)) return false;
+  const have = gridAt(f.skin, ux, uy, uz);
+  if (!Number.isFinite(have)) return false;
+  const ss = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+  // and only her belly: none below her pubic bone (her thighs, her groin), under her breasts, or out at her flanks and arms
+  const zone = pushZone(x, y);
+  const k = zone * ss(have - 0.08, have - 0.01, r) * (1 - ss(have + 0.03, have + 0.07, r));
+  if (k <= 0) return false;
+  out.set(ux, uy, uz).multiplyScalar(amount * k);
+  return true;
 }
