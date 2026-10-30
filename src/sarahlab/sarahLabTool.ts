@@ -114,6 +114,8 @@ export const SARAH_LAB_ACTION = Object.freeze({
   /** BABIES (one, twins, triplets) and how each LIES (auto, head down, breech, sideways, random) */
   babies: 'sarahlab:babies',
   babyLie: 'sarahlab:baby-lie',
+  /** KICK: the next move now, a kick (baby.ts `MOVES`) */
+  babyKick: 'sarahlab:baby-kick',
   outfit: 'sarahlab:outfit',
   model: 'sarahlab:model',
   refine: 'sarahlab:refine',

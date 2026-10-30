@@ -183,7 +183,7 @@ export class SkinPose {
       }
       x += dx; y += dy; z += dz;
     }
-    if (this.jig) { const J = this.jigAt; jiggleAt(this.jig, v, J); x += J.x; y += J.y; z += J.z; }
+    if (this.jig) { const J = this.jigAt; jiggleAt(this.jig, v, J, x, y, z); x += J.x; y += J.y; z += J.z; }
     if (this.skinned) {
       const SI = this.skinIndex!, SW = this.skinWeight!, n = this.boneCount;
       let sx = 0, sy = 0, sz = 0;

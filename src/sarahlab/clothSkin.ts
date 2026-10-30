@@ -907,7 +907,7 @@ export class ClothSkin {
       }
       x += dx; y += dy; z += dz;
     }
-    if (this.jig) { const J = this.jigAt; jiggleAt(this.jig, v, J); x += J.x; y += J.y; z += J.z; }
+    if (this.jig) { const J = this.jigAt; jiggleAt(this.jig, v, J, x, y, z); x += J.x; y += J.y; z += J.z; }
     { const bp = this.bindPos, o = v * 3; bp[o] = x; bp[o + 1] = y; bp[o + 2] = z; }
     if (this.skinned) {
       const SI = this.skinI!, SW = this.skinW!, B = this.bones, o4 = v * 4;

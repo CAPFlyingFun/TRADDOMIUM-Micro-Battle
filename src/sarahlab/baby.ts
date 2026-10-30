@@ -1214,3 +1214,150 @@ export function carriedShare(bumpPercent: number, weightPercent: number, babies:
   const wk = weekForBump(bumpPercent, babies), many = babies * (babySize(wk, weightPercent, babies).g + fluidMl(wk));
   return one > 0 ? many / one : 1;
 }
+
+// ------------------------------------------------------------------------------------------------ kicks and moves
+
+/**
+ * KICKS AND MOVES (Joshua, 2026-10-30: "the kicks and baby movements since they are related and maybe a simple collision
+ * between another baby and the womb lining to allow some movements and flexibility like real babies"). Now and then each
+ * baby moves: a KICK (a leg shoots out and folds back), a PUNCH (an arm), a STRETCH (arms, legs and back all at once,
+ * slowly) or a ROLL (it turns a little about its own length and settles back). A foot or hand that reaches past her
+ * womb's lining is not let through it: the lining gives, and her belly shows the kick from outside. One that reaches into
+ * another baby nudges it, and the fluid takes it up.
+ */
+export type MoveKind = 'kick' | 'punch' | 'stretch' | 'roll';
+export interface MoveSpec {
+  /** seconds to reach the move, held there, and to fold back (the fluid slows the way back) */
+  readonly rise: number; readonly hold: number; readonly fall: number;
+  /** how likely, of all moves */
+  readonly share: number;
+}
+export const MOVES: Readonly<Record<MoveKind, MoveSpec>> = Object.freeze({
+  kick: { rise: 0.16, hold: 0.07, fall: 0.6, share: 0.5 },
+  punch: { rise: 0.2, hold: 0.05, fall: 0.5, share: 0.2 },
+  stretch: { rise: 0.9, hold: 0.5, fall: 1.3, share: 0.15 },
+  roll: { rise: 1.2, hold: 0.4, fall: 1.6, share: 0.15 },
+});
+/** How often a baby moves at BABY KICKS 100% (seconds between, on average); and a kick's chance of a second straight after. GAME TUNING. */
+export const MOVE_EVERY_S = 10, MOVE_SOONEST_S = 2, KICK_AGAIN = 0.35;
+/** How far her belly may show a kick out (rest metres), and how wide (rest metres). GAME TUNING. */
+export const KICK_MOST_M = 0.02, KICK_WIDE_M = 0.045;
+
+/** How far into a move it is at `t` seconds since it began (0..1, smooth both ways); 0 once it is over. */
+export function moveEnvelope(kind: MoveKind, t: number): number {
+  const m = MOVES[kind];
+  if (!(t > 0)) return 0;
+  const ease = (u: number) => { const c = Math.min(1, Math.max(0, u)); return c * c * (3 - 2 * c); };
+  if (t < m.rise) return ease(t / m.rise);
+  if (t < m.rise + m.hold) return 1;
+  return 1 - ease((t - m.rise - m.hold) / m.fall);
+}
+export const moveLength = (kind: MoveKind): number => MOVES[kind].rise + MOVES[kind].hold + MOVES[kind].fall;
+
+/** BABY KICKS (0..200%) as a share of how often: 0 never, 1 as tuned, 2 twice as often. */
+export const kicksShare = (kicks: number): number => Math.min(200, Math.max(0, Number.isFinite(kicks) ? kicks : 100)) / 100;
+
+/**
+ * The next move a baby makes, from a random source: which, and how long until it (seconds) -- a while, on average
+ * `MOVE_EVERY_S` over the share, never sooner than `MOVE_SOONEST_S`; after a kick, sometimes another straight away.
+ * `Infinity` when BABY KICKS is 0.
+ */
+export function nextMove(rnd: () => number, kicks: number, after?: MoveKind): { kind: MoveKind; inS: number } {
+  const share = kicksShare(kicks);
+  if (!(share > 0)) return { kind: 'kick', inS: Infinity };
+  if (after === 'kick' && rnd() < KICK_AGAIN) return { kind: 'kick', inS: 0.5 + 0.6 * rnd() };
+  let r = rnd(), kind: MoveKind = 'kick';
+  for (const k of Object.keys(MOVES) as MoveKind[]) { if (r < MOVES[k].share) { kind = k; break; } r -= MOVES[k].share; }
+  return { kind, inS: MOVE_SOONEST_S + (-Math.log(Math.max(1e-6, 1 - rnd())) * MOVE_EVERY_S) / share };
+}
+
+/** The baby's bones a move uses (the packed model's names): each side's leg and arm, top to tip; its back and head. */
+export const BABY_BONES = Object.freeze({
+  leg: { left: ['Bone_010', 'Bone_009', 'Bone_008', 'Bone_007'], right: ['Bone_015', 'Bone_014', 'Bone_013', 'Bone_012'] },
+  arm: { left: ['Bone_022', 'Bone_021', 'Bone_020', 'Bone_019'], right: ['Bone_027', 'Bone_026', 'Bone_025', 'Bone_024'] },
+  back: ['Bone_001', 'Bone_005', 'Bone_004'], neck: 'Bone_018',
+});
+
+const tA = new THREE.Vector3(), tB = new THREE.Vector3(), tQ = new THREE.Quaternion(), tP = new THREE.Quaternion(), tR = new THREE.Quaternion();
+/** Turn a bone (in the world) so the way to its child goes `share` of the way toward `to` (unit). */
+export function turnToward(bone: THREE.Object3D, child: THREE.Object3D, to: THREE.Vector3, share: number): void {
+  bone.getWorldPosition(tA); child.getWorldPosition(tB);
+  const from = tB.sub(tA);
+  if (from.lengthSq() < 1e-16 || !(share > 0)) return;
+  tR.setFromUnitVectors(from.normalize(), to).slerp(tQ.identity(), 1 - Math.min(1, share)) ;
+  bone.getWorldQuaternion(tQ).premultiply(tR);
+  if (bone.parent) bone.parent.getWorldQuaternion(tP).invert(); else tP.identity();
+  bone.quaternion.copy(tP.multiply(tQ));
+  bone.updateMatrixWorld(true);
+}
+
+export interface MoveFrame {
+  /** the baby's long axis toward its head, its front (where its face and belly are), its left: in the world */
+  readonly long: THREE.Vector3; readonly front: THREE.Vector3; readonly left: THREE.Vector3;
+  /** the way out of her womb from the baby (world, unit): where a kick goes */
+  readonly out: THREE.Vector3;
+}
+
+/**
+ * Pose a baby's limbs for a move `k` of the way in (0..1), from its curl (every bone first back to `rest`). `side` picks
+ * the leg or arm. Returns the bone at the tip that moved (the toe or the hand), or null (a roll moves no limb).
+ */
+export function poseMove(bones: ReadonlyMap<string, THREE.Bone>, rest: ReadonlyMap<string, THREE.Quaternion>, kind: MoveKind, side: 'left' | 'right', k: number, f: MoveFrame): THREE.Bone | null {
+  for (const [name, q] of rest) { const b = bones.get(name); if (b) b.quaternion.copy(q); }
+  const root = bones.get('Bone_000'); root?.updateMatrixWorld(true);
+  if (!(k > 0) || kind === 'roll') return null;
+  const limb = (chain: readonly string[], to: THREE.Vector3, reach: number, straighten: number): THREE.Bone | null => {
+    const [a, b, c, tip] = chain.map((n) => bones.get(n));
+    if (!a || !b || !c) return null;
+    turnToward(a, b, to, reach * k);
+    // the joint below straightens toward the line of the one above
+    b.getWorldPosition(tA); a.getWorldPosition(tB); const along = tA.sub(tB).normalize().clone();
+    turnToward(b, c, along, straighten * k);
+    return tip ?? c;
+  };
+  const v = new THREE.Vector3();
+  // (as far as asked: the lining stops it -- the scene holds the move short where it would reach past)
+  if (kind === 'kick') return limb(BABY_BONES.leg[side], v.copy(f.out).multiplyScalar(0.85).addScaledVector(f.long, -0.3).addScaledVector(f.left, side === 'left' ? 0.15 : -0.15).normalize(), 0.8, 0.9);
+  if (kind === 'punch') return limb(BABY_BONES.arm[side], v.copy(f.out).multiplyScalar(0.8).addScaledVector(f.front, 0.25).addScaledVector(f.long, 0.15).normalize(), 0.7, 0.85);
+  // a stretch: both legs and arms part of the way, its back and head arched back
+  let tipBone: THREE.Bone | null = null;
+  for (const s of ['left', 'right'] as const) {
+    tipBone = limb(BABY_BONES.leg[s], v.copy(f.long).multiplyScalar(-1).addScaledVector(f.out, 0.4).normalize(), 0.35, 0.5) ?? tipBone;
+    limb(BABY_BONES.arm[s], v.copy(f.long).multiplyScalar(0.6).addScaledVector(f.left, s === 'left' ? 0.6 : -0.6).normalize(), 0.3, 0.5);
+  }
+  for (const n of [...BABY_BONES.back, BABY_BONES.neck]) {
+    const b = bones.get(n); if (!b) continue;
+    b.getWorldQuaternion(tQ).premultiply(tR.setFromAxisAngle(f.left, -0.1 * k));
+    if (b.parent) b.parent.getWorldQuaternion(tP).invert(); else tP.identity();
+    b.quaternion.copy(tP.multiply(tQ)); b.updateMatrixWorld(true);
+  }
+  return tipBone;
+}
+
+/** How far a roll turns a baby about its length at the height of it (radians). GAME TUNING. */
+export const ROLL_RAD = 0.3;
+
+/**
+ * Where a foot or hand (rest metres, the womb's frame) meets her womb's lining: how far past it it reaches (rest metres;
+ * 0 inside), the point on her skin there and the way out. Her belly shows that much of a kick, no more than `KICK_MOST_M`.
+ */
+export function kickOnSkin(w: WombShape, tip: THREE.Vector3, pad: number, at: THREE.Vector3, out: THREE.Vector3): number {
+  const d = tip.clone().sub(w.centre), r = d.length();
+  if (r < 1e-9) return 0;
+  out.copy(d).divideScalar(r);
+  const lining = sacRadius(w, out.x, out.y, out.z) * SAC_FILL, skin = gridAt(w.skin, out.x, out.y, out.z);
+  if (!Number.isFinite(skin)) return 0;
+  const past = r + pad - lining;
+  at.copy(w.centre).addScaledVector(out, skin);
+  // a foot or hand at the lining shows through it a little before it reaches past (her lining and skin are soft)
+  return Math.min(KICK_MOST_M, Math.max(0, past + KICK_FELT_M));
+}
+/** How near the lining a foot or hand already shows on her belly (rest metres). GAME TUNING. */
+export const KICK_FELT_M = 0.006;
+
+/** How far a point (rest metres, the womb's frame) with so much round it stands past her womb's lining (rest metres; negative inside). */
+export function liningPast(w: WombShape, p: THREE.Vector3, pad: number): number {
+  const dx = p.x - w.centre.x, dy = p.y - w.centre.y, dz = p.z - w.centre.z, r = Math.hypot(dx, dy, dz);
+  if (r < 1e-9) return -Infinity;
+  return r + pad - sacRadius(w, dx / r, dy / r, dz / r) * SAC_FILL;
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { carriedShare, floatDrift, floatTune, fluidMl, FLUID, AUTO_DEPTH_MOST, babiesInHer, babyBody, babySolid, balanceDeg, BALANCE_MOST_DEG, FIT_TOLERANCE, PACK_SOFT, SHRINK_MOST, solidDeep, type BabyPlace, multipleShare, placeBabies, sacAround, babyPast, bellyPush, growSac, placeBaby, pushAt, pushZone, babyLine, babyPlace, babySize, curlFrame, FETAL_CHART, fitInSac, MODEL_CROWN_RUMP, sacRadius, SAC_FILL, weekForBump, wombAt, wombFromSkin, wombRadius, WOMB_BACK_Z, WOMB_FLOOR_Y, WOMB_TISSUE_M } from '../src/sarahlab/baby';
+import { kickOnSkin, KICK_FELT_M, KICK_MOST_M, kicksShare, liningPast, moveEnvelope, moveLength, MOVES, MOVE_SOONEST_S, nextMove, turnToward, carriedShare, floatDrift, floatTune, fluidMl, FLUID, AUTO_DEPTH_MOST, babiesInHer, babyBody, babySolid, balanceDeg, BALANCE_MOST_DEG, FIT_TOLERANCE, PACK_SOFT, SHRINK_MOST, solidDeep, type BabyPlace, multipleShare, placeBabies, sacAround, babyPast, bellyPush, growSac, placeBaby, pushAt, pushZone, babyLine, babyPlace, babySize, curlFrame, FETAL_CHART, fitInSac, MODEL_CROWN_RUMP, sacRadius, SAC_FILL, weekForBump, wombAt, wombFromSkin, wombRadius, WOMB_BACK_Z, WOMB_FLOOR_Y, WOMB_TISSUE_M } from '../src/sarahlab/baby';
 
 describe('her baby: the chart', () => {
   it('runs weeks 12 to 41 in order, every weight inside its 10th to 90th', () => {
@@ -288,6 +288,53 @@ describe('her babies: in their fluid', () => {
       expect(carriedShare(b, 0, 1)).toBe(1);
       expect(carriedShare(b, 0, 2)).toBeGreaterThan(1); expect(carriedShare(b, 0, 3)).toBeGreaterThan(carriedShare(b, 0, 2) - 0.05);
     }
+  });
+});
+
+describe('her babies: kicks and moves', () => {
+  it('a move rises, holds and folds back, slower back than out; nothing before or after', () => {
+    for (const kind of Object.keys(MOVES) as (keyof typeof MOVES)[]) {
+      const m = MOVES[kind];
+      expect(moveEnvelope(kind, 0)).toBe(0); expect(moveEnvelope(kind, m.rise + m.hold / 2)).toBe(1);
+      expect(moveEnvelope(kind, moveLength(kind) + 0.01)).toBe(0);
+      expect(m.fall).toBeGreaterThan(m.rise);
+    }
+    expect(Object.values(MOVES).reduce((t, m) => t + m.share, 0)).toBeCloseTo(1, 9);
+  });
+
+  it('BABY KICKS says how often: never at 0, twice as often at 200, never sooner than the soonest', () => {
+    const seeded = (seed: number) => () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+    expect(nextMove(seeded(3), 0).inS).toBe(Infinity); expect(kicksShare(-5)).toBe(0); expect(kicksShare(900)).toBe(2);
+    const mean = (kicks: number) => { const r = seeded(11); let t = 0; for (let i = 0; i < 4000; i++) t += nextMove(r, kicks).inS - MOVE_SOONEST_S; return t / 4000; };
+    expect(mean(100) / mean(200)).toBeCloseTo(2, 1);
+    const r = seeded(5); for (let i = 0; i < 500; i++) expect(nextMove(r, 200).inS).toBeGreaterThanOrEqual(MOVE_SOONEST_S);
+    // a kick sometimes comes straight after another
+    const r2 = seeded(7); let again = 0; for (let i = 0; i < 1000; i++) if (nextMove(r2, 100, 'kick').inS < MOVE_SOONEST_S) again++;
+    expect(again).toBeGreaterThan(250); expect(again).toBeLessThan(450);
+  });
+
+  it('a bone turns toward where it is sent, by as much as asked', () => {
+    const a = new THREE.Bone(), b = new THREE.Bone(); b.position.set(0, 1, 0); a.add(b); a.updateMatrixWorld(true);
+    turnToward(a, b, new THREE.Vector3(1, 0, 0), 1);
+    expect(b.getWorldPosition(new THREE.Vector3()).distanceTo(new THREE.Vector3(1, 0, 0))).toBeLessThan(1e-6);
+    const c = new THREE.Bone(), d = new THREE.Bone(); d.position.set(0, 1, 0); c.add(d); c.updateMatrixWorld(true);
+    turnToward(c, d, new THREE.Vector3(1, 0, 0), 0.5);
+    const p = d.getWorldPosition(new THREE.Vector3()); expect(Math.atan2(p.x, p.y)).toBeCloseTo(Math.PI / 4, 6);
+  });
+
+  it('her belly shows a kick at the lining and past it, never more than the most, never off her belly', () => {
+    const skin: number[] = [];
+    for (let y = 0.80; y <= 1.23; y += 0.008) for (let x = -0.22; x <= 0.22; x += 0.008) { const u = (y - 1.02) / 0.2, v = x / 0.2, k = 1 - u * u - v * v; skin.push(x, y, 0.05 + (k > 0 ? 0.3 * Math.sqrt(k) : 0)); }
+    const w = wombFromSkin(skin, weekForBump(150)), at = new THREE.Vector3(), out = new THREE.Vector3();
+    const r = sacRadius(w, 0, 0, 1) * SAC_FILL, front = (d: number) => w.centre.clone().add(new THREE.Vector3(0, 0, d));
+    expect(kickOnSkin(w, front(r - 0.03), 0, at, out)).toBe(0);
+    expect(kickOnSkin(w, front(r), 0, at, out)).toBeCloseTo(KICK_FELT_M, 6);
+    expect(kickOnSkin(w, front(r + 0.1), 0, at, out)).toBe(KICK_MOST_M);
+    expect(out.z).toBeCloseTo(1, 6); expect(at.z).toBeGreaterThan(w.centre.z + r);
+    expect(liningPast(w, front(r + 0.01), 0)).toBeCloseTo(0.01, 6);
+    // behind her womb there is no belly to show it
+    const back = w.centre.clone().add(new THREE.Vector3(0, 0, -(sacRadius(w, 0, 0, -1) + 0.05)));
+    expect(kickOnSkin(w, back, 0, at, out)).toBe(0);
   });
 });
 

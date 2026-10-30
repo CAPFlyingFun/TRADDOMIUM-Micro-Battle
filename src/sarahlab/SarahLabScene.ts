@@ -79,7 +79,7 @@ import { applyShapeFields, baseShapeFields, liftShapeFields, type ShapeFields, t
 import { BUILD_PROFILES, buildAmounts, buildKey, heightLine, heldSegments, profileOf, withProfile, type BuildAmounts, type BuildSegment } from '../actor/bodyBuild';
 import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields, prepareBuildRig, standingLift, type BuildMeshFields, type BuildRig } from '../view/bodyBuild';
 import { dropIdleMorphs } from '../view/morphPrune';
-import { AUTO_LIES, BABIES_NAME, BABY_MODEL, babiesInHer, babyLine, babySolid, carriedShare, curlFrame, floatDrift, floatRoom, floatTune, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
+import { AUTO_LIES, BABIES_NAME, BABY_MODEL, babiesInHer, babyLine, babySolid, carriedShare, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { setPush, jiggleOf as jiggleOfMesh } from './softBody';
 import { attachJiggle, bellyTune, breastTune, createJiggleUniforms, feltAcceleration, restingMass, stepMass, type Mass } from './softBody';
@@ -355,6 +355,36 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let babySolidOf: BabySolid | null = null;
   /** IN THEIR FLUID: each baby's mass, the room round it as packed (rest metres), the clock its drift runs on, what her belly felt last */
   let babyFloats: Mass[] = [], babyRooms: number[] = [], babyClock = 0;
+  /**
+   * KICKS AND MOVES (baby.ts `MOVES`): each baby's move under way (`t` seconds in; below 0, none), the next and how long
+   * until it, its own random source, and its bones as its curl has them.
+   */
+  interface BabyMove { kind: MoveKind; side: 'left' | 'right'; t: number; next: number; pending: MoveKind; rnd: () => number; bones: Map<string, THREE.Bone>; rest: Map<string, THREE.Quaternion>; posed: boolean }
+  let babyMoves: BabyMove[] = [], babyCurlRest: Map<string, THREE.Quaternion> | null = null;
+  const moveTip = new THREE.Vector3(), moveAt = new THREE.Vector3(), moveOut = new THREE.Vector3(), moveRoll = new THREE.Quaternion(), moveAxis = new THREE.Vector3();
+  const moveFrame = { long: new THREE.Vector3(), front: new THREE.Vector3(), left: new THREE.Vector3(), out: new THREE.Vector3() }, moveQ = new THREE.Quaternion();
+  function babyMoveOf(i: number, root: THREE.Object3D): BabyMove {
+    let m = babyMoves[i];
+    if (m && m.bones.get('Bone_000') && isUnder(m.bones.get('Bone_000')!, root)) return m;
+    const bones = new Map<string, THREE.Bone>();
+    root.traverse((n) => { if ((n as THREE.Bone).isBone) bones.set(n.name, n as THREE.Bone); });
+    // its curl, as the model has it (taken from the first baby when it came: a copy made mid-move would hold the move)
+    const rest = babyCurlRest ?? new Map<string, THREE.Quaternion>();
+    let seed = 1013 * (i + 1);
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+    m = { kind: 'kick', side: 'left', t: -1, next: Infinity, pending: 'kick', rnd, bones, rest, posed: true };
+    babyMoves[i] = m;
+    return m;
+  }
+  /** Start a baby's move now (KICK, a probe), or its next one when it is due. */
+  function startMove(m: BabyMove, kind: MoveKind, side?: 'left' | 'right'): void {
+    m.kind = kind; m.t = 0;
+    if (side) { m.side = side; return; }
+    // mostly the leg or arm nearer her front (the one free to reach her belly), sometimes the other
+    const chain = kind === 'punch' ? BABY_BONES.arm : BABY_BONES.leg, z = (s: 'left' | 'right') => { const b = m.bones.get(chain[s][3]); return b ? b.getWorldPosition(moveTip).applyQuaternion(moveRoll.copy(babyHolder?.getWorldQuaternion(moveQ) ?? moveQ.identity()).invert()).z : 0; };
+    const nearer = z('left') >= z('right') ? 'left' : 'right';
+    m.side = m.rnd() < 0.75 ? nearer : nearer === 'left' ? 'right' : 'left';
+  }
   const feltBelly = new THREE.Vector3(), floatMove = new THREE.Vector3(), floatAxis = new THREE.Vector3(), floatTurn = new THREE.Quaternion(), floatAt = new THREE.Vector3();
   const GHOST_OPACITY = 0.26;
   const tmp = new THREE.Vector3();
@@ -1777,8 +1807,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     buttons.baby = btn('SEE BABY', SARAH_LAB_ACTION.baby, () => { showBaby(!babyShown); refresh(); });
     buttons.babies = btn('BABIES · ONE', SARAH_LAB_ACTION.babies, () => { babyCount = (babyCount % 3) + 1; babyDirty = true; babyFitAt = -Infinity; applyLook(); refresh(); });
     buttons.babyLie = btn('LIE · AUTO', SARAH_LAB_ACTION.babyLie, () => { babyLie = LIE_MODES[(LIE_MODES.indexOf(babyLie) + 1) % LIE_MODES.length]; if (babyLie === 'random') babyLieSeed = Math.floor(Math.random() * 1e6) + 1; babyDirty = true; babyFitAt = -Infinity; refresh(); });
-    for (const b of [buttons.model, buttons.refine, buttons.bellyCurve, buttons.outfit, buttons.armSide, buttons.bounce, buttons.baby, buttons.babies, buttons.babyLie]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
-    for (const [b, tab] of [[buttons.model, 'body'], [buttons.refine, 'body'], [buttons.bellyCurve, 'body'], [buttons.outfit, 'outfit'], [buttons.armSide, 'pose'], [buttons.bounce, 'pose'], [buttons.baby, 'body'], [buttons.babies, 'body'], [buttons.babyLie, 'body']] as const) b.dataset.tab = tab;
+    // KICK: one of them kicks now (as BABY KICKS makes them on their own)
+    buttons.babyKick = btn('KICK', SARAH_LAB_ACTION.babyKick, () => { const roots = babyRoots(); if (!roots.length) return; const i = Math.floor(Math.random() * roots.length); startMove(babyMoveOf(i, roots[i]), 'kick'); });
+    for (const b of [buttons.model, buttons.refine, buttons.bellyCurve, buttons.outfit, buttons.armSide, buttons.bounce, buttons.baby, buttons.babies, buttons.babyLie, buttons.babyKick]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
+    for (const [b, tab] of [[buttons.model, 'body'], [buttons.refine, 'body'], [buttons.bellyCurve, 'body'], [buttons.outfit, 'outfit'], [buttons.armSide, 'pose'], [buttons.bounce, 'pose'], [buttons.baby, 'body'], [buttons.babies, 'body'], [buttons.babyLie, 'body'], [buttons.babyKick, 'body']] as const) b.dataset.tab = tab;
     right.appendChild(row);
     // the baby's week, length and weight, while it is shown
     babyNote = document.createElement('div');
@@ -2501,7 +2533,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function settleMasses(): void {
     for (const m of Object.values(masses)) Object.assign(m, restingMass());
     if (anchors) for (const a of Object.values(anchors)) a.primed = 0;
-    for (const u of Object.values(jiggle)) u.value.set(0, 0, 0);
+    for (const u of [jiggle.belly, jiggle.breastL, jiggle.breastR]) u.value.set(0, 0, 0);
+    for (const k of jiggle.kickAt.value) k.w = 0;
   }
 
   /**
@@ -2551,6 +2584,32 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // her babies in their fluid: each lags what her body does a little, within the room it has (baby.ts `FLUID`)
     babyClock += dt;
     babyFloats.forEach((f, i) => { const t = floatTune(babyRooms[i] ?? 0, body.babyFloat); stepMass(f, dt, feltBelly.x * t.gain, feltBelly.y * t.gain, feltBelly.z * t.gain, t); });
+    // two babies floating toward each other meet and stay apart (along the line between their middles), the fluid taking it up
+    const roots = babyRoots();
+    for (let a = 0; a < babyFloats.length; a++) for (let b = a + 1; b < babyFloats.length; b++) {
+      const A = babyFloats[a], B = babyFloats[b], ma = roots[a]?.userData.mid as THREE.Vector3 | undefined, mb = roots[b]?.userData.mid as THREE.Vector3 | undefined;
+      if (!ma || !mb) continue;
+      moveAxis.copy(mb).sub(ma).normalize();
+      const closing = (A.x - B.x) * moveAxis.x + (A.y - B.y) * moveAxis.y + (A.z - B.z) * moveAxis.z, slack = 0.001;
+      if (closing <= slack) continue;
+      const fix = (closing - slack) / 2;
+      A.x -= moveAxis.x * fix; A.y -= moveAxis.y * fix; A.z -= moveAxis.z * fix; B.x += moveAxis.x * fix; B.y += moveAxis.y * fix; B.z += moveAxis.z * fix;
+      const vRel = (A.vx - B.vx) * moveAxis.x + (A.vy - B.vy) * moveAxis.y + (A.vz - B.vz) * moveAxis.z;
+      if (vRel > 0) { const h = vRel / 2; A.vx -= moveAxis.x * h; A.vy -= moveAxis.y * h; A.vz -= moveAxis.z * h; B.vx += moveAxis.x * h; B.vy += moveAxis.y * h; B.vz += moveAxis.z * h; }
+    }
+    // their moves: each baby's under way runs on; its next comes when it is due (BABY KICKS: how often)
+    roots.forEach((r, i) => {
+      const m = babyMoveOf(i, r);
+      if (m.t >= 0) {
+        m.t += dt;
+        if (m.t > moveLength(m.kind)) { m.t = -1; const n = nextMove(m.rnd, body.babyKicks, m.kind); m.next = n.inS; m.pending = n.kind; }
+      } else if (!(kicksShare(body.babyKicks) > 0)) m.next = Infinity;
+      else {
+        if (!Number.isFinite(m.next)) { const n = nextMove(m.rnd, body.babyKicks); m.next = n.inS; m.pending = n.kind; }
+        m.next -= dt;
+        if (m.next <= 0) startMove(m, m.pending);
+      }
+    });
     placeBaby();
   }
 
@@ -2594,7 +2653,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // (as skinned at rest: the packed file keeps its points quantized and its scale in the skin's binds)
         root.traverse((n) => { const m = n as THREE.Mesh; if (!m.isMesh) return; const a = m.geometry.getAttribute('position'); for (let i = 0; i < a.count; i++) { m.getVertexPosition(i, v).applyMatrix4(m.matrixWorld); pts.push(v.x, v.y, v.z); } });
         root.getObjectByName('Bone_017')?.getWorldPosition(head);
-        babyCurl = curlFrame(pts, head); babySolidOf = null;
+        babyCurl = curlFrame(pts, head); babySolidOf = null; babyMoves = [];
+        // the bones a move turns, as the curl has them
+        babyCurlRest = new Map();
+        for (const n of [...BABY_BONES.leg.left, ...BABY_BONES.leg.right, ...BABY_BONES.arm.left, ...BABY_BONES.arm.right, ...BABY_BONES.back, BABY_BONES.neck]) { const b = root.getObjectByName(n); if (b) babyCurlRest.set(n, b.quaternion.clone()); }
         // a sample of its points, to keep it inside her womb
         babyPoints = Float32Array.from(pts.filter((_, i) => Math.floor(i / 3) % 10 === 0));
         babyAll = Float32Array.from(pts);
@@ -2718,6 +2780,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       pos.setXYZ(i, w.centre.x + r * x, w.centre.y + r * y, w.centre.z + r * z);
     }
     pos.needsUpdate = true; mesh.geometry.computeVertexNormals(); mesh.geometry.computeBoundingSphere();
+    mesh.userData.base = Float32Array.from(pos.array as Float32Array); mesh.userData.bumped = false;
   }
   /**
    * The baby, its sac, her womb and her belly round them (baby.ts): the baby at the chart's size; the sac grown round it;
@@ -2756,7 +2819,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       // each in its fluid, with the room it has
       babyRooms = floatRoom(babyPoints, fits, babyWomb);
       while (babyFloats.length < fits.length) babyFloats.push(restingMass());
-      babyFloats.length = fits.length;
+      babyFloats.length = fits.length; babyMoves.length = Math.min(babyMoves.length, fits.length);
       if (babySac && babyWall) {
         layShell(babyWall, babyWomb, WOMB_WALL_M);
         // one baby: its sac lines her womb; several: each its own, round it
@@ -2768,23 +2831,100 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       babyRoot.userData.fitMs = performance.now() - fitStart; babyFitAt = performance.now();
       refresh();
     }
+    moveBabies();
     if (!babyShown || !babyHolder || !babySac || !babyWall) return;
     // the belly's mass carries what is in it (her frame, metres)
-    // ...and each floats in its fluid: lagging her a little, drifting and turning slowly round its own middle
-    babyRoots().forEach((r, i) => {
+    babyRoots().forEach((r, i) => { const f = babyFloats[i], d = r.userData.drift as THREE.Vector3 | undefined; babyOwnSacs[i]?.position.copy(jiggle.belly.value).add(d ?? floatAt.set(0, 0, 0)).add(f ? floatAt.set(f.x, f.y, f.z) : floatAt.set(0, 0, 0)); });
+    babySac.position.copy(jiggle.belly.value); babyWall.position.copy(jiggle.belly.value);
+    // the lining gives where a kick reaches it (its wall and sac with her belly)
+    for (const m of [babySac, babyWall]) bumpShell(m);
+    // anything put on her since (a garment, the cloth tee) is seen through too
+    ghost(true);
+  }
+  /**
+   * Her babies placed in her (her rest frame, metres; under the holder when shown, on their own when not -- her belly
+   * shows their kicks either way): each floating in its fluid -- lagging her a little, drifting and turning slowly round
+   * its own middle -- rolling if it is, its limbs posed for its move; a foot or hand that reaches her womb's lining shows
+   * on her belly (the kick uniforms), one that reaches into another baby nudges it.
+   */
+  function moveBabies(): void {
+    const roots = babyRoots(), K = jiggle.kickAt.value, D = jiggle.kickDir.value;
+    for (const k of K) k.w = 0;
+    if (babyFrame) { jiggle.kickRest.value.copy(babyFrame.meshToRest); jiggle.kickUnits.value.setFromMatrix4(babyFrame.meshToRest).invert(); }
+    if (babyHolder) babyHolder.updateMatrixWorld(true);
+    const toWorld = babyHolder && babyHolder.parent ? babyHolder.getWorldQuaternion(moveQ) : moveQ.identity();
+    roots.forEach((r, i) => {
       const at = r.userData.at as THREE.Vector3 | undefined, turn = r.userData.turn as THREE.Quaternion | undefined, mid = r.userData.mid as THREE.Vector3 | undefined;
-      if (!at || !turn || !mid) return;
-      const angle = floatDrift(babyClock, i, babyRooms[i] ?? 0, floatMove, floatAxis, body.babyFloat), f = babyFloats[i];
+      if (!at || !turn || !mid || !babyCurl) return;
+      const angle = floatDrift(babyClock, i, babyRooms[i] ?? 0, floatMove, floatAxis, body.babyFloat), f = babyFloats[i], m = babyMoveOf(i, r);
+      const k = m.t >= 0 ? moveEnvelope(m.kind, m.t) : 0;
       floatTurn.setFromAxisAngle(floatAxis, angle);
+      // a roll: about its own length, and back
+      if (m.t >= 0 && m.kind === 'roll') floatTurn.premultiply(moveRoll.setFromAxisAngle(moveAxis.copy(babyCurl.long).applyQuaternion(turn).normalize(), ROLL_RAD * k * (m.side === 'left' ? 1 : -1)));
       r.quaternion.copy(floatTurn).multiply(turn);
       r.position.copy(at).sub(mid).applyQuaternion(floatTurn).add(mid).add(floatMove).add(jiggle.belly.value);
       if (f) r.position.add(floatAt.set(f.x, f.y, f.z));
-      // its own sac goes with it (twins, triplets)
-      babyOwnSacs[i]?.position.copy(jiggle.belly.value).add(floatMove).add(f ? floatAt : floatAt.set(0, 0, 0));
+      (r.userData.drift ??= new THREE.Vector3()).copy(floatMove);
+      r.updateMatrixWorld(true);
+      // its limbs: posed while it moves, back to its curl once after
+      if (!(k > 0) && !m.posed) return;
+      m.posed = k > 0;
+      const q = r.getWorldQuaternion(moveRoll);
+      moveFrame.long.copy(babyCurl.long).applyQuaternion(q); moveFrame.front.copy(babyCurl.back).negate().applyQuaternion(q); moveFrame.left.copy(babyCurl.side).applyQuaternion(q);
+      // the way out of her womb from it: away from her womb's middle, and forward (her belly is in front)
+      moveFrame.out.copy(mid).sub(babyWomb?.centre ?? mid).add(moveAxis.set(0, 0, 0.12)).normalize().applyQuaternion(toWorld);
+      // THE LINING STOPS IT: a limb reaches only as far as her womb's lining gives (`KICK_MOST_M` past it) -- the move held
+      // short, by halving, where it would go further
+      const pad = 0.012 * (r.scale.x / 0.33), w = babyWomb;
+      const restOf = (b: THREE.Object3D, out: THREE.Vector3) => { b.getWorldPosition(out); if (babyHolder && r.parent === babyHolder) babyHolder.worldToLocal(out); return out.sub(jiggle.belly.value); };
+      const pastAt = (tipBone: THREE.Object3D | null): number => {
+        if (!tipBone || !w) return -Infinity;
+        let worst = -Infinity;
+        for (let b: THREE.Object3D | null = tipBone, n = 0; b && n < 3; b = b.parent, n++) worst = Math.max(worst, liningPast(w, restOf(b, moveAt), pad));
+        return worst;
+      };
+      const allowed = KICK_MOST_M - KICK_FELT_M;
+      let tip = poseMove(m.bones, m.rest, m.kind, m.side, k, moveFrame);
+      if (tip && w && pastAt(tip) > allowed) {
+        let lo = 0, hi = k;
+        for (let it = 0; it < 6; it++) { const mid2 = (lo + hi) / 2; tip = poseMove(m.bones, m.rest, m.kind, m.side, mid2, moveFrame); if (pastAt(tip) > allowed) hi = mid2; else lo = mid2; }
+        tip = poseMove(m.bones, m.rest, m.kind, m.side, lo, moveFrame);
+      }
+      if (!tip || !babyWomb) return;
+      // where the tip is in her rest frame, her womb's own place (the belly's swing taken off)
+      restOf(tip, moveTip);
+      const amp = kickOnSkin(babyWomb, moveTip, 0.012 * (r.scale.x / 0.33), moveAt, moveOut);
+      if (amp > 0 && i < K.length) { K[i].set(moveAt.x, moveAt.y, moveAt.z, amp); D[i].set(moveOut.x, moveOut.y, moveOut.z, KICK_WIDE_M * Math.min(1.2, Math.max(0.6, r.scale.x / 0.33))); }
+      // into another baby: it is nudged away, and the fluid takes it up
+      if (babySolidOf) roots.forEach((o, j) => {
+        if (j === i || !babyFloats[j]) return;
+        const local = moveAt.copy(moveTip).add(jiggle.belly.value).sub(o.position).applyQuaternion(moveQ.copy(o.quaternion).invert()).divideScalar(o.scale.x).sub(babyCurl!.centre);
+        const deep = solidDeep(babySolidOf!, local.x, local.y, local.z) * o.scale.x;
+        if (deep <= 0) return;
+        moveAxis.copy(moveTip).sub(mid).normalize();
+        const F = babyFloats[j]; F.vx += moveAxis.x * deep * 4; F.vy += moveAxis.y * deep * 4; F.vz += moveAxis.z * deep * 4;
+      });
     });
-    babySac.position.copy(jiggle.belly.value); babyWall.position.copy(jiggle.belly.value);
-    // anything put on her since (a garment, the cloth tee) is seen through too
-    ghost(true);
+  }
+  /** A womb shell (laid by `layShell`) with her kicks on it: out where each one is, as her belly is. */
+  function bumpShell(mesh: THREE.Mesh): void {
+    const K = jiggle.kickAt.value, D = jiggle.kickDir.value, base = mesh.userData.base as Float32Array | undefined;
+    if (!base) return;
+    const any = K.some((k) => k.w > 0);
+    if (!any && !mesh.userData.bumped) return;
+    const pos = mesh.geometry.getAttribute('position') as THREE.BufferAttribute, P = pos.array as Float32Array;
+    P.set(base);
+    if (any) for (let v = 0; v < pos.count; v++) {
+      const x = base[v * 3], y = base[v * 3 + 1], z = base[v * 3 + 2];
+      for (let k = 0; k < K.length; k++) {
+        if (!(K[k].w > 0)) continue;
+        // (the shell is inside her skin: measured from the kick's own line, not its point on her skin)
+        const dx = x - K[k].x, dy = y - K[k].y, dz = z - K[k].z, along = dx * D[k].x + dy * D[k].y + dz * D[k].z;
+        const off2 = dx * dx + dy * dy + dz * dz - along * along, f = Math.exp(-off2 / (D[k].w * D[k].w)) * (along > -0.08 ? 1 : 0);
+        P[v * 3] += D[k].x * K[k].w * f; P[v * 3 + 1] += D[k].y * K[k].w * f; P[v * 3 + 2] += D[k].z * K[k].w * f;
+      }
+    }
+    mesh.userData.bumped = any; pos.needsUpdate = true;
   }
   const qMesh = new THREE.Quaternion(), qBone = new THREE.Quaternion(), qBind = new THREE.Quaternion(), toBody = new THREE.Quaternion();
   const accel = new THREE.Vector3(), vel = new THREE.Vector3(), felt = new THREE.Vector3(), side = new THREE.Vector3(), qSide = new THREE.Quaternion();
@@ -3093,6 +3233,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           return { pairs, worst, bad };
         },
         // a probe's comparison: her belly with the baby's push taken off, or back
+        babyMove: (i: number, kind: MoveKind, side?: 'left' | 'right') => { const r = babyRoots()[i]; if (!r) return false; startMove(babyMoveOf(i, r), kind, side); return true; },
+        kicks: () => jiggle.kickAt.value.map((k, i) => ({ at: [k.x, k.y, k.z].map((x) => +x.toFixed(4)), mm: Math.round(k.w * 1000), dir: [jiggle.kickDir.value[i].x, jiggle.kickDir.value[i].y, jiggle.kickDir.value[i].z].map((x) => +x.toFixed(3)) })),
         babiesSet: (count: number, lie: string, seed?: number) => { babyCount = Math.min(3, Math.max(1, Math.round(count))); babyLie = (LIE_MODES as readonly string[]).includes(lie) ? lie as typeof babyLie : 'auto'; if (seed) babyLieSeed = seed; babyDirty = true; babyFitAt = -Infinity; applyLook(); refresh(); return true; },
         pushOff: (off: boolean) => { babyPushOff = off; if (babyPushField) layPush(babyPushField); return true; },
         baby: (on?: boolean) => { if (on !== undefined) { showBaby(on); refresh(); } return { shown: babyShown, loaded: !!babyRoot, held: !!babyHolder, line: babyLine(bump, body.babyWeight, babyCount), count: babyCount, lies: babyRoots().map((r) => r.userData.lie ?? null), at: babyRoot ? { position: babyRoot.position.toArray(), scale: babyRoot.scale.x, pushMm: babyPushField ? Math.round(babyPushField.most * 1000) : null, depthPct: babyAutoDepth, balanceDeg: babyBalanceDeg, shrink: babyCurled, fitMs: babyRoot.userData.fitMs ?? null, womb: babyWomb ? { centre: babyWomb.centre.toArray(), top: babyWomb.centre.y + sacRadius(babyWomb, 0, 1, 0), bottom: babyWomb.centre.y - sacRadius(babyWomb, 0, -1, 0), front: babyWomb.centre.z + sacRadius(babyWomb, 0, 0, 1), back: babyWomb.centre.z - sacRadius(babyWomb, 0, 0, -1), half: sacRadius(babyWomb, 1, 0, 0) } : null } : null }; },

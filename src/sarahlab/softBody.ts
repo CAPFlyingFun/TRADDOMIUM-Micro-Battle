@@ -131,8 +131,37 @@ export interface JiggleUniforms {
   readonly belly: { value: THREE.Vector3 };
   readonly breastL: { value: THREE.Vector3 };
   readonly breastR: { value: THREE.Vector3 };
+  /**
+   * A BABY'S KICK on her belly (baby.ts `MOVES`): up to `KICKS` at once, each where on her skin (rest metres, xyz) and
+   * how far out (w, metres), the way out (xyz) and how wide (w, metres); her geometry to her rest frame, and back for a
+   * move. Her belly only (its follow weight), smooth round the point. Nothing while every w is 0.
+   */
+  readonly kickAt: { value: THREE.Vector4[] };
+  readonly kickDir: { value: THREE.Vector4[] };
+  readonly kickRest: { value: THREE.Matrix4 };
+  readonly kickUnits: { value: THREE.Matrix3 };
 }
-export const createJiggleUniforms = (): JiggleUniforms => ({ belly: { value: new THREE.Vector3() }, breastL: { value: new THREE.Vector3() }, breastR: { value: new THREE.Vector3() } });
+/** How many kicks her belly shows at once (one a baby). */
+export const KICKS = 3;
+export const createJiggleUniforms = (): JiggleUniforms => ({
+  belly: { value: new THREE.Vector3() }, breastL: { value: new THREE.Vector3() }, breastR: { value: new THREE.Vector3() },
+  kickAt: { value: Array.from({ length: KICKS }, () => new THREE.Vector4()) }, kickDir: { value: Array.from({ length: KICKS }, () => new THREE.Vector4(0, 0, 1, 0.03)) },
+  kickRest: { value: new THREE.Matrix4() }, kickUnits: { value: new THREE.Matrix3() },
+});
+
+/** A kick's move at a point of her (rest metres) for a belly follow weight, rest metres, into `out` (its xyz added). */
+export function kickAt(u: JiggleUniforms, bellyWeight: number, x: number, y: number, z: number, out: THREE.Vector3): THREE.Vector3 {
+  out.set(0, 0, 0);
+  const share = clamp(bellyWeight * 0.9, 0, 1);
+  if (!(share > 0)) return out;
+  for (let k = 0; k < KICKS; k++) {
+    const a = u.kickAt.value[k], d = u.kickDir.value[k];
+    if (!(a.w > 0)) continue;
+    const dx = x - a.x, dy = y - a.y, dz = z - a.z, f = Math.exp(-(dx * dx + dy * dy + dz * dz) / (d.w * d.w));
+    out.x += d.x * a.w * f * share; out.y += d.y * a.w * f * share; out.z += d.z * a.w * f * share;
+  }
+  return out;
+}
 
 /**
  * The follow weights of one mesh, from its own motion shapes (null when it has neither, or they move nothing): three
@@ -176,9 +205,24 @@ export function patchJiggle(material: THREE.Material, uniforms: JiggleUniforms):
     shader.uniforms.uJiggleBelly = uniforms.belly;
     shader.uniforms.uJiggleBreastL = uniforms.breastL;
     shader.uniforms.uJiggleBreastR = uniforms.breastR;
+    shader.uniforms.uKickAt = uniforms.kickAt;
+    shader.uniforms.uKickDir = uniforms.kickDir;
+    shader.uniforms.uKickRest = uniforms.kickRest;
+    shader.uniforms.uKickUnits = uniforms.kickUnits;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec3 jiggle;\nattribute vec3 babyPush;\nuniform vec3 uJiggleBelly;\nuniform vec3 uJiggleBreastL;\nuniform vec3 uJiggleBreastR;')
-      .replace('#include <morphtarget_vertex>', '#include <morphtarget_vertex>\ntransformed += babyPush + jiggle.x * uJiggleBelly + jiggle.y * uJiggleBreastL + jiggle.z * uJiggleBreastR;');
+      .replace('#include <common>', `#include <common>\nattribute vec3 jiggle;\nattribute vec3 babyPush;\nuniform vec3 uJiggleBelly;\nuniform vec3 uJiggleBreastL;\nuniform vec3 uJiggleBreastR;\nuniform vec4 uKickAt[${KICKS}];\nuniform vec4 uKickDir[${KICKS}];\nuniform mat4 uKickRest;\nuniform mat3 uKickUnits;`)
+      .replace('#include <morphtarget_vertex>', `#include <morphtarget_vertex>
+vec3 kickMove = vec3(0.0);
+if (jiggle.x > 0.0) {
+  vec3 kickP = (uKickRest * vec4(transformed, 1.0)).xyz;
+  for (int k = 0; k < ${KICKS}; k++) {
+    if (uKickAt[k].w <= 0.0) continue;
+    vec3 kd = kickP - uKickAt[k].xyz;
+    kickMove += uKickDir[k].xyz * (uKickAt[k].w * exp(-dot(kd, kd) / (uKickDir[k].w * uKickDir[k].w)));
+  }
+  kickMove = clamp(jiggle.x * 0.9, 0.0, 1.0) * (uKickUnits * kickMove);
+}
+transformed += babyPush + kickMove + jiggle.x * uJiggleBelly + jiggle.y * uJiggleBreastL + jiggle.z * uJiggleBreastR;`);
   };
   material.customProgramCacheKey = function () { return `${cacheKey ? cacheKey.call(this) : ''}|jiggle`; };
   material.needsUpdate = true;
@@ -226,10 +270,20 @@ export function setPush(mesh: THREE.Object3D, values: ArrayLike<number> | null):
   if (a) a.needsUpdate = true;
   return true;
 }
-export function jiggleAt(j: Jiggle, v: number, out: { x: number; y: number; z: number }): void {
+const kickP = new THREE.Vector3(), kickM = new THREE.Vector3();
+/** ...and, given where the vertex is (geometry units, after its morphs), a kick's move too, as the shader adds it. */
+export function jiggleAt(j: Jiggle, v: number, out: { x: number; y: number; z: number }, x?: number, y?: number, z?: number): void {
   const w = j.weights, o = v * 3, b = j.uniforms.belly.value, l = j.uniforms.breastL.value, r = j.uniforms.breastR.value;
   const p = j.push;
   out.x = p[o] + w[o] * b.x + w[o + 1] * l.x + w[o + 2] * r.x;
   out.y = p[o + 1] + w[o] * b.y + w[o + 1] * l.y + w[o + 2] * r.y;
   out.z = p[o + 2] + w[o] * b.z + w[o + 1] * l.z + w[o + 2] * r.z;
+  if (x === undefined || y === undefined || z === undefined || !(w[o] > 0)) return;
+  const u = j.uniforms;
+  const K = u.kickAt.value;
+  let any = false; for (let k = 0; k < K.length; k++) if (K[k].w > 0) { any = true; break; }
+  if (!any) return;
+  kickP.set(x, y, z).applyMatrix4(u.kickRest.value);
+  kickAt(u, w[o], kickP.x, kickP.y, kickP.z, kickM).applyMatrix3(u.kickUnits.value);
+  out.x += kickM.x; out.y += kickM.y; out.z += kickM.z;
 }

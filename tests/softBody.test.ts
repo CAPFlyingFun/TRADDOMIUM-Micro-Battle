@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import {
-  bellyTune, bounceShare, breastTune, createJiggleUniforms, jiggleAt, jiggleWeights, patchJiggle, restingMass, stepMass,
+  bellyTune, bounceShare, breastTune, createJiggleUniforms, jiggleAt, kickAt, KICKS, jiggleWeights, patchJiggle, restingMass, stepMass,
   JIGGLE_SOURCES, UNITS_PER_METRE, type Mass, type MassTune,
 } from '../src/sarahlab/softBody';
 import { walkSwayAccel, WALK_SWAY_M } from '../src/sarahlab/sarahLabTool';
@@ -144,6 +144,20 @@ describe('soft body: the skin', () => {
     expect(out.y).toBeCloseTo(0.02 - 0.004 * UNITS_PER_METRE, 6);
   });
 
+  it('a kick moves her belly out round its point, as far as it says, and the CPU posers read the same', () => {
+    const { geometry, dictionary } = strip();
+    const uniforms = createJiggleUniforms(), weights = jiggleWeights(geometry, dictionary)!, j = { weights, uniforms, push: new Float32Array(weights.length) }, out = { x: 0, y: 0, z: 0 };
+    // her geometry is her rest frame here; a kick 2 cm out at the first vertex, straight forward
+    uniforms.kickAt.value[0].set(0.1, 1, 0, 0.02); uniforms.kickDir.value[0].set(0, 0, 1, 0.03);
+    jiggleAt(j, 0, out, 0.1, 1, 0);
+    expect(out.z).toBeCloseTo(0.02 * Math.min(1, weights[0] * 0.9), 9);
+    // further away, less; off her belly (no belly weight), nothing
+    jiggleAt(j, 0, out, 0.13, 1, 0); expect(out.z).toBeLessThan(0.02 * 0.5);
+    jiggleAt(j, 1, out, 0.05, 1, 0); expect(out.z).toBe(0);
+    expect(kickAt(uniforms, 1, 0.1, 1, 0, new THREE.Vector3()).z).toBeCloseTo(0.02 * 0.9, 9);
+    uniforms.kickAt.value[0].w = 0; jiggleAt(j, 0, out, 0.1, 1, 0); expect(out.z).toBe(0);
+  });
+
   it('the push is its own attribute, added before skinning with the jiggle', () => {
     const material = new THREE.MeshStandardMaterial(), uniforms = createJiggleUniforms();
     patchJiggle(material, uniforms);
@@ -165,8 +179,9 @@ describe('soft body: the skin', () => {
     material.onBeforeCompile(shader as never, undefined as never);
     const v = shader.vertexShader;
     expect(v.match(/attribute vec3 jiggle/g)?.length).toBe(1);
-    expect(v.indexOf('transformed += babyPush + jiggle.x')).toBeGreaterThan(v.indexOf('#include <morphtarget_vertex>'));
-    expect(v.indexOf('transformed += babyPush + jiggle.x')).toBeLessThan(v.indexOf('#include <skinning_vertex>'));
+    expect(v.indexOf('transformed += babyPush + kickMove + jiggle.x')).toBeGreaterThan(v.indexOf('#include <morphtarget_vertex>'));
+    expect(v.indexOf('transformed += babyPush + kickMove + jiggle.x')).toBeLessThan(v.indexOf('#include <skinning_vertex>'));
+    expect(shader.uniforms.uKickAt).toBe(uniforms.kickAt); expect(v).toContain(`uniform vec4 uKickAt[${KICKS}]`);
     expect(shader.uniforms.uJiggleBelly).toBe(uniforms.belly);
     expect(material.customProgramCacheKey()).toContain('jiggle');
   });
