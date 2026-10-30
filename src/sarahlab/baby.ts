@@ -1150,3 +1150,67 @@ export function babiesInHer(points: ArrayLike<number>, all: ArrayLike<number>, s
   const grams = n * babySize(weekForBump(bumpPercent, n), weightPercent, n).g * best.shrink ** 3;
   return { fits: best.fits, womb, push: bellyPush(womb, n), shrink: best.shrink, depth: best.pct, balance: balanceDeg(best.fits, curl, best.room, grams), over: best.over };
 }
+
+// -------------------------------------------------------------------------------------------------- in their fluid
+
+/**
+ * IN THEIR FLUID (Joshua, 2026-10-30: "when we get to actually the babies moving and the actual fluid sac, things will
+ * look more realistic with the fluid like a damper"). A baby does not ride its mother's belly rigidly: it floats in its
+ * sac's fluid, nearly as dense as itself, so it lags her motion a little and comes back slowly, never springing -- and
+ * it is never quite still. Each baby is a mass in fluid (`FLUID`, stepped like her belly's with `stepMass`, its travel
+ * the room it has round it) plus a slow drift and turn of its own. All of it within the room it was packed with.
+ */
+export const FLUID = Object.freeze({
+  /** how much of what her body does a baby feels against its fluid (it is all but as light as the fluid: a share) */
+  share: 0.45,
+  /** its spring back to its place, and how damped: slow, and settling without a swing (the fluid). GAME TUNING */
+  hz: 0.9, damping: 0.95,
+  /** of the room round it, how much it may travel; and never more than this (rest metres) */
+  roomShare: 0.6, mostM: 0.006,
+  /** its drift: how far (rest metres) and how far it turns (radians), over these periods (seconds); each baby its own */
+  driftM: 0.0015, driftRad: 0.022, driftS: [6.3, 7.9, 5.4],
+});
+
+/** How much room each baby has round it, as packed (rest metres): how far its furthest point stands inside the wall. */
+export function floatRoom(points: ArrayLike<number>, fits: readonly BabyPlace[], womb: WombShape): number[] {
+  return fits.map((f) => { const w = pastWall(points, f, womb); return Math.max(0, -Math.max(w.belly, w.inside)); });
+}
+
+/** A baby's mass in its fluid, for its room (rest metres): `stepMass`'s tune; `gain` the share of her body's motion it feels. */
+export function floatTune(roomM: number, float = 100): { hz: number; damping: number; maxM: number; gain: number } {
+  const k = floatShare(float);
+  return { hz: FLUID.hz, damping: FLUID.damping, maxM: Math.min(FLUID.mostM * k, Math.max(0, roomM) * Math.min(0.9, FLUID.roomShare * k)), gain: FLUID.share * k };
+}
+/** BABY FLOAT (0..200%) as a share: 0 still, 1 as tuned, 2 twice as much. */
+export const floatShare = (float: number): number => Math.min(200, Math.max(0, Number.isFinite(float) ? float : 100)) / 100;
+
+/**
+ * A baby's own drift at a time (seconds), the `index`th of them, with so much room: a small slow wander (`move`, rest
+ * metres) and turn (`axis`, `angle` radians) -- no two babies in step, nothing where there is no room, by BABY FLOAT.
+ * Smooth in time.
+ */
+export function floatDrift(seconds: number, index: number, roomM: number, move: THREE.Vector3, axis: THREE.Vector3, float = 100): number {
+  const room = Math.min(1, Math.max(0, roomM) / 0.004) * floatShare(float), T = FLUID.driftS, p = index * 2.1;
+  const w = (k: number) => (2 * Math.PI * seconds) / T[(index + k) % T.length];
+  move.set(Math.sin(w(0) + p), 0.6 * Math.sin(w(1) * 0.83 + 1.3 * p), Math.sin(w(2) * 1.17 + 0.7 * p)).multiplyScalar(FLUID.driftM * room);
+  axis.set(Math.sin(w(1) * 0.61 + p), Math.cos(w(2) * 0.53 + 2 * p), 0.5 * Math.sin(w(0) * 0.71)).normalize();
+  return FLUID.driftRad * room * Math.sin(w(2) * 0.9 + p);
+}
+
+/**
+ * How much amniotic fluid each sac holds by week (ml): rising to about 800 by week 34, then falling slowly to term and
+ * past. BIOLOGICAL SHAPE (amniotic fluid volume by gestational age, the usual curve).
+ */
+export const FLUID_ML: readonly (readonly [number, number])[] = [[12, 60], [16, 200], [20, 400], [28, 700], [34, 830], [38, 780], [40, 700], [42, 500]];
+export const fluidMl = (week: number): number => lerpTable(FLUID_ML, week, 1);
+
+/**
+ * What her belly carries with so many babies against with one at the same size (1 for one): babies and fluid, each sac
+ * its own. More to carry is a heavier, more damped belly (softBody's `bellyTune`) -- her approved one-baby belly as it is.
+ */
+export function carriedShare(bumpPercent: number, weightPercent: number, babies: number): number {
+  if (babies <= 1) return 1;
+  const one = babySize(weekForBump(bumpPercent), weightPercent).g + fluidMl(weekForBump(bumpPercent));
+  const wk = weekForBump(bumpPercent, babies), many = babies * (babySize(wk, weightPercent, babies).g + fluidMl(wk));
+  return one > 0 ? many / one : 1;
+}

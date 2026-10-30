@@ -25,7 +25,7 @@
  */
 
 export type BodyControl =
-  | 'bellyTilt' | 'bellyHeight' | 'bellyWidth' | 'bellyDepth' | 'bellyUpper' | 'bellyLower' | 'navel' | 'babyWeight' | 'bellyFirmness' | 'bellyBounce'
+  | 'bellyTilt' | 'bellyHeight' | 'bellyWidth' | 'bellyDepth' | 'bellyUpper' | 'bellyLower' | 'navel' | 'babyWeight' | 'bellyFirmness' | 'bellyBounce' | 'babyFloat'
   | 'breastSize' | 'breastWidth' | 'breastHeight' | 'breastDepth' | 'breastSpacing' | 'breastPosition' | 'breastDroop' | 'breastUpper' | 'breastLower' | 'milk' | 'milkBalance' | 'breastFirmness' | 'breastBounce'
   | 'height' | 'upperLeg' | 'lowerLeg' | 'torso' | 'neck' | 'upperArm' | 'forearm' | 'shoulders' | 'waist' | 'hips' | 'head' | 'hands' | 'feet';
 
@@ -67,6 +67,8 @@ export const BODY_CONTROLS: readonly BodyControlSpec[] = Object.freeze([
   // (sarahlab/softBody.ts). 50 is the tuning as made; lower is softer and moves more, higher is tighter and settles sooner.
   { key: 'bellyFirmness', group: 'belly', label: 'Firmness', unit: '%', min: 0, max: 100, step: 1, fallback: 50, spread: 15, help: 'how the belly moves with her: lower is softer and swings more, higher is tighter and settles sooner' },
   { key: 'bellyBounce', group: 'belly', label: 'Bounce', unit: '%', min: 0, max: 200, step: 5, fallback: 100, spread: 20, help: 'how much of that motion shows: 0 holds the belly still, 100 is as tuned, 200 twice as much' },
+  // Joshua, 2026-10-30, of the babies in their fluid: "can you add a slider to adjust later?" (sarahlab/baby.ts `FLUID`)
+  { key: 'babyFloat', group: 'belly', label: 'Baby float', unit: '%', min: 0, max: 200, step: 5, fallback: 100, spread: 20, help: 'how much the babies drift and lag in their fluid: 0 holds them still, 100 is as tuned, 200 twice as much (never past the room they have)' },
   { key: 'breastSize', group: 'breasts', label: 'Size', unit: '%', min: -100, max: 100, step: 1, fallback: 0, spread: 10, help: 'volume from the bust the belly slider gives: +100% is 2.0x, -100% is 0.5x, at any belly size' },
   { key: 'breastWidth', group: 'breasts', label: 'Width', unit: '%', min: -25, max: 25, step: 1, fallback: 0, spread: 4, help: 'side to side' },
   { key: 'breastHeight', group: 'breasts', label: 'Height', unit: '%', min: -25, max: 25, step: 1, fallback: 0, spread: 4, help: 'top to bottom' },

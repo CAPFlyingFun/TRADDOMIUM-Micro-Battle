@@ -71,6 +71,13 @@ describe('soft body: the masses', () => {
     expect(bounceShare(500)).toBe(2); expect(bounceShare(-5)).toBe(0); expect(bounceShare(NaN)).toBe(1);
   });
 
+  it('more to carry (twins, triplets and their fluid) is slower and more damped; one is as approved', () => {
+    expect(bellyTune(100, 50, 0, 100, 1)).toEqual(bellyTune(100));
+    const heavy = bellyTune(100, 50, 0, 100, 1.6);
+    expect(heavy.hz).toBeLessThan(bellyTune(100).hz); expect(heavy.damping).toBeGreaterThan(bellyTune(100).damping);
+    expect(settle(ring(heavy, -0.3))).toBeLessThanOrEqual(settle(ring(bellyTune(100), -0.3)) + 0.1);
+  });
+
   it('milk fills the breast out and firms it', () => {
     const empty = breastTune(1.3, 0), full = breastTune(1.3, 100);
     expect(full.hz).toBeGreaterThan(empty.hz);

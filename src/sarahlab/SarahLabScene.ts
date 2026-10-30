@@ -79,10 +79,10 @@ import { applyShapeFields, baseShapeFields, liftShapeFields, type ShapeFields, t
 import { BUILD_PROFILES, buildAmounts, buildKey, heightLine, heldSegments, profileOf, withProfile, type BuildAmounts, type BuildSegment } from '../actor/bodyBuild';
 import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields, prepareBuildRig, standingLift, type BuildMeshFields, type BuildRig } from '../view/bodyBuild';
 import { dropIdleMorphs } from '../view/morphPrune';
-import { AUTO_LIES, BABIES_NAME, BABY_MODEL, babiesInHer, babyLine, babySolid, curlFrame, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
+import { AUTO_LIES, BABIES_NAME, BABY_MODEL, babiesInHer, babyLine, babySolid, carriedShare, curlFrame, floatDrift, floatRoom, floatTune, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { setPush, jiggleOf as jiggleOfMesh } from './softBody';
-import { attachJiggle, bellyTune, breastTune, createJiggleUniforms, feltAcceleration, restingMass, stepMass } from './softBody';
+import { attachJiggle, bellyTune, breastTune, createJiggleUniforms, feltAcceleration, restingMass, stepMass, type Mass } from './softBody';
 import { applyMilk, applyWomb, applyZeroRefine, babyAnchors, babyWeightState, chestAnchors, chestFieldWeights, groinAnchors, groinFieldWeights, loadMilk, milkAnchors, milkBalanceState, milkFieldWeights, milkState, MILK_PATH, babyFieldWeights, loadWomb, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, WOMB_PATH, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
 import { NAVEL_MORPHS, type NavelPiece } from './navelPiece';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
@@ -353,6 +353,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let babyCurl: CurlFrame | null = null, babyPoints: Float32Array | null = null, babyAll: Float32Array | null = null;
   /** the baby's body as a solid (baby.ts `babySolid`), found once from its points: how babies are kept out of one another */
   let babySolidOf: BabySolid | null = null;
+  /** IN THEIR FLUID: each baby's mass, the room round it as packed (rest metres), the clock its drift runs on, what her belly felt last */
+  let babyFloats: Mass[] = [], babyRooms: number[] = [], babyClock = 0;
+  const feltBelly = new THREE.Vector3(), floatMove = new THREE.Vector3(), floatAxis = new THREE.Vector3(), floatTurn = new THREE.Quaternion(), floatAt = new THREE.Vector3();
   const GHOST_OPACITY = 0.26;
   const tmp = new THREE.Vector3();
   // she opens in her red light spandex tee over painted leggings (Joshua, 2026-10-23), one small file; a model without
@@ -2521,7 +2524,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // her left in the world, for the sway
     side.set(1, 0, 0).applyQuaternion(qSide.copy(meshQ).invert());
     const volume = bustVolume(bump, body.breastSize), milkL = body.milk * (body.milkBalance < 0 ? 1 + 0.4 * body.milkBalance / 100 : 1), milkR = body.milk * (body.milkBalance > 0 ? 1 - 0.4 * body.milkBalance / 100 : 1);
-    const tunes = { belly: bellyTune(bump, body.bellyFirmness, body.babyWeight, body.bellyBounce), breastL: breastTune(volume, milkL, body.breastFirmness, 'left', body.breastBounce), breastR: breastTune(volume, milkR, body.breastFirmness, 'right', body.breastBounce) };
+    const tunes = { belly: bellyTune(bump, body.bellyFirmness, body.babyWeight, body.bellyBounce, babyRoot ? carriedShare(bump, body.babyWeight, babyCount) : 1), breastL: breastTune(volume, milkL, body.breastFirmness, 'left', body.breastBounce), breastR: breastTune(volume, milkR, body.breastFirmness, 'right', body.breastBounce) };
     for (const key of ['belly', 'breastL', 'breastR'] as const) {
       const a = anchors[key];
       a.bone.localToWorld(tmp.copy(a.local)).multiplyScalar(1 / M);
@@ -2543,7 +2546,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       stepMass(m, dt, felt.x, felt.y, felt.z, t);
       // the shaders get metres in her frame; the follow weights turn them into each mesh's units
       jiggle[key].value.set(m.x, m.y, m.z).multiplyScalar(t.gain);
+      if (key === 'belly') feltBelly.copy(felt);
     }
+    // her babies in their fluid: each lags what her body does a little, within the room it has (baby.ts `FLUID`)
+    babyClock += dt;
+    babyFloats.forEach((f, i) => { const t = floatTune(babyRooms[i] ?? 0, body.babyFloat); stepMass(f, dt, feltBelly.x * t.gain, feltBelly.y * t.gain, feltBelly.z * t.gain, t); });
     placeBaby();
   }
 
@@ -2740,7 +2747,16 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       // as many babies as asked for: copies of the first, made or put away
       while (babyCopies.length < fits.length - 1) babyCopies.push(cloneSkinned(babyRoot));
       while (babyCopies.length > fits.length - 1) babyCopies.pop()?.removeFromParent();
-      babyRoots().forEach((r, i) => { r.quaternion.copy(fits[i].quaternion); r.scale.setScalar(fits[i].scale); r.userData.at = fits[i].position; r.userData.lie = lies[i]; if (babyHolder && r.parent !== babyHolder) babyHolder.add(r); });
+      babyRoots().forEach((r, i) => {
+        r.quaternion.copy(fits[i].quaternion); r.scale.setScalar(fits[i].scale); r.userData.at = fits[i].position; r.userData.lie = lies[i];
+        // its turn as packed, and the middle of its curl it drifts round
+        r.userData.turn = fits[i].quaternion.clone(); r.userData.mid = babyCurl!.centre.clone().multiplyScalar(fits[i].scale).applyQuaternion(fits[i].quaternion).add(fits[i].position);
+        if (babyHolder && r.parent !== babyHolder) babyHolder.add(r);
+      });
+      // each in its fluid, with the room it has
+      babyRooms = floatRoom(babyPoints, fits, babyWomb);
+      while (babyFloats.length < fits.length) babyFloats.push(restingMass());
+      babyFloats.length = fits.length;
       if (babySac && babyWall) {
         layShell(babyWall, babyWomb, WOMB_WALL_M);
         // one baby: its sac lines her womb; several: each its own, round it
@@ -2754,9 +2770,19 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     }
     if (!babyShown || !babyHolder || !babySac || !babyWall) return;
     // the belly's mass carries what is in it (her frame, metres)
-    for (const r of babyRoots()) { const at = r.userData.at as THREE.Vector3 | undefined; if (at) r.position.copy(at).add(jiggle.belly.value); }
+    // ...and each floats in its fluid: lagging her a little, drifting and turning slowly round its own middle
+    babyRoots().forEach((r, i) => {
+      const at = r.userData.at as THREE.Vector3 | undefined, turn = r.userData.turn as THREE.Quaternion | undefined, mid = r.userData.mid as THREE.Vector3 | undefined;
+      if (!at || !turn || !mid) return;
+      const angle = floatDrift(babyClock, i, babyRooms[i] ?? 0, floatMove, floatAxis, body.babyFloat), f = babyFloats[i];
+      floatTurn.setFromAxisAngle(floatAxis, angle);
+      r.quaternion.copy(floatTurn).multiply(turn);
+      r.position.copy(at).sub(mid).applyQuaternion(floatTurn).add(mid).add(floatMove).add(jiggle.belly.value);
+      if (f) r.position.add(floatAt.set(f.x, f.y, f.z));
+      // its own sac goes with it (twins, triplets)
+      babyOwnSacs[i]?.position.copy(jiggle.belly.value).add(floatMove).add(f ? floatAt : floatAt.set(0, 0, 0));
+    });
     babySac.position.copy(jiggle.belly.value); babyWall.position.copy(jiggle.belly.value);
-    for (const m of babyOwnSacs) m.position.copy(jiggle.belly.value);
     // anything put on her since (a garment, the cloth tee) is seen through too
     ghost(true);
   }

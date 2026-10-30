@@ -92,10 +92,12 @@ export const bounceShare = (bounce: number): number => clamp(Number.isFinite(bou
  * little slower. How much of the mass's travel her skin shows grows with the bump to full term and falls past it: at
  * 200% it shows 60% of what full term shows. No bump, no motion.
  */
-export function bellyTune(bumpPercent: number, firmness = 50, babyWeight = 0, bounce = 100): MassTune {
+export function bellyTune(bumpPercent: number, firmness = 50, babyWeight = 0, bounce = 100, carried = 1): MassTune {
   const s = clamp(bumpPercent / 100, 0, 2), f = clamp(firmness / 100, 0, 1), bw = clamp(babyWeight / 100, -1, 1);
-  const hz = (2.0 + 0.4 * s) * (0.75 + 0.5 * f) * (1 - 0.06 * bw);
-  const damping = 0.5 + 0.06 * s + 0.25 * (f - 0.5);
+  // twins and triplets and their fluid (baby.ts `carriedShare`, 1 for one): heavier is slower, and the fluid damps it
+  const c = clamp(Number.isFinite(carried) ? carried : 1, 0.5, 2);
+  const hz = ((2.0 + 0.4 * s) * (0.75 + 0.5 * f) * (1 - 0.06 * bw)) / Math.sqrt(c);
+  const damping = 0.5 + 0.06 * s + 0.25 * (f - 0.5) + 0.25 * Math.max(0, c - 1);
   const gain = 0.55 * Math.min(1, s) * (1 - 0.4 * clamp(s - 1, 0, 1)) * (1.3 - 0.6 * f) * bounceShare(bounce);
   return { hz, damping, maxM: 0.02, gain };
 }

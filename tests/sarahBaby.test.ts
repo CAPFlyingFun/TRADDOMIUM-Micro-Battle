@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { AUTO_DEPTH_MOST, babiesInHer, babyBody, babySolid, balanceDeg, BALANCE_MOST_DEG, FIT_TOLERANCE, PACK_SOFT, SHRINK_MOST, solidDeep, type BabyPlace, multipleShare, placeBabies, sacAround, babyPast, bellyPush, growSac, placeBaby, pushAt, pushZone, babyLine, babyPlace, babySize, curlFrame, FETAL_CHART, fitInSac, MODEL_CROWN_RUMP, sacRadius, SAC_FILL, weekForBump, wombAt, wombFromSkin, wombRadius, WOMB_BACK_Z, WOMB_FLOOR_Y, WOMB_TISSUE_M } from '../src/sarahlab/baby';
+import { carriedShare, floatDrift, floatTune, fluidMl, FLUID, AUTO_DEPTH_MOST, babiesInHer, babyBody, babySolid, balanceDeg, BALANCE_MOST_DEG, FIT_TOLERANCE, PACK_SOFT, SHRINK_MOST, solidDeep, type BabyPlace, multipleShare, placeBabies, sacAround, babyPast, bellyPush, growSac, placeBaby, pushAt, pushZone, babyLine, babyPlace, babySize, curlFrame, FETAL_CHART, fitInSac, MODEL_CROWN_RUMP, sacRadius, SAC_FILL, weekForBump, wombAt, wombFromSkin, wombRadius, WOMB_BACK_Z, WOMB_FLOOR_Y, WOMB_TISSUE_M } from '../src/sarahlab/baby';
 
 describe('her baby: the chart', () => {
   it('runs weeks 12 to 41 in order, every weight inside its 10th to 90th', () => {
@@ -253,3 +253,41 @@ describe('her babies: twins and triplets, and how they lie', () => {
     }
   });
 });
+
+describe('her babies: in their fluid', () => {
+  it('a baby travels only within the room it has, never more than the most', () => {
+    expect(floatTune(0).maxM).toBe(0);
+    expect(floatTune(0.004).maxM).toBeCloseTo(0.004 * FLUID.roomShare, 12);
+    expect(floatTune(1).maxM).toBe(FLUID.mostM);
+    // BABY FLOAT: 0 holds it still, 200 twice as much -- still never past its room
+    expect(floatTune(0.004, 0).maxM).toBe(0); expect(floatTune(0.004, 0).gain).toBe(0);
+    expect(floatTune(1, 200).gain).toBeCloseTo(2 * floatTune(1).gain, 12); expect(floatTune(0.004, 200).maxM).toBeLessThan(0.004);
+    const m0 = new THREE.Vector3(), a0 = new THREE.Vector3();
+    expect(Math.abs(floatDrift(4.2, 0, 0.01, m0, a0, 0))).toBe(0); expect(m0.length()).toBe(0);
+    // and settles without swinging: the fluid damps it
+    expect(floatTune(1).damping).toBeGreaterThan(0.8);
+  });
+
+  it('drifts slowly and a little, each its own way, not at all with no room', () => {
+    const m = new THREE.Vector3(), a = new THREE.Vector3();
+    expect(Math.abs(floatDrift(3.3, 0, 0, m, a))).toBe(0); expect(m.length()).toBe(0);
+    let most = 0, mostTurn = 0;
+    for (let t = 0; t < 30; t += 0.05) { mostTurn = Math.max(mostTurn, Math.abs(floatDrift(t, 1, 0.01, m, a))); most = Math.max(most, m.length()); expect(a.length()).toBeCloseTo(1, 6); }
+    expect(most).toBeLessThanOrEqual(FLUID.driftM * Math.sqrt(1 + 0.36 + 1) + 1e-9); expect(mostTurn).toBeLessThanOrEqual(FLUID.driftRad + 1e-9);
+    expect(most).toBeGreaterThan(0.3 * FLUID.driftM);
+    // smooth: a frame apart it hardly moves
+    const p0 = new THREE.Vector3(); floatDrift(10, 0, 0.01, p0, a); floatDrift(10 + 1 / 60, 0, 0.01, m, a);
+    expect(m.distanceTo(p0)).toBeLessThan(0.0001);
+    // two babies are not in step
+    const q = new THREE.Vector3(); floatDrift(10, 1, 0.01, q, a); expect(q.distanceTo(p0)).toBeGreaterThan(1e-5);
+  });
+
+  it('her fluid peaks about week 34; twins and triplets are more to carry, one is as approved', () => {
+    expect(fluidMl(34)).toBeGreaterThan(fluidMl(28)); expect(fluidMl(34)).toBeGreaterThan(fluidMl(40));
+    for (const b of [50, 100, 150, 200]) {
+      expect(carriedShare(b, 0, 1)).toBe(1);
+      expect(carriedShare(b, 0, 2)).toBeGreaterThan(1); expect(carriedShare(b, 0, 3)).toBeGreaterThan(carriedShare(b, 0, 2) - 0.05);
+    }
+  });
+});
+
