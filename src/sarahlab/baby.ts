@@ -1361,3 +1361,224 @@ export function liningPast(w: WombShape, p: THREE.Vector3, pad: number): number 
   if (r < 1e-9) return -Infinity;
   return r + pad - sacRadius(w, dx / r, dy / r, dz / r) * SAC_FILL;
 }
+
+// ------------------------------------------------------------------------------------- the cord and the placenta
+
+/**
+ * THE CORD AND THE PLACENTA (Joshua, 2026-10-30: "more than one baby, the cord(s), positions, and kicks"; "I would then
+ * actually do the cord and birth before the clothing"). Each baby has its own placenta, a thick disc on her womb's lining
+ * where it has room (high on the wall, never low: a low one is a complication, not the commonest), and its own cord from
+ * the placenta's middle to its navel: soft, longer than the way between, so it loops; floating in the fluid; kept inside
+ * her womb and out of every baby (its own navel excepted where it leaves it), and carried by the babies as they move.
+ */
+/** The cord's length by week (cm): about 30 at 20 weeks, 55 to 60 at term. BIOLOGICAL SHAPE. */
+export const CORD_CM: readonly (readonly [number, number])[] = [[12, 8], [16, 16], [20, 32], [28, 45], [34, 52], [40, 56], [42, 58]];
+export const cordLength = (week: number): number => lerpTable(CORD_CM, week, 1) / 100;
+/** The cord's radius by week (rest metres): about 1.5 cm across at term. BIOLOGICAL SHAPE. */
+export const cordRadius = (week: number): number => 0.0075 * Math.min(1, Math.max(0.3, (week - 8) / 30));
+/** The placenta by week: [week, radius, thickness] (rest metres): about 22 cm across and 2.5 thick at term. BIOLOGICAL SHAPE. */
+export const PLACENTA: readonly (readonly [number, number, number])[] = [[12, 0.035, 0.008], [20, 0.07, 0.015], [28, 0.09, 0.02], [40, 0.11, 0.025], [42, 0.112, 0.026]];
+export const placentaSize = (week: number): { radius: number; thick: number } => ({ radius: lerpTable(PLACENTA, week, 1), thick: lerpTable(PLACENTA, week, 2) });
+
+/** The ways from her womb's middle a placenta is tried (unit, rest frame): high on the wall all round, and the top. */
+export const PLACENTA_SPOTS: readonly THREE.Vector3[] = Object.freeze((() => {
+  const out: THREE.Vector3[] = [new THREE.Vector3(0, 1, 0)];
+  for (const y of [0.3, 0.6, 0.85]) for (let a = 0; a < 8; a++) { const ph = (a / 8) * 2 * Math.PI + Math.PI, s = Math.sqrt(1 - y * y); out.push(new THREE.Vector3(s * Math.sin(ph), y, s * Math.cos(ph))); }
+  return out;
+})());
+
+export interface PlacentaSpot { readonly at: THREE.Vector3; readonly normal: THREE.Vector3; readonly radius: number; readonly thick: number }
+/**
+ * Where each baby's placenta sits (rest metres): of `PLACENTA_SPOTS`, the one where the babies leave the lining most room
+ * (within its disc), nearest the baby it feeds, not on another's; on the lining, its thickness into the womb as far as the
+ * room allows. `navels`: each baby's navel. The disc's `normal` faces into her womb.
+ */
+export function placentaSpots(points: ArrayLike<number>, fits: readonly BabyPlace[], womb: WombShape, week: number, navels: readonly THREE.Vector3[]): PlacentaSpot[] {
+  // (twins' and triplets' each a little smaller: they share her womb)
+  const one = placentaSize(week), k0 = Math.sqrt(multipleShare(week, fits.length)), size = { radius: one.radius * k0, thick: one.thick }, q = new THREE.Vector3(), placed: THREE.Vector3[] = [];
+  // the babies' points as placed, once
+  const all: THREE.Vector3[] = [];
+  for (const f of fits) for (let i = 0; i < points.length / 3; i += 2) all.push(q.set(points[i * 3], points[i * 3 + 1], points[i * 3 + 2]).multiplyScalar(f.scale).applyQuaternion(f.quaternion).add(f.position).sub(womb.centre).clone());
+  const roomAt = (d: THREE.Vector3): number => {
+    let room = Infinity;
+    const R = sacRadius(womb, d.x, d.y, d.z) * SAC_FILL, cone = Math.cos(Math.min(0.6, size.radius / Math.max(0.05, R)));
+    for (const p of all) { const r = p.length(); if (r < 1e-9 || p.dot(d) / r < cone) continue; room = Math.min(room, sacRadius(womb, p.x / r, p.y / r, p.z / r) * SAC_FILL - r); }
+    return room;
+  };
+  const rooms = PLACENTA_SPOTS.map(roomAt);
+  return fits.map((_, b) => {
+    let best = 0, bestScore = -Infinity;
+    PLACENTA_SPOTS.forEach((d, k) => {
+      const R = sacRadius(womb, d.x, d.y, d.z) * SAC_FILL, at = womb.centre.clone().addScaledVector(d, R);
+      // not where another's is
+      if (placed.some((p) => p.distanceTo(at) < 1.6 * size.radius)) return;
+      // (and rather on her back wall than her front, as about half are -- and out of the way of seeing her babies)
+      const score = Math.min(rooms[k], size.thick * 2) - 0.25 * (navels[b] ? at.distanceTo(navels[b]) : 0) - 0.03 * d.z;
+      if (score > bestScore) { bestScore = score; best = k; }
+    });
+    const d = PLACENTA_SPOTS[best], R = sacRadius(womb, d.x, d.y, d.z) * SAC_FILL, at = womb.centre.clone().addScaledVector(d, R);
+    placed.push(at);
+    return { at, normal: d.clone().negate(), radius: size.radius, thick: Math.max(0.004, Math.min(size.thick, Number.isFinite(rooms[best]) ? Math.max(0.004, rooms[best]) : size.thick)) };
+  });
+}
+
+/** A baby's body in its fluid for the cord: its solid, where it is and how it is turned (the holder's frame), its curl's middle. */
+export interface CordBody { readonly solid: BabySolid; readonly position: THREE.Vector3; readonly quaternion: THREE.Quaternion; readonly scale: number; readonly curlCentre: THREE.Vector3 }
+
+/** The cord's own pull and its fluid (GAME TUNING): how fast its swing dies (per second kept), and its weight in the fluid (m/s²). */
+export const CORD_FLUID = Object.freeze({ keep: 0.08, sink: 0.6, passes: 10, nodes: 28 });
+
+/**
+ * A CORD: a chain of points (rest metres) from its placenta to its baby's navel, as long as the week says, stepped like a
+ * rope in fluid (each point carrying on as it was going, slowed by the fluid; each link kept its length; its two ends
+ * held; kept inside the womb and out of the babies). `points` is its shape, three a point.
+ */
+export class Cord {
+  readonly points: Float32Array;
+  private readonly was: Float32Array;
+  length: number; radius: number;
+  constructor(length: number, radius: number, readonly n = CORD_FLUID.nodes) {
+    this.points = new Float32Array(n * 3); this.was = new Float32Array(n * 3); this.length = length; this.radius = radius;
+  }
+  /** Laid afresh from `a` to `b`: an arc bowed toward `toward`, as long as the cord (so it starts with no pull). */
+  lay(a: THREE.Vector3, b: THREE.Vector3, toward: THREE.Vector3): void {
+    const n = this.n, mid = a.clone().add(b).multiplyScalar(0.5), bow = toward.clone().sub(mid);
+    if (bow.lengthSq() < 1e-8) bow.set(0, 0, 1);
+    bow.normalize();
+    const curve = (h: number, t: number, out: THREE.Vector3) => { const c = mid.clone().addScaledVector(bow, h); return out.copy(a).multiplyScalar((1 - t) * (1 - t)).addScaledVector(c, 2 * t * (1 - t)).addScaledVector(b, t * t); };
+    const arc = (h: number) => { let s = 0; const p = new THREE.Vector3(), q = a.clone(); for (let k = 1; k <= 32; k++) { curve(h, k / 32, p); s += p.distanceTo(q); q.copy(p); } return s; };
+    let lo = 0, hi = this.length;
+    for (let k = 0; k < 30; k++) { const m = (lo + hi) / 2; if (arc(m) < this.length) lo = m; else hi = m; }
+    const p = new THREE.Vector3();
+    for (let i = 0; i < n; i++) { curve(lo, i / (n - 1), p); this.points.set([p.x, p.y, p.z], i * 3); }
+    this.was.set(this.points);
+  }
+  /** One step: `a` (its placenta) and `b` (the navel) held; inside `womb` (its middle moved by `offset`), out of `bodies` (the last, `own`, not near its navel). */
+  step(dt: number, a: THREE.Vector3, b: THREE.Vector3, womb: WombShape, offset: THREE.Vector3, bodies: readonly CordBody[], own = -1): void {
+    const n = this.n, P = this.points, W = this.was, h = Math.min(0.05, Math.max(0, dt)), keep = Math.pow(CORD_FLUID.keep, h), seg = this.length / (n - 1);
+    for (let i = 1; i < n - 1; i++) for (let c = 0; c < 3; c++) {
+      const o = i * 3 + c, v = (P[o] - W[o]) * keep; W[o] = P[o]; P[o] += v - (c === 1 ? CORD_FLUID.sink * h * h : 0);
+    }
+    const p = new THREE.Vector3(), q = new THREE.Vector3(), local = new THREE.Vector3(), inv = bodies.map((bd) => bd.quaternion.clone().invert());
+    const centre = womb.centre.clone().add(offset);
+    for (let pass = 0; pass < CORD_FLUID.passes; pass++) {
+      P.set([a.x, a.y, a.z], 0); P.set([b.x, b.y, b.z], (n - 1) * 3);
+      // each link its length
+      for (let i = 0; i < n - 1; i++) {
+        p.fromArray(P, i * 3); q.fromArray(P, (i + 1) * 3);
+        const d = q.clone().sub(p), L = d.length();
+        if (L < 1e-9) continue;
+        const fix = d.multiplyScalar((L - seg) / L / 2), wa = i === 0 ? 0 : 1, wb = i + 1 === n - 1 ? 0 : 1, sum = wa + wb || 1;
+        p.addScaledVector(fix, (2 * wa) / sum); q.addScaledVector(fix, (-2 * wb) / sum);
+        p.toArray(P, i * 3); q.toArray(P, (i + 1) * 3);
+      }
+      for (let i = 1; i < n - 1; i++) {
+        p.fromArray(P, i * 3);
+        // inside her womb
+        const d = p.clone().sub(centre), r = d.length();
+        if (r > 1e-9) { const lim = sacRadius(womb, d.x / r, d.y / r, d.z / r) * SAC_FILL - this.radius; if (r > lim) p.copy(centre).addScaledVector(d, lim / r); }
+        // out of every baby: along the way its body thins (its depth's slope), by how deep, plus its own thickness
+        bodies.forEach((bd, k) => {
+          if (k === own && i > n - 4) return;
+          local.copy(p).sub(bd.position).applyQuaternion(inv[k]).divideScalar(bd.scale).sub(bd.curlCentre);
+          const deep = solidDeep(bd.solid, local.x, local.y, local.z) * bd.scale + this.radius;
+          if (solidDeep(bd.solid, local.x, local.y, local.z) <= 0 && deep <= this.radius) return;
+          const e = bd.solid.cube, g = new THREE.Vector3(
+            solidDeep(bd.solid, local.x + e, local.y, local.z) - solidDeep(bd.solid, local.x - e, local.y, local.z),
+            solidDeep(bd.solid, local.x, local.y + e, local.z) - solidDeep(bd.solid, local.x, local.y - e, local.z),
+            solidDeep(bd.solid, local.x, local.y, local.z + e) - solidDeep(bd.solid, local.x, local.y, local.z - e));
+          if (g.lengthSq() < 1e-12) g.copy(local).normalize().negate();
+          g.negate().normalize().applyQuaternion(bd.quaternion);
+          p.addScaledVector(g, Math.min(deep, 0.02));
+        });
+        p.toArray(P, i * 3);
+      }
+    }
+  }
+}
+
+/**
+ * The cord drawn: a tube round its points (the geometry made by `cordTube`, laid again each frame), its three vessels
+ * winding round it as a real cord's do -- two arteries and a vein, a turn every few centimetres.
+ */
+export const CORD_RINGS = 64, CORD_SIDES = 10;
+export function cordTube(): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry(), verts = (CORD_RINGS + 1) * CORD_SIDES;
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts * 3), 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(verts * 3), 3));
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(verts * 3), 3));
+  const index: number[] = [];
+  for (let r = 0; r < CORD_RINGS; r++) for (let s = 0; s < CORD_SIDES; s++) {
+    const a = r * CORD_SIDES + s, b = r * CORD_SIDES + ((s + 1) % CORD_SIDES), c = a + CORD_SIDES, d = b + CORD_SIDES;
+    index.push(a, c, b, b, c, d);
+  }
+  g.setIndex(index);
+  return g;
+}
+export function layCordTube(g: THREE.BufferGeometry, points: ArrayLike<number>, radius: number): void {
+  const n = Math.floor(points.length / 3);
+  if (n < 2) return;
+  const pts: THREE.Vector3[] = [];
+  for (let i = 0; i < n; i++) pts.push(new THREE.Vector3(points[i * 3], points[i * 3 + 1], points[i * 3 + 2]));
+  const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+  const P = g.getAttribute('position') as THREE.BufferAttribute, N = g.getAttribute('normal') as THREE.BufferAttribute, C = g.getAttribute('color') as THREE.BufferAttribute;
+  const at = new THREE.Vector3(), tan = new THREE.Vector3(), nrm = new THREE.Vector3(), bin = new THREE.Vector3(), o = new THREE.Vector3();
+  nrm.set(0, 1, 0);
+  const len = curve.getLength();
+  for (let r = 0; r <= CORD_RINGS; r++) {
+    const t = r / CORD_RINGS;
+    curve.getPointAt(t, at); curve.getTangentAt(t, tan).normalize();
+    // carried along without twisting (each ring's frame from the one before)
+    nrm.addScaledVector(tan, -nrm.dot(tan));
+    if (nrm.lengthSq() < 1e-8) nrm.set(tan.y, -tan.x, 0);
+    nrm.normalize(); bin.crossVectors(tan, nrm);
+    const turn = (t * len) / 0.035 * 2 * Math.PI;
+    for (let s = 0; s < CORD_SIDES; s++) {
+      const ang = (s / CORD_SIDES) * 2 * Math.PI, k = r * CORD_SIDES + s;
+      o.copy(nrm).multiplyScalar(Math.cos(ang)).addScaledVector(bin, Math.sin(ang));
+      P.setXYZ(k, at.x + o.x * radius, at.y + o.y * radius, at.z + o.z * radius); N.setXYZ(k, o.x, o.y, o.z);
+      // the vessels: a vein (blue) and two arteries (red) winding round the pale jelly
+      const v = (ang - turn) / (2 * Math.PI), f = (x: number) => Math.max(0, Math.cos(2 * Math.PI * (v - x)) - 0.55) / 0.45;
+      const vein = f(0), art = Math.max(f(1 / 3), f(2 / 3));
+      C.setXYZ(k, 0.86 - 0.35 * vein - 0.1 * art, 0.86 - 0.3 * vein - 0.45 * art, 0.9 - 0.05 * vein - 0.45 * art);
+    }
+  }
+  P.needsUpdate = true; N.needsUpdate = true; C.needsUpdate = true;
+  g.computeBoundingSphere();
+}
+
+/** The placenta drawn: a lens laid on her womb's lining round its spot, following the lining's curve, thickest at its middle. */
+export const PLACENTA_RINGS = 10, PLACENTA_SIDES = 28;
+export function placentaGeometry(): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry(), per = 1 + PLACENTA_RINGS * PLACENTA_SIDES;
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(per * 2 * 3), 3));
+  const index: number[] = [], ring = (r: number, s: number) => 1 + (r - 1) * PLACENTA_SIDES + (s % PLACENTA_SIDES);
+  for (const [face, flip] of [[0, false], [per, true]] as const) {
+    for (let s = 0; s < PLACENTA_SIDES; s++) { const a = face, b = face + ring(1, s), c = face + ring(1, s + 1); index.push(...(flip ? [a, c, b] : [a, b, c])); }
+    for (let r = 1; r < PLACENTA_RINGS; r++) for (let s = 0; s < PLACENTA_SIDES; s++) {
+      const a = face + ring(r, s), b = face + ring(r, s + 1), c = face + ring(r + 1, s), d = face + ring(r + 1, s + 1);
+      index.push(...(flip ? [a, b, c, b, d, c] : [a, c, b, b, c, d]));
+    }
+  }
+  g.setIndex(index);
+  return g;
+}
+export function layPlacenta(g: THREE.BufferGeometry, spot: PlacentaSpot, womb: WombShape): void {
+  const P = g.getAttribute('position') as THREE.BufferAttribute, per = 1 + PLACENTA_RINGS * PLACENTA_SIDES;
+  const out = spot.normal.clone().negate(), side = new THREE.Vector3(0, 1, 0).cross(out);
+  if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
+  side.normalize();
+  const up = new THREE.Vector3().crossVectors(out, side), d = new THREE.Vector3();
+  const R0 = sacRadius(womb, out.x, out.y, out.z), half = spot.radius / Math.max(0.05, R0);
+  const lay = (k: number, ang: number, rho: number) => {
+    // the way to it from her womb's middle: tipped from the spot's by its share of the disc's angle
+    const a = rho * half;
+    d.copy(out).multiplyScalar(Math.cos(a)).addScaledVector(side, Math.sin(a) * Math.cos(ang)).addScaledVector(up, Math.sin(a) * Math.sin(ang)).normalize();
+    const lining = sacRadius(womb, d.x, d.y, d.z) + 0.5 * WOMB_WALL_M, thick = spot.thick * Math.sqrt(Math.max(0, 1 - rho * rho));
+    P.setXYZ(k, womb.centre.x + d.x * lining, womb.centre.y + d.y * lining, womb.centre.z + d.z * lining);
+    P.setXYZ(k + per, womb.centre.x + d.x * (lining - thick), womb.centre.y + d.y * (lining - thick), womb.centre.z + d.z * (lining - thick));
+  };
+  lay(0, 0, 0);
+  for (let r = 1; r <= PLACENTA_RINGS; r++) for (let s = 0; s < PLACENTA_SIDES; s++) lay(1 + (r - 1) * PLACENTA_SIDES + s, (s / PLACENTA_SIDES) * 2 * Math.PI, r / PLACENTA_RINGS);
+  P.needsUpdate = true; g.computeVertexNormals(); g.computeBoundingSphere();
+}

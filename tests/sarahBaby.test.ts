@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { kickOnSkin, KICK_FELT_M, KICK_MOST_M, kicksShare, liningPast, moveEnvelope, moveLength, MOVES, MOVE_SOONEST_S, nextMove, turnToward, carriedShare, floatDrift, floatTune, fluidMl, FLUID, AUTO_DEPTH_MOST, babiesInHer, babyBody, babySolid, balanceDeg, BALANCE_MOST_DEG, FIT_TOLERANCE, PACK_SOFT, SHRINK_MOST, solidDeep, type BabyPlace, multipleShare, placeBabies, sacAround, babyPast, bellyPush, growSac, placeBaby, pushAt, pushZone, babyLine, babyPlace, babySize, curlFrame, FETAL_CHART, fitInSac, MODEL_CROWN_RUMP, sacRadius, SAC_FILL, weekForBump, wombAt, wombFromSkin, wombRadius, WOMB_BACK_Z, WOMB_FLOOR_Y, WOMB_TISSUE_M } from '../src/sarahlab/baby';
+import { Cord, cordLength, cordRadius, placentaSpots, placentaSize, kickOnSkin, KICK_FELT_M, KICK_MOST_M, kicksShare, liningPast, moveEnvelope, moveLength, MOVES, MOVE_SOONEST_S, nextMove, turnToward, carriedShare, floatDrift, floatTune, fluidMl, FLUID, AUTO_DEPTH_MOST, babiesInHer, babyBody, babySolid, balanceDeg, BALANCE_MOST_DEG, FIT_TOLERANCE, PACK_SOFT, SHRINK_MOST, solidDeep, type BabyPlace, multipleShare, placeBabies, sacAround, babyPast, bellyPush, growSac, placeBaby, pushAt, pushZone, babyLine, babyPlace, babySize, curlFrame, FETAL_CHART, fitInSac, MODEL_CROWN_RUMP, sacRadius, SAC_FILL, weekForBump, wombAt, wombFromSkin, wombRadius, WOMB_BACK_Z, WOMB_FLOOR_Y, WOMB_TISSUE_M } from '../src/sarahlab/baby';
 
 describe('her baby: the chart', () => {
   it('runs weeks 12 to 41 in order, every weight inside its 10th to 90th', () => {
@@ -335,6 +335,39 @@ describe('her babies: kicks and moves', () => {
     // behind her womb there is no belly to show it
     const back = w.centre.clone().add(new THREE.Vector3(0, 0, -(sacRadius(w, 0, 0, -1) + 0.05)));
     expect(kickOnSkin(w, back, 0, at, out)).toBe(0);
+  });
+});
+
+describe('her babies: the cord and the placenta', () => {
+  const skin: number[] = [];
+  for (let y = 0.80; y <= 1.23; y += 0.008) for (let x = -0.22; x <= 0.22; x += 0.008) { const u = (y - 1.02) / 0.2, v = x / 0.2, k = 1 - u * u - v * v; skin.push(x, y, 0.05 + (k > 0 ? 0.3 * Math.sqrt(k) : 0)); }
+  const womb = wombFromSkin(skin, 40);
+
+  it('grows with the weeks: a cord of 55 cm or so at term, 1.5 across; a placenta about 22 cm across', () => {
+    expect(cordLength(20)).toBeCloseTo(0.32, 6); expect(cordLength(40)).toBeGreaterThan(0.5); expect(cordLength(40)).toBeLessThan(0.6);
+    expect(cordRadius(40) * 2).toBeCloseTo(0.015, 6); expect(cordRadius(14)).toBeLessThan(cordRadius(30));
+    expect(placentaSize(40).radius * 2).toBeCloseTo(0.22, 6); expect(placentaSize(20).thick).toBeLessThan(placentaSize(40).thick);
+  });
+
+  it('keeps its length, its ends where they are held, and itself inside her womb', () => {
+    const a = womb.centre.clone().add(new THREE.Vector3(0, 0.1, -0.05)), b = womb.centre.clone().add(new THREE.Vector3(0.02, -0.08, 0.06));
+    const cord = new Cord(0.5, 0.007);
+    cord.lay(a, b, womb.centre);
+    for (let k = 0; k < 240; k++) cord.step(1 / 60, a, b, womb, new THREE.Vector3(), []);
+    const P = cord.points, n = P.length / 3, p = new THREE.Vector3(), q = new THREE.Vector3();
+    let len = 0; for (let i = 0; i < n - 1; i++) len += p.fromArray(P, i * 3).distanceTo(q.fromArray(P, (i + 1) * 3));
+    expect(len).toBeGreaterThan(0.5 * 0.95); expect(len).toBeLessThan(0.5 * 1.05);
+    expect(p.fromArray(P, 0).distanceTo(a)).toBeLessThan(1e-6); expect(p.fromArray(P, (n - 1) * 3).distanceTo(b)).toBeLessThan(1e-6);
+    for (let i = 0; i < n; i++) { p.fromArray(P, i * 3).sub(womb.centre); const r = p.length(); expect(r).toBeLessThanOrEqual(sacRadius(womb, p.x / r, p.y / r, p.z / r) * SAC_FILL + 1e-4); }
+  });
+
+  it('a placenta for each baby: high on her lining, never low, never on another', () => {
+    const pts = (() => { const o: number[] = []; for (let i = 0; i < 300; i++) { const t = i * 2.39996, z = ((i + 0.5) / 300) * 2 - 1, r = Math.sqrt(1 - z * z); o.push(0.25 * r * Math.cos(t), 0.55 * z, 0.3 * r * Math.sin(t)); } return o; })();
+    const place = (y: number): BabyPlace => ({ position: womb.centre.clone().add(new THREE.Vector3(0, y, 0)), quaternion: new THREE.Quaternion(), scale: 0.1 });
+    const spots = placentaSpots(pts, [place(-0.05), place(0.05)], womb, 36, [womb.centre.clone(), womb.centre.clone()]);
+    expect(spots).toHaveLength(2);
+    for (const sp of spots) { expect(sp.at.y - womb.centre.y).toBeGreaterThan(0); expect(sp.normal.length()).toBeCloseTo(1, 6); expect(sp.at.clone().sub(womb.centre).dot(sp.normal)).toBeLessThan(0); }
+    expect(spots[0].at.distanceTo(spots[1].at)).toBeGreaterThan(spots[0].radius);
   });
 });
 
