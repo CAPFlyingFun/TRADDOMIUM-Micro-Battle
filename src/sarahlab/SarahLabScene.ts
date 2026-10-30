@@ -84,6 +84,7 @@ import { BIRTH_POSES, poseBirth } from '../actor/humanBirth';
 import { AUTO_LIES, BABIES_NAME, BABY_MODEL, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { setPush, jiggleOf as jiggleOfMesh } from './softBody';
+import { createVulvaPatch, type VulvaPatch } from './vulvaMesh';
 import { attachJiggle, bellyTune, breastTune, createJiggleUniforms, feltAcceleration, restingMass, stepMass, type Mass } from './softBody';
 import { applyMilk, applyWomb, applyZeroRefine, babyAnchors, babyWeightState, chestAnchors, chestFieldWeights, groinAnchors, groinFieldWeights, loadMilk, milkAnchors, milkBalanceState, milkFieldWeights, milkState, MILK_PATH, babyFieldWeights, loadWomb, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, WOMB_PATH, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
 import { NAVEL_MORPHS, type NavelPiece } from './navelPiece';
@@ -330,6 +331,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * belly's mass swinging them with her. Fetched the first time it is asked for.
    */
   let babyFrame: { bone: THREE.Bone; matrix: THREE.Matrix4; meshToRest: THREE.Matrix4 } | null = null;
+  /** her vulva, rebuilt finer from her own skin to be able to open (vulvaMesh.ts) */
+  let vulva: VulvaPatch | null = null;
   let babyFitAt = -Infinity, babyPushField: BellyPush | null = null, babyPushOff = false;
   /** BABIES and LIE: how many, and how each lies (AUTO is the commonest for so many; RANDOM is drawn again each time it is chosen) */
   let babyKeySeen = '', babyKeyAt = 0;
@@ -3231,6 +3234,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
               birthShadeU.centre.value.set(0, c.y, c.z); birthShadeU.rest.value.copy(babyFrame.meshToRest);
               for (const m of (Array.isArray(bm!.material) ? bm!.material : [bm!.material])) patchBirthShade(m, birthShadeU);
             }
+            // and the area rebuilt finer, from her own skin, to be able to open (vulvaMesh.ts)
+            vulva?.dispose();
+            try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
           }
         }
         if (babyShown) showBaby(true);
@@ -3248,6 +3254,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (sitMoving) { sitAmount = stepSit(sitAmount, pose === 'sit' ? 1 : 0, dt); if (sitAmount === (pose === 'sit' ? 1 : 0)) { sitMoving = false; applyLook(); } }
       else sitAmount = pose === 'sit' ? 1 : 0;
       if (rig) rig.apply(currentTurns());
+      vulva?.sync();
       garmentRoom?.applyPose();
       place();
       feelMotion(dt);
@@ -3387,6 +3394,62 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         },
         // a probe's comparison: her belly with the baby's push taken off, or back
         birthArea: (on: boolean) => { birthAreaShown = on; applyLook(); return true; },
+        // how much room her body leaves round the split: the opening's plane (tangent at the split's middle), and on a
+        // grid across it (mm, x her left, t toward her front) how far her body stands out of that plane (mm), the most
+        vulvaRoom: (step = 10, reach = 70) => {
+          if (!vulva) return null;
+          const b = bodyOf(); if (!b) return null;
+          model?.updateMatrixWorld(true);
+          const m = vulva.mesh, fl = vulva.bake.flat, v = new THREE.Vector3();
+          const avg = (keep: (i: number) => boolean) => { const a = new THREE.Vector3(); let q = 0; for (let i = 0; i < vulva!.bake.count; i++) if (keep(i)) { m.getVertexPosition(i, v); m.localToWorld(v); a.add(v); q++; } return a.divideScalar(Math.max(1, q)); };
+          const A = avg((i) => vulva!.bake.ring[i] === 0 && Math.abs(fl[i * 2 + 1]) < 0.004);
+          const along = avg((i) => vulva!.bake.ring[i] === 0 && fl[i * 2 + 1] > 0.02).sub(avg((i) => vulva!.bake.ring[i] === 0 && fl[i * 2 + 1] < -0.02)).normalize();
+          const across = avg((i) => Math.abs(fl[i * 2 + 1]) < 0.008 && fl[i * 2] > 0.01).sub(avg((i) => Math.abs(fl[i * 2 + 1]) < 0.008 && fl[i * 2] < -0.01));
+          across.addScaledVector(along, -across.dot(along)).normalize();
+          const n = along.clone().cross(across).normalize();
+          const sk = findSkinnedMesh(model!); if (sk && measure) { const bones = sk.skeleton.bones, j = measure.joints, h = bones[j.hipL].getWorldPosition(new THREE.Vector3()).add(bones[j.hipR].getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5); if (n.dot(A.clone().sub(h)) < 0) n.negate(); }
+          // the gap between her left and right (her body outside the rebuilt area) at each height out of the plane, at a few places along the split
+          const cut = new Uint8Array(b.mesh.geometry.getAttribute('position').count), kept = new Uint8Array(cut.length);
+          for (const i of vulva.bake.keep) kept[i] = 1;
+          for (let k = 0; k < vulva.bake.src.length; k++) cut[vulva.bake.src[k]] = 1;
+          const pts: number[] = [];
+          for (let i = 0; i < cut.length; i++) {
+            if (cut[i] && !kept[i]) continue;
+            b.mesh.getVertexPosition(i, v); b.mesh.localToWorld(v); v.sub(A).divideScalar(M / 1000);
+            pts.push(v.dot(across), v.dot(along), v.dot(n));
+          }
+          const gaps: string[] = ['  h \\ t |' + [-40, -20, 0, 20, 40].map((t) => String(t).padStart(12)).join('')];
+          for (let h0 = 0; h0 <= 80; h0 += 10) {
+            let line = String(h0).padStart(8) + ' |';
+            for (const t0 of [-40, -20, 0, 20, 40]) {
+              let left = Infinity, right = -Infinity;
+              for (let q = 0; q < pts.length; q += 3) { const x = pts[q], t = pts[q + 1], h = pts[q + 2]; if (Math.abs(t - t0) > 4 || Math.abs(h - h0) > 5) continue; if (x > 0) left = Math.min(left, x); else right = Math.max(right, x); }
+              line += (Number.isFinite(left) && Number.isFinite(right) ? `${Math.round(left - right)} (${Math.round(right)}..${Math.round(left)})` : 'open').padStart(12);
+            }
+            gaps.push(line);
+          }
+          const cells = Math.round(reach / step), N = 2 * cells + 1, high = Array.from({ length: N }, () => new Array<number>(N).fill(-Infinity));
+          const pos = b.mesh.geometry.getAttribute('position');
+          for (let i = 0; i < pos.count; i++) {
+            b.mesh.getVertexPosition(i, v); b.mesh.localToWorld(v); v.sub(A).divideScalar(M / 1000);
+            const x = v.dot(across), t = v.dot(along), h = v.dot(n);
+            if (h < -40 || h > 200) continue;
+            const ix = Math.round(x / step) + cells, it = Math.round(t / step) + cells;
+            if (ix < 0 || it < 0 || ix >= N || it >= N) continue;
+            high[it][ix] = Math.max(high[it][ix], h);
+          }
+          return { step, rows: high.map((r, k) => `${String((k - cells) * step).padStart(4)} | ` + r.map((h) => (h === -Infinity ? '   .' : String(Math.round(h)).padStart(4))).join('')).reverse(), cols: '  t  | ' + Array.from({ length: N }, (_, k) => String((k - cells) * step).padStart(4)).join(''), gaps };
+        },
+        vulva: (on: boolean, wire = false) => { if (!vulva) return null; vulva.show(on); vulva.wire(on && wire); const sk = model && findSkinnedMesh(model), m = vulva.mesh, c = new THREE.Vector3(), v = new THREE.Vector3(); let k = 0;
+          model?.updateMatrixWorld(true);
+          for (let i = 0; i < vulva.bake.count; i++) if (vulva.bake.ring[i] === 0) { m.getVertexPosition(i, v); m.localToWorld(v); c.add(v); k++; }
+          c.divideScalar(Math.max(1, k));
+          const avg = (keep: (i: number) => boolean) => { const a = new THREE.Vector3(); let q = 0; for (let i = 0; i < vulva!.bake.count; i++) if (keep(i)) { m.getVertexPosition(i, v); m.localToWorld(v); a.add(v); q++; } return a.divideScalar(Math.max(1, q)); };
+          const fl = vulva.bake.flat, along = avg((i) => vulva!.bake.ring[i] === 0 && fl[i * 2 + 1] > 0.03).sub(avg((i) => vulva!.bake.ring[i] === 0 && fl[i * 2 + 1] < -0.03)), across = avg((i) => Math.abs(fl[i * 2 + 1]) < 0.008 && fl[i * 2] > 0.01).sub(avg((i) => Math.abs(fl[i * 2 + 1]) < 0.008 && fl[i * 2] < -0.01));
+          const nrm = along.clone().cross(across).normalize();
+          let hip: number[] | null = null;
+          if (sk && measure) { const bones = sk.skeleton.bones, j = measure.joints, h = bones[j.hipL].getWorldPosition(new THREE.Vector3()).add(bones[j.hipR].getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5); hip = c.clone().sub(h).divideScalar(M).toArray().map((x) => +x.toFixed(4)); if (nrm.dot(c.clone().sub(h)) < 0) nrm.negate(); }
+          return { points: vulva.bake.count, triangles: vulva.bake.index.length / 3, outline: vulva.bake.outline, missed: vulva.bake.missed, splitFromHips: hip, splitWorld: c.clone().divideScalar(M).toArray().map((x) => +x.toFixed(4)), fields: (() => { const b = bodyOf(), sh = b ? shaped.find((x) => x.mesh === b.mesh) : undefined; return sh ? { cleft: sh.fields.fields.has(BIRTH_CLEFT_FIELD), lips: sh.fields.fields.has(BIRTH_LIPS_FIELD), applied: sh.fields.last.split('|').filter((x) => /birth/i.test(x)) } : null; })(), faceYaw: +Math.atan2(nrm.x, nrm.z).toFixed(3), facePitch: +Math.asin(Math.max(-1, Math.min(1, nrm.y))).toFixed(3) }; },
         // the view aimed at a point off the middle of her hips (metres, world: across, up, forward), from a yaw, pitch and distance (cm)
         aim: (yaw: number, pitch: number, distance: number, dx = 0, dy = 0, dz = 0) => {
           const sk = model && findSkinnedMesh(model);
