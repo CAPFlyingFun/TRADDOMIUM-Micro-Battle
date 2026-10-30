@@ -8,6 +8,7 @@
  * So nothing here is the game's Sarah: the lab loads `models/sarah-base.glb`,
  * which no other scene reads.
  */
+import { BIRTH_STYLES, type BirthStyle } from '../actor/humanBirth';
 import { BELLY_KNOTS, bellyKeyWeights, type BellyCurve } from './bellyInterpolation';
 import { BODY_CONTROLS, type BodyShape } from '../actor/bodyShape';
 import type { RandomSpec } from '../actor/bodyRandom';
@@ -90,7 +91,9 @@ export const sarahLabTool: DevTool = {
 /** The HUD root's `data-role`: what a probe waits for. */
 export const SARAH_LAB_HUD_ROLE = 'sarah-lab-hud';
 
-export type SarahLabPose = 'stand' | 'walk' | 'sit' | 'tpose';
+export type SarahLabPose = 'stand' | 'walk' | 'sit' | 'tpose' | BirthStyle;
+/** Her birth positions (actor/humanBirth.ts): her legs open, her lower clothes off while she is in one. */
+export const isBirthPose = (p: SarahLabPose): p is BirthStyle => (BIRTH_STYLES as readonly string[]).includes(p);
 
 export const SARAH_LAB_ACTION = Object.freeze({
   back: 'sarahlab:back',
@@ -107,6 +110,10 @@ export const SARAH_LAB_ACTION = Object.freeze({
   walk: 'sarahlab:walk',
   sit: 'sarahlab:sit',
   tpose: 'sarahlab:tpose',
+  /** the birth positions (actor/humanBirth.ts) */
+  apart: 'sarahlab:apart',
+  squat: 'sarahlab:squat',
+  recline: 'sarahlab:recline',
   turn: 'sarahlab:turn',
   bounce: 'sarahlab:bounce',
   /** SEE BABY: her baby in her womb, her body seen through (baby.ts) */

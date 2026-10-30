@@ -46,6 +46,8 @@ import {
 } from './paintTemplates';
 
 export const FABRIC_PANEL_ROLE = 'sarahlab-fabric';
+/** The painted pieces that cover her crotch: off while she gives birth. */
+const LOWER_KINDS: readonly string[] = ['bottom', 'onePiece'];
 export type EditorSpace = 'design' | 'paint' | 'save';
 export type PaintView = 'layer' | 'all' | 'clear';
 export const FABRIC_ACTION = Object.freeze({
@@ -184,6 +186,8 @@ export interface FabricPanel {
   setActive(on: boolean): void;
   /** Every paint layer hidden (true) or as the editor shows them (false): her skin bare for the FACE section's brush; nothing is lost. */
   setBare(on: boolean): void;
+  /** Her painted bottoms and one-pieces hidden (true; her birth positions), every other layer as it was; nothing is lost. */
+  setLowerBare(on: boolean): void;
   /** The shared BREAST and NAVEL DETAIL as saved, and a way to set either (null: AUTO). */
   detail(): DetailOverride;
   /** How much of her shows through a modelled garment: the MANUAL values where set, else AUTO from its fabric. */
@@ -518,6 +522,8 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
   function layerShown(i: number): boolean {
     // her skin painted bare in FACE (CLOTHES · HIDDEN): no paint layer shows, and every one is kept
     if (bare) return false;
+    // giving birth: whatever is painted over her crotch is off (a bottom or a one-piece; legwear and tops stay)
+    if (lowerBare && templates[i] && LOWER_KINDS.includes(pieceKind(templates[i]!.id) ?? 'top')) return false;
     if (!editing()) return true;
     if (space === 'paint') return paintView === 'all' || (paintView === 'layer' && layer() === i);
     if (space === 'design' && isolated) return layer() === i;
@@ -532,6 +538,8 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
   let shownGarments: 'all' | 'none' | string = 'all';
   /** Every paint layer hidden for the room's FACE section (`setBare`). */
   let bare = false;
+  /** Her painted bottoms hidden for her birth positions (`setLowerBare`). */
+  let lowerBare = false;
   function updateView(): void {
     const next = editing() && space === 'paint' && target.kind === 'layer';
     if (next !== painting) { painting = next; if (!next) strokeEnd(); overlay(); }
@@ -1075,6 +1083,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     space: () => space,
     setActive(on) { if (on === active) return; active = on; updateView(); draw(); },
     setBare(on) { if (on === bare) return; bare = on; sync(); },
+    setLowerBare(on) { if (on === lowerBare) return; lowerBare = on; sync(); },
     detail: () => override,
     garmentDetail,
     setDetail: setDetailValue,

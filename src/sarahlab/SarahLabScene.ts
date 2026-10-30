@@ -79,6 +79,7 @@ import { applyShapeFields, baseShapeFields, liftShapeFields, type ShapeFields, t
 import { BUILD_PROFILES, buildAmounts, buildKey, heightLine, heldSegments, profileOf, withProfile, type BuildAmounts, type BuildSegment } from '../actor/bodyBuild';
 import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields, prepareBuildRig, standingLift, type BuildMeshFields, type BuildRig } from '../view/bodyBuild';
 import { dropIdleMorphs } from '../view/morphPrune';
+import { BIRTH_POSES, poseBirth } from '../actor/humanBirth';
 import { AUTO_LIES, BABIES_NAME, BABY_MODEL, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { setPush, jiggleOf as jiggleOfMesh } from './softBody';
@@ -91,7 +92,7 @@ import {
   SARAH_V2_HAIR_MODEL, BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, teeLengthParts, sleevesLine, necklineLine, neckShapeLine, CLOTH_NECKLINE_DEFAULT, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, CLOTH_TEE_LENGTH_DEFAULT, clothTuning, clothRestScale, type ClothTune,
   labTitle, CLOTH_SEATED_LINE, bellyMotionWeights, bellyWeights, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatFor, navelState, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, walkBounceAccel, walkSwayAccel,
   offeredOutfits, outfitThumbPath,
-  type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, SARAH_DEFAULT_OUTFIT, SIM_TEE_OUTFIT, RECOVERED_GARMENTS,
+  type Garment, type SarahLabPose, isBirthPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, SARAH_DEFAULT_OUTFIT, SIM_TEE_OUTFIT, RECOVERED_GARMENTS,
 } from './sarahLabTool';
 import { blendJointTurns, sitEase, stepSit } from './poseBlend';
 
@@ -290,6 +291,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let disposed = false;
 
   let pose: SarahLabPose = 'stand';
+  /** a birth position's own turns, and where she was set for it last (worked out again when it, her build or size changes) */
+  const birthOut: MutableJointTurn[] = [];
+  const LOWER_GARMENTS: readonly string[] = ['leggings', 'leggingsLow', 'bikini', 'swimsuit'];
+  let birthPlaced: { key: string; position: THREE.Vector3; quaternion: THREE.Quaternion } | null = null;
   /** 0 standing, 1 fully seated: how far the thighs have taken over the bump's tilt (`effectiveTiltDeg`). */
   let seated = 0;
   /** Breast dimensions moved together, as by an aspect-ratio lock: a flag only, never a value. */
@@ -977,6 +982,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     lit(buttons.walk, pose === 'walk');
     lit(buttons.sit, pose === 'sit');
     lit(buttons.tpose, pose === 'tpose');
+    for (const p of ['apart', 'squat', 'recline'] as const) lit(buttons[p], pose === p);
     lit(buttons.ranges, rangesShown);
     for (const [group] of RANDOM_GROUPS) lit(buttons[`groupLock-${group}`], randomRules.groups.includes(group));
     { const p = profileOf(body); for (const pr of BUILD_PROFILES) lit(buttons[`profile-${pr.id}`], p === pr.id); }
@@ -1163,6 +1169,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     layNavel(bump);
     // which garments are drawn: the outfit editor's choice, or none while her skin is painted bare (CLOTHES · HIDDEN)
     const view = skinBare ? 'none' : garmentView;
+    fabric?.setLowerBare(isBirthPose(pose));
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
       // the fitted light tee keeps its own navel's shape as fitted for her size: NAVEL DETAIL settles it in the shader
@@ -1177,6 +1184,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (([...GARMENTS, ...RECOVERED_SHIRTS] as readonly string[]).includes(name)) mesh.visible = shownNow(name);
       { const t = trimShown(name, wornGarments(outfit, garments)); if (t !== null) mesh.visible = t; }
       if (mesh.userData.replacedByRecovered) mesh.visible = false;
+      // in a birth position her bottoms are off (Joshua, 2026-10-30: "Hide automatically"): leggings, the bikini, a swimsuit
+      if (isBirthPose(pose) && (LOWER_GARMENTS.includes(name) || mesh.userData.recoveredLeggings)) mesh.visible = false;
       // the cloth experiment draws the light tee as cloth: the fitted one stands aside (and keeps its fabric on)
       if ((clothWorn() || garmentRoom) && name === 'shirtSpandexLite') mesh.visible = false;
       if (cloth && name === 'shirtSpandexLite') cloth.mesh.visible = clothOn && !clothSeated && shownNow('shirtSpandexLite') && view === 'all' && !garmentRoom;
@@ -1696,7 +1705,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     poses.className = 'slab-poses';
     poses.dataset.tab = 'pose';
     poses.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:6px';
-    for (const [p, label, action] of [['stand', 'STAND', SARAH_LAB_ACTION.stand], ['walk', 'WALK', SARAH_LAB_ACTION.walk], ['sit', 'SIT', SARAH_LAB_ACTION.sit], ['tpose', 'T-POSE', SARAH_LAB_ACTION.tpose]] as const) {
+    for (const [p, label, action] of [['stand', 'STAND', SARAH_LAB_ACTION.stand], ['walk', 'WALK', SARAH_LAB_ACTION.walk], ['sit', 'SIT', SARAH_LAB_ACTION.sit], ['tpose', 'T-POSE', SARAH_LAB_ACTION.tpose], ['apart', 'LEGS APART', SARAH_LAB_ACTION.apart], ['squat', 'SQUAT', SARAH_LAB_ACTION.squat], ['recline', 'RECLINE', SARAH_LAB_ACTION.recline]] as const) {
       buttons[p] = btn(label, action, () => {
         // STAND to SIT and back is a move over SIT_SECONDS, the cloth on her all the way; any other switch is at once
         sitMoving = (p === 'sit' || p === 'stand') && (pose === 'sit' || pose === 'stand' || sitMoving) && p !== pose;
@@ -2455,7 +2464,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function turnsFor(p: SarahLabPose = pose, out: MutableJointTurn[] = poseOut): readonly JointTurn[] {
     if (!rig || !measure) return [];
     let base: readonly JointTurn[];
-    if (p === 'sit') base = poseSeated(measure, rig.bind, { style: 'sit', seconds, posture: 'pregnant', bump: bump / 100, settled: settledSitFor(SARAH_LAB_MODELS[modelIndex].id) }, out);
+    if (isBirthPose(p)) {
+      // a birth position: her standing arms, her back and legs as the position has them (actor/humanBirth.ts)
+      const stood = poseHuman(measure, rig.bind, { stance: 'stand', phase: 0, seconds, lean: 0, carry: bump / 100 }, out);
+      const birth = poseBirth(measure, rig.bind, { style: p, seconds, bump: bump / 100 }, birthOut);
+      const mine = new Set(birth.map((t) => t.joint));
+      base = [...stood.filter((t) => !mine.has(t.joint)), ...birth];
+    } else if (p === 'sit') base = poseSeated(measure, rig.bind, { style: 'sit', seconds, posture: 'pregnant', bump: bump / 100, settled: settledSitFor(SARAH_LAB_MODELS[modelIndex].id) }, out);
     else {
       const stance = p === 'walk' ? 'walk' : 'stand';
       // the stride is in bind units, `bindScale` of them to the metre
@@ -2504,6 +2519,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function place(): void {
     if (!model || !rig || !measure) return;
     const skin = findSkinnedMesh(model);
+    if (isBirthPose(pose) && skin) { placeBirth(skin); return; }
+    model.quaternion.identity();
     if (sitAmount <= 0 || !skin) {
       model.position.set(0, standLift * M, 0);
       model.updateMatrixWorld(true);
@@ -2536,6 +2553,40 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // seated she used to be set with her hips 4 cm behind the room's middle: the view follows her back to frame her so
     orbit.target.z = ORBIT_START.target.z + (model.position.z + now.hips.z - (stand.hips.z + (-0.04 * M - stand.hips.z) * e));
   }
+
+  /**
+   * Her place in a birth position: her feet on the floor where she stood (LEGS APART, SQUAT), or leaned back about her
+   * hips onto what holds her up, her hips at `RECLINE_HIPS_M` (RECLINE). Worked out once a position, build and size.
+   */
+  function placeBirth(skin: THREE.SkinnedMesh): void {
+    if (!model || !rig || !measure || !isBirthPose(pose)) return;
+    const key = `${pose}|${bonesBuilt}|${bump.toFixed(1)}|${standLift.toFixed(4)}`;
+    if (birthPlaced?.key !== key) {
+      const bones = skin.skeleton.bones, j = measure.joints, v = () => new THREE.Vector3();
+      const read = () => {
+        model!.position.set(0, 0, 0); model!.quaternion.identity(); model!.updateMatrixWorld(true);
+        const al = bones[j.ankleL].getWorldPosition(v()), ar = bones[j.ankleR].getWorldPosition(v());
+        return { hips: bones[j.hipL].getWorldPosition(v()).add(bones[j.hipR].getWorldPosition(v())).multiplyScalar(0.5), feet: al.clone().add(ar).multiplyScalar(0.5), low: Math.min(al.y, ar.y) };
+      };
+      rig.apply(turnsFor('stand', standOut)); const stand = read();
+      rig.apply(turnsFor(pose, poseOut)); const now = read();
+      const lean = (BIRTH_POSES[pose].leanBack * Math.PI) / 180, q = new THREE.Quaternion();
+      const position = v();
+      if (lean > 0) {
+        // leaned back (her top toward -z) about her hips, the hips where she stood, at the support's height
+        q.setFromAxisAngle(v().set(1, 0, 0), -lean);
+        position.set(stand.hips.x, RECLINE_HIPS_M * M, stand.hips.z).sub(now.hips.clone().applyQuaternion(q));
+      } else position.set(stand.feet.x - now.feet.x, stand.low + standLift * M - now.low, stand.feet.z - now.feet.z);
+      birthPlaced = { key, position, quaternion: q };
+      rig.apply(currentTurns());
+    }
+    model.position.copy(birthPlaced.position); model.quaternion.copy(birthPlaced.quaternion);
+    model.updateMatrixWorld(true);
+    stool.visible = false;
+    orbit.target.z = ORBIT_START.target.z;
+  }
+  /** Leaned back in RECLINE, her hips are this high off the floor (metres): a bed's edge. GAME TUNING. */
+  const RECLINE_HIPS_M = 0.55;
 
   /** The masses at rest, and their anchors to be read afresh (a jump, a new body, a bake). */
   function settleMasses(): void {
