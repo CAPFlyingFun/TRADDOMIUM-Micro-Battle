@@ -18,7 +18,9 @@ import { birthAreaCentre, BIRTH_AREA } from './birthArea';
 export const BIRTH_WEIGHTS = Object.freeze({
   /** how much of each thigh's say over the masked skin goes to her pelvis in a birth position (Joshua's look at RECLINE,
    * 2026-10-30: all of it opened her vulva but stretched her inner thighs into sheets; half keeps both) */
-  share: 0.5,
+  share: 0,
+  /* (0 since RECLINE opened to 80 degrees out, 50 up, 2026-10-31: her own weights then leave her belly, mound and vulva
+   * smooth, and the mask only pinched her perineum; kept for a pose that needs it) */
   /** the thigh's cone, round the line from hip joint to knee: inside `inner` degrees all thigh, outside `outer` all torso */
   inner: 38, outer: 62,
   /** her middle (metres across, either side): within `middle` all torso, out to `middleFade` fading to the cone's say --
@@ -101,7 +103,7 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
       const cone = smooth(B.inner, B.outer, ang) * smooth(B.coneFar, B.coneNear, d.length()), middle = smooth(B.middleFade, B.middle, Math.abs(v.x)) * smooth(B.middleFar, B.middleNear, v.distanceTo(crotch)) * smooth(crotch.y + B.moundTo, crotch.y + B.moundFrom, v.y);
       const pubic = B.pubic * smooth(crotch.y + B.pubicFrom, crotch.y + B.pubicTo, v.y) * smooth(B.pubicWideFade, B.pubicWide, Math.abs(v.x)) * smooth(B.thighIn, B.thighOut, ang);
       // (stored against the share the scene hands over, so that all of it goes to her pelvis)
-      const m = Math.max(B.useCone ? cone : 0, middle, pubic / B.share);
+      const m = Math.max(B.useCone ? cone : 0, middle, B.share > 0 ? pubic / B.share : pubic);
       mask[i * 2 + s] = m;
       if (m > 0) any = true;
     }

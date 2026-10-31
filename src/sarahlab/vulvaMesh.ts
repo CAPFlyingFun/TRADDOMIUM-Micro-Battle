@@ -232,6 +232,28 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   const smooth = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
   const O = new THREE.Vector3(), tA = new THREE.Vector3(), nO = new THREE.Vector3(), vv = new THREE.Vector3();
   const rim = new Float32Array(M * 3);
+  // her body's weights (read again when they change) and the area's own, kept to come back to
+  let bodyI: Float32Array | null = null, bodyW: Float32Array | null = null, bodySkinVersion = -1;
+  const patchI = skI ? (skI.array as Uint16Array) : null, patchW = skW ? (skW.array as Float32Array) : null;
+  let ownPI = patchI ? Uint16Array.from(patchI) : null, ownPW = patchW ? Float32Array.from(patchW) : null;
+  const readBodySkin = () => {
+    if (!si || !sw) return;
+    if (bodyI && sw.version === bodySkinVersion) return;
+    bodySkinVersion = sw.version; bodyI = floatsOf(si); bodyW = floatsOf(sw);
+  };
+  const wAcc = new Map<number, number>();
+  /** the area's point p carried as her skin is at the place `at` (three of her vertices, three weights) */
+  const weightsAt = (p: number, at: Float64Array) => {
+    if (!patchI || !patchW || !bodyI || !bodyW) return;
+    wAcc.clear();
+    for (let k = 0; k < 3; k++) {
+      const v = at[k], b = at[3 + k];
+      if (b <= 0) continue;
+      for (let j = 0; j < 4; j++) { const w = bodyW[v * 4 + j]; if (w > 0) wAcc.set(bodyI[v * 4 + j], (wAcc.get(bodyI[v * 4 + j]) ?? 0) + b * w); }
+    }
+    const top = [...wAcc].sort((x, y) => y[1] - x[1]).slice(0, 4), sum = top.reduce((m, [, w]) => m + w, 0) || 1;
+    for (let j = 0; j < 4; j++) { patchI[p * 4 + j] = top[j]?.[0] ?? 0; patchW[p * 4 + j] = top[j] ? top[j][1] / sum : 0; }
+  };
   /** lay the opening on the rest shape just read (restPos) */
   function layOpen(): void {
     const pos = want;
@@ -255,6 +277,10 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     // and the skin between each edge and her own skin at the area's edge gives way along its column, all of it laid
     // out flat and read back off her skin where it now lies. Nothing stands out of her; the tube goes in at the edge.
     const D = 0.1 * open, back = sp.mid - sp.back, front = sp.front - sp.mid, b = D / 2;
+    // each point carried by her bones as her skin is WHERE IT NOW LIES (so, posed, it stays on her skin: Joshua's
+    // RECLINE of 2026-10-31 opens her thighs 80 degrees, and the two lips' skin is each thigh's as much as her pelvis's)
+    if (patchI && patchW && ownPI && ownPW) { patchI.set(ownPI); patchW.set(ownPW); }
+    readBodySkin();
     const smp = new Float64Array(6);
     const bp = g.getAttribute('position') as THREE.BufferAttribute, bn = g.getAttribute('normal') as THREE.BufferAttribute | undefined;
     const BP = bp.array as Float32Array, BN = bn ? (bn.array as Float32Array) : null;
@@ -268,6 +294,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       moved[p] = open > 0 ? w : 0;
       if (open <= 0 || w <= 0) continue;
       bake.sampleFlat(bake.flat[p * 2] + w * du, bake.flat[p * 2 + 1] + w * ds, smp);
+      weightsAt(p, smp);
       for (let c = 0; c < 3; c++) {
         pos[p * 3 + c] = smp[3] * BP[smp[0] * 3 + c] + smp[4] * BP[smp[1] * 3 + c] + smp[5] * BP[smp[2] * 3 + c];
         if (BN) nr[p * 3 + c] = smp[3] * BN[smp[0] * 3 + c] + smp[4] * BN[smp[1] * 3 + c] + smp[5] * BN[smp[2] * 3 + c];
@@ -296,41 +323,34 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     }
     openApplied = open;
   }
-  // her bones' turns, each frame: S = bindInverse * bone * boneInverse * bind (what three.js skins with), and its 3x3
-  const S: THREE.Matrix4[] = body.skeleton.bones.map(() => new THREE.Matrix4());
-  const Lv = new THREE.Matrix3(), Lp = new THREE.Matrix3(), Li = new THREE.Matrix3(), tmp = new THREE.Matrix4(), Sv = new THREE.Matrix4(), Spi = new THREE.Matrix4();
-  const e3 = new THREE.Vector3(), f3 = new THREE.Vector3();
-  /** lay the opening (as laid on her rest shape) on her as she is posed now */
+  /** the opening (as laid on her rest shape) handed to the GPU, and the tube's bones */
   function poseOpen(): void {
-    if (open <= 0 || !skI || !skW) { pos.set(want); nrm.set(wantNrm); tubePos.set(tubeWant); return; }
-    const sk = body.skeleton;
-    for (let i = 0; i < sk.bones.length; i++) S[i].multiplyMatrices(body.bindMatrixInverse, tmp.multiplyMatrices(sk.bones[i].matrixWorld, sk.boneInverses[i])).multiply(body.bindMatrix);
-    Lp.setFromMatrix4(S[pelvis]);
-    const blend = (v: number, out: THREE.Matrix4) => {
-      const el = out.elements; el.fill(0);
-      for (let c = 0; c < 4; c++) { const w = skW.getComponent(v, c); if (w <= 0) continue; const se = S[skI.getComponent(v, c)].elements; for (let k = 0; k < 16; k++) el[k] += w * se[k]; }
-      return out;
-    };
-    for (let p = 0; p < P; p++) {
-      const o = p * 3;
-      if (moved[p] <= 1e-6) { pos[o] = want[o]; pos[o + 1] = want[o + 1]; pos[o + 2] = want[o + 2]; nrm[o] = wantNrm[o]; nrm[o + 1] = wantNrm[o + 1]; nrm[o + 2] = wantNrm[o + 2]; continue; }
-      Lv.setFromMatrix4(blend(p, Sv)); Li.copy(Lv).invert().multiply(Lp);
-      e3.set(want[o] - restPos[o], want[o + 1] - restPos[o + 1], want[o + 2] - restPos[o + 2]).applyMatrix3(Li);
-      pos[o] = restPos[o] + e3.x; pos[o + 1] = restPos[o + 1] + e3.y; pos[o + 2] = restPos[o + 2] + e3.z;
-      f3.set(wantNrm[o], wantNrm[o + 1], wantNrm[o + 2]); e3.copy(f3).applyMatrix3(Li).normalize().multiplyScalar(moved[p]).addScaledVector(f3, 1 - moved[p]).normalize();
-      nrm[o] = e3.x; nrm[o + 1] = e3.y; nrm[o + 2] = e3.z;
-    }
-    // the tube's mouth where the split's edge is now, in her pelvis's frame; the rest of it as laid out from there
-    Spi.copy(S[pelvis]).invert();
-    for (let j = 0; j < M; j++) {
-      const v = base[j];
-      e3.fromArray(restPos, v * 3).applyMatrix4(blend(v, Sv)).applyMatrix4(Spi);
-      for (let c = 0; c < 3; c++) e3.setComponent(c, e3.getComponent(c) + want[v * 3 + c] - restPos[v * 3 + c]);
-      for (let m = 0; m < K; m++) { const o = (m * M + j) * 3; for (let c = 0; c < 3; c++) tubePos[o + c] = e3.getComponent(c) + tubeWant[o + c] - tubeWant[j * 3 + c]; }
+    // the area lies on her skin, carried as her skin is there: nothing to turn
+    pos.set(want); nrm.set(wantNrm); tubePos.set(tubeWant);
+    if (skI) skI.needsUpdate = true;
+    if (skW) skW.needsUpdate = true;
+    // the tube's mouth carried as the lips' edge it hangs from, deeper in more and more by her pelvis alone
+    const tI = tubeGeom.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, tW = tubeGeom.getAttribute('skinWeight') as THREE.BufferAttribute | undefined;
+    if (tI && tW && patchI && patchW) {
+      const a2 = tI.array as Uint16Array, b2 = tW.array as Float32Array;
+      for (let m = 0; m < K; m++) {
+        const deep = smooth(0, 0.5, m / (K - 1));
+        for (let j = 0; j < M; j++) {
+          const o = (m * M + j) * 4, v = base[j] * 4;
+          let pel = -1;
+          for (let c = 0; c < 4; c++) { a2[o + c] = patchI[v + c]; b2[o + c] = patchW[v + c] * (1 - deep); if (patchI[v + c] === pelvis) pel = c; }
+          if (pel < 0) { let low = 0; for (let c = 1; c < 4; c++) if (b2[o + c] < b2[o + low]) low = c; pel = low; a2[o + pel] = pelvis; b2[o + pel] = 0; }
+          b2[o + pel] += deep;
+          const sum = b2[o] + b2[o + 1] + b2[o + 2] + b2[o + 3] || 1;
+          for (let c = 0; c < 4; c++) b2[o + c] /= sum;
+        }
+      }
+      tI.needsUpdate = true; tW.needsUpdate = true;
     }
     (tubeGeom.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     tubeGeom.computeVertexNormals();
   }
+
 
 
   let posVersion = -1, pushVersion = -1, shown = true;
@@ -350,7 +370,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       layOpen();
       changed = true;
     }
-    if (changed || open > 0) {
+    if (changed) {
       poseOpen();
       (geom.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
       (geom.getAttribute('normal') as THREE.BufferAttribute).needsUpdate = true;
@@ -375,6 +395,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       const a = geom.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, b = geom.getAttribute('skinWeight') as THREE.BufferAttribute | undefined;
       if (!a || !b) return;
       sampleSkin(a.array as Uint16Array, b.array as Float32Array); a.needsUpdate = true; b.needsUpdate = true;
+      ownPI = Uint16Array.from(a.array as Uint16Array); ownPW = Float32Array.from(b.array as Float32Array); openApplied = -1; sync();
     },
     worldAxes() {
       const sk = body.skeleton, m4 = new THREE.Matrix4().multiplyMatrices(body.bindMatrixInverse, new THREE.Matrix4().multiplyMatrices(sk.bones[pelvis].matrixWorld, sk.boneInverses[pelvis])).multiply(body.bindMatrix);
