@@ -3267,7 +3267,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           const bm = bodyOf()?.mesh, sb = shaped.find((x) => x.mesh === bm), ix = bm?.geometry.index;
           if (sb && sb.fields.baseNrm && ix && !sb.fields.fields.has(BIRTH_CLEFT_FIELD)) {
             const map = new Map(sb.fields.fields);
-            const parts = birthAreaFields(sb.fields.basePos, sb.fields.baseNrm, ix.array, babyFrame.meshToRest);
+            // ALL her triangles, not the cut-down set drawn under her clothes (2026-10-31: built from that set, her
+            // underwear's leg openings were open edges to the smoothing, which drew them apart into cracks up her groin)
+            const herTris = (bm!.userData.allIndices as ArrayLike<number> | undefined) ?? ix.array;
+            const parts = birthAreaFields(sb.fields.basePos, sb.fields.baseNrm, herTris, babyFrame.meshToRest);
             if (parts.cleft.index.length) map.set(BIRTH_CLEFT_FIELD, parts.cleft);
             if (parts.lips.index.length) map.set(BIRTH_LIPS_FIELD, parts.lips);
             // and her inner thighs drawn back from her crotch in a birth pose (birthThighs.ts)
@@ -3284,9 +3287,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             // and the area rebuilt finer, from her own skin, to be able to open (vulvaMesh.ts)
             vulva?.dispose();
             try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest, measure?.joints.pelvis); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
-            try { birthNormals = createBirthNormals(bm!, babyFrame.meshToRest, ix.array, measure ? [measure.joints.hipL, measure.joints.hipR] : [], (i) => birthWeights?.maskOf(i) ?? 0, undefined /* the crease planes dented her belly: off (2026-10-31) */); } catch (error) { console.error('[sarahlab] her birth-pose normals could not be made', error); birthNormals = null; }
-            try { const jt = measure?.joints; birthRoom = jt ? createBirthRoom(bm!, babyFrame.meshToRest, ix.array, jt.pelvis, jt.hipL, jt.hipR) : null; } catch (error) { console.error('[sarahlab] her birth-pose room could not be made', error); birthRoom = null; }
-            try { const jt = measure?.joints; birthWeights = jt ? createBirthWeights(bm!, babyFrame.meshToRest, jt.pelvis, jt.hipL, jt.hipR, jt.kneeL, jt.kneeR, ix.array) : null; } catch (error) { console.error('[sarahlab] her birth-pose weights could not be made', error); birthWeights = null; }
+            try { birthNormals = createBirthNormals(bm!, babyFrame.meshToRest, herTris, measure ? [measure.joints.hipL, measure.joints.hipR] : [], (i) => birthWeights?.maskOf(i) ?? 0, undefined /* the crease planes dented her belly: off (2026-10-31) */); } catch (error) { console.error('[sarahlab] her birth-pose normals could not be made', error); birthNormals = null; }
+            try { const jt = measure?.joints; birthRoom = jt ? createBirthRoom(bm!, babyFrame.meshToRest, herTris, jt.pelvis, jt.hipL, jt.hipR) : null; } catch (error) { console.error('[sarahlab] her birth-pose room could not be made', error); birthRoom = null; }
+            try { const jt = measure?.joints; birthWeights = jt ? createBirthWeights(bm!, babyFrame.meshToRest, jt.pelvis, jt.hipL, jt.hipR, jt.kneeL, jt.kneeR, herTris) : null; } catch (error) { console.error('[sarahlab] her birth-pose weights could not be made', error); birthWeights = null; }
           }
         }
         if (babyShown) showBaby(true);
@@ -3533,6 +3536,69 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         birthTweak: (t: Partial<BirthSpec> | null) => { birthTweak = t; applyLook(); return true; },
         birthRoom: (on: boolean) => { birthRoomOn = on; birthRoomFor = ''; applyLook(); return { watched: birthRoom?.watched ?? null, largestMm: birthRoom ? +(birthRoom.largest * 1000).toFixed(1) : null, partsMm: birthRoom ? Object.fromEntries(Object.entries(birthRoom.parts).map(([k2, v2]) => [k2, +(v2 * 1000).toFixed(1)])) : null }; },
         // which of her points have come to her middle as posed (pelvis frame |x| < 6 mm) that stood well off it, and where they stood
+        // her seams as drawn: points that are one point in her model (several copies for the texture) and how far apart
+        // her skinning and shape fields have pulled the copies (world units), the worst and how many past 0.5 / 2 mm
+        seamGaps: (fresh = false) => {
+          const b = bodyOf(); if (!b || !model) return null;
+          model.updateMatrixWorld(true); b.mesh.skeleton.update();
+          const sb = shaped.find((x) => x.mesh === b.mesh), base = sb?.fields.basePos; if (!base) return null;
+          const n = Math.floor(base.length / 3), groups = new Map<string, number[]>();
+          for (let i = 0; i < n; i++) { const k = `${Math.round(base[i * 3] * 1e6)},${Math.round(base[i * 3 + 1] * 1e6)},${Math.round(base[i * 3 + 2] * 1e6)}`; (groups.get(k) ?? groups.set(k, []).get(k)!).push(i); }
+          const a = new THREE.Vector3(), c = new THREE.Vector3(), world = (i: number, o: THREE.Vector3) => b.mesh.localToWorld(b.mesh.getVertexPosition(i, o));
+          let worst = 0, over05 = 0, over2 = 0, at: number[] = [];
+          for (const g2 of groups.values()) {
+            if (g2.length < 2) continue;
+            world(g2[0], a);
+            for (let q = 1; q < g2.length; q++) {
+              const d = world(g2[q], c).distanceTo(a);
+              if (d > 0.05) over05++; if (d > 0.2) over2++;
+              if (d > worst) { worst = d; at = [g2[0], g2[q]]; }
+            }
+          }
+          const oe = birthNormals?.openEdges ?? [], rest = babyFrame?.meshToRest, pa = b.mesh.geometry.getAttribute('position'), v = new THREE.Vector3();
+          const openAt = rest ? Array.from({ length: Math.min(12, oe.length / 2) }, (_, q) => v.set(pa.getX(oe[q * 2]), pa.getY(oe[q * 2]), pa.getZ(oe[q * 2])).applyMatrix4(rest).toArray().map((x) => +x.toFixed(3))) : [];
+          // her triangles near her groin turned to face in: drawn (with every field) against how her skinning alone turns them
+          let flipped = 0, near = 0; const flipAt: number[][] = [];
+          if (rest) {
+            const all = (b.mesh.userData.allIndices as ArrayLike<number> | undefined) ?? b.mesh.geometry.index?.array ?? [];
+            const P0 = new THREE.Vector3(), P1 = new THREE.Vector3(), P2 = new THREE.Vector3(), Q0 = new THREE.Vector3(), Q1 = new THREE.Vector3(), Q2 = new THREE.Vector3(), r0 = new THREE.Vector3();
+            const skinOnly = (i: number, o: THREE.Vector3) => b.mesh.applyBoneTransform(i, o.fromArray(base, i * 3));
+            for (let t = 0; t + 2 < all.length; t += 3) {
+              const i0 = all[t], i1 = all[t + 1], i2 = all[t + 2];
+              r0.fromArray(base, i0 * 3).applyMatrix4(rest);
+              if (Math.abs(r0.x) > 0.25 || r0.y < 0.55 || r0.y > 0.95) continue;
+              near++;
+              b.mesh.getVertexPosition(i0, P0); b.mesh.getVertexPosition(i1, P1); b.mesh.getVertexPosition(i2, P2);
+              skinOnly(i0, Q0); skinOnly(i1, Q1); skinOnly(i2, Q2);
+              const nd = P1.sub(P0).cross(P2.sub(P0)), ns = Q1.sub(Q0).cross(Q2.sub(Q0));
+              if (nd.lengthSq() < 1e-14 || ns.lengthSq() < 1e-14) continue;
+              if (nd.dot(ns) < 0) { flipped++; if (flipAt.length < 10) flipAt.push(r0.toArray().map((x) => +x.toFixed(3))); }
+            }
+          }
+          // sharp folds as drawn: triangles sharing an edge, facing more than 120 degrees apart
+          let folds = 0; const foldAt: number[][] = [];
+          if (rest) {
+            const all = (b.mesh.userData.allIndices as ArrayLike<number> | undefined) ?? b.mesh.geometry.index?.array ?? [];
+            const keyOf = new Map<string, number>(), kk = (i: number) => { const s2 = `${Math.round(base[i * 3] * 1e4)},${Math.round(base[i * 3 + 1] * 1e4)},${Math.round(base[i * 3 + 2] * 1e4)}`; let q = keyOf.get(s2); if (q === undefined) { q = keyOf.size; keyOf.set(s2, q); } return q; };
+            const edgeTri = new Map<string, number>(), fn = new Map<number, THREE.Vector3>(), A = new THREE.Vector3(), B2 = new THREE.Vector3(), C2 = new THREE.Vector3(), r1 = new THREE.Vector3();
+            for (let t = 0; t + 2 < all.length; t += 3) {
+              r1.fromArray(base, all[t] * 3).applyMatrix4(rest);
+              if (Math.abs(r1.x) > 0.25 || r1.y < 0.55 || r1.y > 0.95) continue;
+              b.mesh.getVertexPosition(all[t], A); b.mesh.getVertexPosition(all[t + 1], B2); b.mesh.getVertexPosition(all[t + 2], C2);
+              const nn = B2.sub(A).cross(C2.sub(A)); if (nn.lengthSq() < 1e-16) continue; fn.set(t, nn.normalize().clone());
+              for (let q = 0; q < 3; q++) {
+                const a0 = kk(all[t + q]), b0 = kk(all[t + (q + 1) % 3]), e2 = a0 < b0 ? `${a0},${b0}` : `${b0},${a0}`, o = edgeTri.get(e2);
+                if (o === undefined) edgeTri.set(e2, t); else { const no = fn.get(o); if (no && no.dot(fn.get(t)!) < -0.5) { folds++; if (foldAt.length < 12) foldAt.push(r1.toArray().map((x) => +x.toFixed(3))); } }
+              }
+            }
+          }
+          // drawn against meant (her mesh's own space, as getVertexPosition gives it); `fresh` worked out again first
+          if (fresh) { birthRoomFor = ''; keepBirthRoom(); model.updateMatrixWorld(true); b.mesh.skeleton.update(); }
+          let missWorst = 0, missOver1mm = 0;
+          { const ex = birthNormals?.expected ?? [], o2 = new THREE.Vector3();
+            for (let q = 0; q + 3 < ex.length; q += 4) { b.mesh.getVertexPosition(ex[q], o2); const d = Math.hypot(o2.x - ex[q + 1], o2.y - ex[q + 2], o2.z - ex[q + 3]); if (d > missWorst) missWorst = d; if (d > 0.0011) missOver1mm++; } }
+          return { missWorst: +missWorst.toFixed(5), missOver1mm, meant: (birthNormals?.expected.length ?? 0) / 4, folds, foldAt, unironed: birthNormals?.folded, blow: birthNormals?.blow, worst: +worst.toFixed(3), over05, over2, at, openEdges: oe.length / 2, openAt, near, flipped };
+        },
         midlineCrossers: () => {
           const b = bodyOf(); if (!b || !babyFrame || !measure || !model) return null;
           model.updateMatrixWorld(true);

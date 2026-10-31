@@ -387,7 +387,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       }
     }
     const cm = colMetres;
-    const BP0 = (g.getAttribute('position') as THREE.BufferAttribute).array as Float32Array, pv = new THREE.Vector3();
+    const pv = new THREE.Vector3();
     // THE OPENING'S SIZE IS HER POSED SIZE (Joshua: a 10 cm circle). Each ring-and-column read off her skin as she
     // is posed now (her own bones and weights), and the opening's oval laid in her skin's plane there: across her
     // split and along it, seen square on. A column's lip edge goes out to where the column crosses that oval.
@@ -398,8 +398,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       for (let t = 0; t < 3; t++) {
         const w = bake.bary[v * 3 + t], src = bake.src[v * 3 + t];
         if (w <= 0) continue;
-        pv.fromArray(BP0, src * 3);
-        body.applyBoneTransform(src, pv);
+        // as drawn: her morph targets (the belly slider) and her bones
+        body.getVertexPosition(src, pv);
         out.addScaledVector(pv, w);
       }
       return out;
@@ -560,7 +560,11 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     const bp = g.getAttribute('position') as THREE.BufferAttribute, bn = g.getAttribute('normal') as THREE.BufferAttribute | undefined;
     // opened, the opening's size is measured on her as she is posed: a new pose lays it out again
     let sig = 0;
-    if (open > 0) for (const b of body.skeleton.bones) sig = sig * 1.0001 + b.quaternion.x * 3 + b.quaternion.y * 5 + b.quaternion.z * 7 + b.quaternion.w;
+    if (open > 0) {
+      for (const b of body.skeleton.bones) sig = sig * 1.0001 + b.quaternion.x * 3 + b.quaternion.y * 5 + b.quaternion.z * 7 + b.quaternion.w;
+      // (and her belly: the slider is a morph)
+      const inf = body.morphTargetInfluences; if (inf) for (let m = 0; m < inf.length; m++) sig += inf[m] * (m + 11);
+    }
     if (open > 0 && Math.abs(sig - poseSig) > 1e-6) { poseSig = sig; openApplied = -1; }
     if (bp.version !== posVersion || openApplied !== open) {
       posVersion = bp.version;

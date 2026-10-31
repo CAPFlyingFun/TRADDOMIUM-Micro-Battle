@@ -19,6 +19,9 @@ export const BIRTH_NORMALS = Object.freeze({
   /** her posed skin there smoothed too (Joshua, 2026-10-30: "smooth under the hips and buttocks... Add more
    * smoothening"): how many passes, and how far each moves a point toward its neighbours' middle (0..1) */
   passes: 30, lambda: 0.6,
+  /** folds ironed out after it (2026-10-31): two triangles sharing an edge whose facings' dot is below `foldAt` are a
+   * fold; the points round it are smoothed `ironLambda` hard, four passes a round, at most `ironRounds` rounds */
+  foldAt: -0.2, ironLambda: 0.8, ironRounds: 40,
   /**
    * her posed skin kept from passing through itself there (the saw-tooth seams under her buttocks and down her groin,
    * where her thigh's underside and her buttock press into each other): two points from far apart on her (`apart`
@@ -41,8 +44,16 @@ export interface BirthNormals {
   /** the field for her as posed now (her bones' world matrices current); `pos`/`nrm` her shape as drawn */
   compute(pos: ArrayLike<number>, nrm: ArrayLike<number>): { index: Uint32Array; pos: Float32Array; nrm: Float32Array };
   readonly watched: number;
+  /** vertex pairs of the band's open edges (each an edge only one of her triangles has) */
+  readonly openEdges: readonly number[];
   /** how many points the last compute had to push out of her own skin */
   readonly pierced: number;
+  /** how much the turn back into her rest shape magnified a move (worst, and how many points past 3x) */
+  readonly blow: { worst: number; over3: number };
+  /** how many folds the last compute could not iron out */
+  readonly folded: number;
+  /** (debug) where the last compute meant each point to be drawn, posed: vertex, x, y, z */
+  readonly expected: readonly number[];
 }
 
 const smooth = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -75,10 +86,21 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   const used = new Set<number>(tris);
   for (const i of used) { const s = `${Math.round(pa.getX(i) * 1e4)},${Math.round(pa.getY(i) * 1e4)},${Math.round(pa.getZ(i) * 1e4)}`; let id = keyMap.get(s); if (id === undefined) { id = keyMap.size; keyMap.set(s, id); } key[i] = id; }
   const K = keyMap.size, posed = new Float32Array(n * 3), acc = new Float64Array(K * 3);
+  // each edge of the band (by point), and the triangles (offsets into `tris`) that have it
+  const edgeTris = new Map<string, number[]>();
+  for (let t = 0; t < tris.length; t += 3) for (let q = 0; q < 3; q++) { const a0 = key[tris[t + q]], b0 = key[tris[t + (q + 1) % 3]]; const e2 = a0 < b0 ? `${a0},${b0}` : `${b0},${a0}`; (edgeTris.get(e2) ?? edgeTris.set(e2, []).get(e2)!).push(t); }
+  // (a check: edges inside the band only one triangle has -- open edges, which smoothing pulls apart)
+  const openEdges: number[] = [];
+  { const ec = new Map<string, number>();
+    for (let t = 0; t < tris.length; t += 3) for (let q = 0; q < 3; q++) { const a0 = key[tris[t + q]], b0 = key[tris[t + (q + 1) % 3]]; const e2 = a0 < b0 ? `${a0},${b0}` : `${b0},${a0}`; ec.set(e2, (ec.get(e2) ?? 0) + 1); }
+    const shareK = new Float32Array(K), anyI = new Int32Array(K);
+    for (const i of used) { shareK[key[i]] = Math.max(shareK[key[i]], share[i]); anyI[key[i]] = i; }
+    for (const [e2, c2] of ec) if (c2 === 1) { const [a0, b0] = e2.split(',').map(Number); if (shareK[a0] > 0.05 && shareK[b0] > 0.05) openEdges.push(anyI[a0], anyI[b0]); } }
   // each point where it stands at rest (metres, her rest frame)
   const restK = new Float64Array(K * 3);
   for (const i of used) { const k = key[i]; restK[k * 3] = rest[i * 3]; restK[k * 3 + 1] = rest[i * 3 + 1]; restK[k * 3 + 2] = rest[i * 3 + 2]; }
-  let pierced = 0;
+  let pierced = 0, blowWorst = 0, blowCount = 0, folded = 0;
+  const expected: number[] = [];
   const perMetre = 1 / new THREE.Vector3(1, 0, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(toRest)).length();
   const touchG = B.touch * perMetre, gapG = B.gap * perMetre;
   const S = mesh.skeleton.bones.map(() => new THREE.Matrix4()), tmp = new THREE.Matrix4(), Sv = new THREE.Matrix4(), Li = new THREE.Matrix3();
@@ -88,11 +110,30 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   const blend = (i: number) => { const el = Sv.elements; el.fill(0); for (let k = 0; k < 4; k++) { const w = sw.getComponent(i, k); if (w <= 0) continue; const se = S[si.getComponent(i, k)].elements; for (let e = 0; e < 16; e++) el[e] += w * se[e]; } return Sv; };
   return {
     watched: watched.length,
+    openEdges,
     get pierced() { return pierced; },
+    get blow() { return { worst: +blowWorst.toFixed(2), over3: blowCount }; },
+    get folded() { return folded; },
+    expected,
     compute(pos, nrm) {
       const sk = mesh.skeleton;
       for (let q = 0; q < sk.bones.length; q++) S[q].multiplyMatrices(mesh.bindMatrixInverse, tmp.multiplyMatrices(sk.bones[q].matrixWorld, sk.boneInverses[q])).multiply(mesh.bindMatrix);
-      for (const i of used) { v.set(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]).applyMatrix4(blend(i)); posed[i * 3] = v.x; posed[i * 3 + 1] = v.y; posed[i * 3 + 2] = v.z; }
+      // her shape as DRAWN: her morph targets on it too (2026-10-31: her model carries the full belly and the belly
+      // slider takes it off with a morph; smoothed without them, the smoothing was for a shape she is not drawn in,
+      // and put on the one she is, it folded strips of her groin inside out -- cracks, worst at 0%)
+      const mInf = mesh.morphTargetInfluences, mPos = g.morphAttributes.position, rel = g.morphTargetsRelative;
+      for (const i of used) {
+        v.set(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
+        if (mInf && mPos) {
+          for (let m = 0; m < mPos.length; m++) {
+            const w = mInf[m] ?? 0; if (!w) continue;
+            const ma = mPos[m];
+            if (rel) v.set(v.x + w * ma.getX(i), v.y + w * ma.getY(i), v.z + w * ma.getZ(i));
+            else { v.set(v.x + w * (ma.getX(i) - pos[i * 3]), v.y + w * (ma.getY(i) - pos[i * 3 + 1]), v.z + w * (ma.getZ(i) - pos[i * 3 + 2])); }
+          }
+        }
+        v.applyMatrix4(blend(i)); posed[i * 3] = v.x; posed[i * 3 + 1] = v.y; posed[i * 3 + 2] = v.z;
+      }
       // smoothed where she is posed (by point, so a seam stays shut), each point as far as the band's share says
       const kp = new Float64Array(K * 3), kc = new Float64Array(K), ks = new Float64Array(K);
       for (const i of used) { const k = key[i]; kp[k * 3] += posed[i * 3]; kp[k * 3 + 1] += posed[i * 3 + 1]; kp[k * 3 + 2] += posed[i * 3 + 2]; kc[k]++; ks[k] = Math.max(ks[k], share[i]); }
@@ -222,6 +263,53 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
           }
         }
       };
+      // FOLDS IRONED OUT (2026-10-31: on her posed groin, squeezed where her thigh meets her belly, plain smoothing
+      // turned a thin strip of her skin inside out -- a crack up each groin crease and under her buttocks, wider the
+      // more it smoothed). After the smoothing, wherever two of her triangles that share an edge face more than
+      // `foldAt` apart, the points round them are smoothed again, harder, and only there, until none do.
+      const ironFolds = () => {
+        const fnK = new Float64Array(tris.length), mark = new Uint8Array(K);
+        let lastFolds = 0;
+        for (let round = 0; round < B.ironRounds; round++) {
+          for (let t = 0; t < tris.length; t += 3) {
+            const p0 = key[tris[t]] * 3, p1 = key[tris[t + 1]] * 3, p2 = key[tris[t + 2]] * 3;
+            const ux = kp[p1] - kp[p0], uy = kp[p1 + 1] - kp[p0 + 1], uz = kp[p1 + 2] - kp[p0 + 2], vx = kp[p2] - kp[p0], vy = kp[p2 + 1] - kp[p0 + 1], vz = kp[p2 + 2] - kp[p0 + 2];
+            let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz) || 1;
+            nx /= l; ny /= l; nz /= l; fnK[t] = nx; fnK[t + 1] = ny; fnK[t + 2] = nz;
+          }
+          mark.fill(0);
+          let folds = 0;
+          for (const [, ts] of edgeTris) {
+            if (ts.length !== 2) continue;
+            const a0 = ts[0], b0 = ts[1];
+            if (fnK[a0] * fnK[b0] + fnK[a0 + 1] * fnK[b0 + 1] + fnK[a0 + 2] * fnK[b0 + 2] >= B.foldAt) continue;
+            folds++;
+            for (const t of ts) for (let q = 0; q < 3; q++) mark[key[tris[t + q]]] = 1;
+          }
+          lastFolds = folds;
+          if (!folds) break;
+          // the points round each fold, and their neighbours, so the ironing blends into the skin round it
+          for (let grow = 0; grow < 2; grow++) {
+            const add: number[] = [];
+            for (let t = 0; t < tris.length; t += 3) { const k0 = key[tris[t]], k1 = key[tris[t + 1]], k2 = key[tris[t + 2]]; if (mark[k0] | mark[k1] | mark[k2]) add.push(k0, k1, k2); }
+            for (const k of add) mark[k] = 1;
+          }
+          for (let pass = 0; pass < 4; pass++) {
+            sumN.fill(0); cntN.fill(0);
+            for (let t = 0; t < tris.length; t += 3) for (let q = 0; q < 3; q++) {
+              const k = key[tris[t + q]];
+              if (!mark[k]) continue;
+              for (let r = 1; r < 3; r++) { const o = key[tris[t + ((q + r) % 3)]]; sumN[k * 3] += kp[o * 3]; sumN[k * 3 + 1] += kp[o * 3 + 1]; sumN[k * 3 + 2] += kp[o * 3 + 2]; cntN[k]++; }
+            }
+            for (let k = 0; k < K; k++) {
+              if (!mark[k] || !cntN[k] || ks[k] <= 0) continue;
+              const l = B.ironLambda * ks[k];
+              for (let c = 0; c < 3; c++) kp[k * 3 + c] += l * (sumN[k * 3 + c] / cntN[k] - kp[k * 3 + c]);
+            }
+          }
+        }
+        folded = lastFolds;
+      };
       pierced = 0;
       unPierce();
       layCrease();
@@ -237,6 +325,7 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
           for (let c = 0; c < 3; c++) kp[k * 3 + c] += l * (sumN[k * 3 + c] / cntN[k] - kp[k * 3 + c]);
         }
       }
+      ironFolds();
       unPierce();
       layCrease();
       for (const i of used) { const k = key[i]; posed[i * 3] = kp[k * 3]; posed[i * 3 + 1] = kp[k * 3 + 1]; posed[i * 3 + 2] = kp[k * 3 + 2]; }
@@ -261,6 +350,7 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
         acc.set(sm2);
       }
       const idx: number[] = [], dn: number[] = [], dp: number[] = [];
+      blowWorst = 0; blowCount = 0; expected.length = 0;
       watched.forEach((i) => {
         const o = key[i] * 3;
         a.set(acc[o], acc[o + 1], acc[o + 2]).multiplyScalar(wind);
@@ -275,8 +365,12 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
         idx.push(i); dn.push(a.x, a.y, a.z);
         // and its move, turned back into her rest shape
         const k = key[i];
-        b.set(kp[k * 3] - before[k * 3], kp[k * 3 + 1] - before[k * 3 + 1], kp[k * 3 + 2] - before[k * 3 + 2]).applyMatrix3(Li);
+        b.set(kp[k * 3] - before[k * 3], kp[k * 3 + 1] - before[k * 3 + 1], kp[k * 3 + 2] - before[k * 3 + 2]);
+        const posedLen = b.length();
+        b.applyMatrix3(Li);
+        if (posedLen > 1e-6) { const ratio = b.length() / posedLen; if (ratio > blowWorst) blowWorst = ratio; if (ratio > 3) blowCount++; }
         dp.push(b.x, b.y, b.z);
+        expected.push(i, kp[k * 3], kp[k * 3 + 1], kp[k * 3 + 2]);
       });
       return { index: Uint32Array.from(idx), pos: Float32Array.from(dp), nrm: Float32Array.from(dn) };
     },
