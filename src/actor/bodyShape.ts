@@ -27,7 +27,7 @@
 export type BodyControl =
   | 'bellyTilt' | 'bellyHeight' | 'bellyWidth' | 'bellyDepth' | 'bellyUpper' | 'bellyLower' | 'navel' | 'babyWeight' | 'bellyFirmness' | 'bellyBounce' | 'babyFloat' | 'babyKicks'
   | 'breastSize' | 'breastWidth' | 'breastHeight' | 'breastDepth' | 'breastSpacing' | 'breastPosition' | 'breastDroop' | 'breastUpper' | 'breastLower' | 'milk' | 'milkBalance' | 'breastFirmness' | 'breastBounce'
-  | 'height' | 'upperLeg' | 'lowerLeg' | 'torso' | 'neck' | 'upperArm' | 'forearm' | 'shoulders' | 'waist' | 'hips' | 'head' | 'hands' | 'feet';
+  | 'height' | 'upperLeg' | 'lowerLeg' | 'torso' | 'neck' | 'upperArm' | 'forearm' | 'shoulders' | 'waist' | 'hips' | 'legGap' | 'head' | 'hands' | 'feet';
 
 export interface BodyControlSpec {
   readonly key: BodyControl;
@@ -103,6 +103,9 @@ export const BODY_CONTROLS: readonly BodyControlSpec[] = Object.freeze([
   { key: 'shoulders', group: 'build', label: 'Shoulders', unit: 'cm', min: -6, max: 10, step: 0.5, fallback: 0, spread: 1, help: 'collarbone to shoulder, both sides together; the arms are carried out with them' },
   { key: 'waist', group: 'build', label: 'Waist', unit: '%', min: -25, max: 35, step: 1, fallback: 0, spread: 5, help: 'girth at the waist (her bump\'s front is left where it is)' },
   { key: 'hips', group: 'build', label: 'Hips', unit: '%', min: -20, max: 30, step: 1, fallback: 0, spread: 5, help: 'width at the hips and upper thighs' },
+  // Joshua, 2026-10-30: "can we offset the hips away from the center of the body some to give maybe 2-3 more centimeters
+  // on each side for a total of around 5cm? ... the spacing between the legs at the pubic is just a touch wider"
+  { key: 'legGap', group: 'build', label: 'Leg spacing', unit: 'cm', min: -2, max: 8, step: 0.5, fallback: 0, spread: 0.5, help: 'the space between her legs at the top, both sides together: each hip and leg moves out by half, and the skin between her thighs widens with it' },
   { key: 'head', group: 'build', label: 'Head', unit: '%', min: -30, max: 30, step: 1, fallback: 0, spread: 2, help: 'head size, her hair with it' },
   { key: 'hands', group: 'build', label: 'Hands', unit: '%', min: -30, max: 30, step: 1, fallback: 0, spread: 3, help: 'hand size' },
   { key: 'feet', group: 'build', label: 'Feet', unit: '%', min: -30, max: 30, step: 1, fallback: 0, spread: 3, help: 'foot size' },

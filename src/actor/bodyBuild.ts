@@ -44,7 +44,7 @@ export interface BuildMeasure {
   readonly soleBelowAnkle: number;
 }
 
-/** What a renderer applies. Approved: every `add` 0, `shoulders` 0, `waist` 0, `hips` 0, `head`/`hands`/`feet` 1. */
+/** What a renderer applies. Approved: every `add` 0, `shoulders` 0, `waist` 0, `hips` 0, `legGap` 0, `head`/`hands`/`feet` 1. */
 export interface BuildAmounts {
   /** Metres added to each segment's length (each limb, both sides). Never shorter than 40% of the segment. */
   readonly add: Readonly<Record<BuildSegment, number>>;
@@ -54,6 +54,8 @@ export interface BuildAmounts {
   readonly waist: number;
   /** Width at her hips and upper thighs, as a fraction. */
   readonly hips: number;
+  /** Metres added between her legs at the top, each hip and leg out by half (0 or missing: approved). */
+  readonly legGap?: number;
   /** Scale factors, 1 = approved. */
   readonly head: number;
   readonly hands: number;
@@ -157,6 +159,7 @@ export function buildAmounts(shape: BodyShape, measure: BuildMeasure): BuildAmou
     shoulders: num(shape.shoulders) / 100,
     waist: num(shape.waist) / 100,
     hips: num(shape.hips) / 100,
+    legGap: num(shape.legGap) / 100,
     head: 1 + num(shape.head) / 100,
     hands: 1 + num(shape.hands) / 100,
     feet: 1 + num(shape.feet) / 100,
@@ -165,7 +168,7 @@ export function buildAmounts(shape: BodyShape, measure: BuildMeasure): BuildAmou
 
 /** True when the amounts change nothing: a renderer can leave the body as it loaded. */
 export function isApprovedBuild(a: BuildAmounts): boolean {
-  return BUILD_SEGMENTS.every((s) => a.add[s] === 0) && a.shoulders === 0 && a.waist === 0 && a.hips === 0 && a.head === 1 && a.hands === 1 && a.feet === 1;
+  return BUILD_SEGMENTS.every((s) => a.add[s] === 0) && a.shoulders === 0 && a.waist === 0 && a.hips === 0 && (a.legGap ?? 0) === 0 && a.head === 1 && a.hands === 1 && a.feet === 1;
 }
 
 const fixed = (v: number): string => {
@@ -183,7 +186,7 @@ export function buildKey(a: BuildAmounts): string {
   return [
     `ul:${fixed(add.upperLeg)}`, `ll:${fixed(add.lowerLeg)}`, `to:${fixed(add.torso)}`, `nk:${fixed(add.neck)}`,
     `ua:${fixed(add.upperArm)}`, `fa:${fixed(add.forearm)}`,
-    `sh:${fixed(a.shoulders)}`, `wa:${fixed(a.waist)}`, `hp:${fixed(a.hips)}`,
+    `sh:${fixed(a.shoulders)}`, `wa:${fixed(a.waist)}`, `hp:${fixed(a.hips)}`, `lg:${fixed(a.legGap ?? 0)}`,
     `hd:${fixed(a.head)}`, `hn:${fixed(a.hands)}`, `ft:${fixed(a.feet)}`,
   ].join('|');
 }

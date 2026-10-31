@@ -3440,6 +3440,25 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           }
           return { step, rows: high.map((r, k) => `${String((k - cells) * step).padStart(4)} | ` + r.map((h) => (h === -Infinity ? '   .' : String(Math.round(h)).padStart(4))).join('')).reverse(), cols: '  t  | ' + Array.from({ length: N }, (_, k) => String((k - cells) * step).padStart(4)).join(''), gaps };
         },
+        // her body's draw emptied (the rebuilt area and its tube left on their own), or back
+        vulvaSolo: (on: boolean) => { const b = bodyOf(); if (!b) return false; b.mesh.visible = !on; if (vulva) { vulva.solo = on; vulva.sync(); } const m = vulva?.mesh; let root: THREE.Object3D | null = m ?? null; while (root?.parent) root = root.parent; return { patch: !!m, visible: m?.visible, parent: m?.parent?.name ?? m?.parent?.type, inScene: root?.type, drawRange: [m?.geometry.drawRange.start, m?.geometry.drawRange.count], count: m?.geometry.getAttribute('position').count, idx: m?.geometry.index?.count, bodyIsPatchGeom: m?.geometry === b.mesh.geometry }; },
+        vulvaNoTube: (on: boolean) => { if (vulva) { vulva.noTube = on; vulva.sync(); } return true; },
+        // aim straight at her split: from its own facing, at a distance (and turned a little either way)
+        vulvaAim: (distance: number, yawOff = 0, pitchOff = 0) => {
+          if (!vulva) return null; model?.updateMatrixWorld(true);
+          const f = vulva.facing(); orbit.yaw = f.yaw + yawOff; orbit.pitch = f.pitch + pitchOff; orbit.distance = distance; orbit.target.copy(f.at); turning = false;
+          return { yaw: +f.yaw.toFixed(3), pitch: +f.pitch.toFixed(3) };
+        },
+        vulvaStats: () => {
+          const b = bodyOf(); if (!vulva || !b) return null;
+          const ud = vulva.mesh.userData as { drawn?: number }; if (ud.drawn === undefined) { ud.drawn = 0; vulva.mesh.onBeforeRender = () => { ud.drawn!++; }; }
+          const pa = vulva.mesh.geometry.getAttribute('position') as THREE.BufferAttribute, arr = pa.array as Float32Array;
+          let nan = 0; for (const x of arr) if (!Number.isFinite(x)) nan++;
+          const v = new THREE.Vector3(), w = new THREE.Vector3(), p0 = 100, src = vulva.bake.src[p0 * 3];
+          vulva.mesh.getVertexPosition(p0, v); vulva.mesh.localToWorld(v); b.mesh.getVertexPosition(src, w); b.mesh.localToWorld(w);
+          return { nan, n: pa.count, local0: [arr[p0 * 3], arr[p0 * 3 + 1], arr[p0 * 3 + 2]], bodyLocal: [b.mesh.geometry.getAttribute('position').getX(src), b.mesh.geometry.getAttribute('position').getY(src), b.mesh.geometry.getAttribute('position').getZ(src)], world0: v.toArray(), bodyWorld: w.toArray(), meshVisible: vulva.mesh.visible, layers: vulva.mesh.layers.mask, bodyLayers: b.mesh.layers.mask, matVisible: (vulva.mesh.material as THREE.Material).visible, renderOrder: [vulva.mesh.renderOrder, b.mesh.renderOrder], bodyParentIsScene: b.mesh.parent === vulva.mesh.parent, drawn: ud.drawn, calls: ctx.renderer.gl.info.render.calls, solo: vulva.solo, parentVisible: vulva.mesh.parent?.visible, dbg: vulva.debug() };
+        },
+        vulvaOpen: (o: number) => { if (!vulva) return null; vulva.setOpen(o); return vulva.open; },
         vulva: (on: boolean, wire = false) => { if (!vulva) return null; vulva.show(on); vulva.wire(on && wire); const sk = model && findSkinnedMesh(model), m = vulva.mesh, c = new THREE.Vector3(), v = new THREE.Vector3(); let k = 0;
           model?.updateMatrixWorld(true);
           for (let i = 0; i < vulva.bake.count; i++) if (vulva.bake.ring[i] === 0) { m.getVertexPosition(i, v); m.localToWorld(v); c.add(v); k++; }

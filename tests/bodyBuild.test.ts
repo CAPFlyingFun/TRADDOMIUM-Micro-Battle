@@ -7,7 +7,7 @@ import {
   profileOf, segmentLimitCm, standingHeight, withProfile, type BuildAmounts, type BuildSegment,
 } from '../src/actor/bodyBuild';
 
-const BUILD_KEYS: readonly BodyControl[] = ['height', 'upperLeg', 'lowerLeg', 'torso', 'neck', 'upperArm', 'forearm', 'shoulders', 'waist', 'hips', 'head', 'hands', 'feet'];
+const BUILD_KEYS: readonly BodyControl[] = ['height', 'upperLeg', 'lowerLeg', 'torso', 'neck', 'upperArm', 'forearm', 'shoulders', 'waist', 'hips', 'legGap', 'head', 'hands', 'feet'];
 const shaped = (values: Partial<Record<BodyControl, number>>): BodyShape => clampShape({ ...defaultBodyShape(), ...values });
 const amounts = (values: Partial<Record<BodyControl, number>>): BuildAmounts => buildAmounts(shaped(values), SARAH_V2_BUILD);
 const len = (s: BuildSegment) => SARAH_V2_BUILD.segments[s].length;
@@ -26,7 +26,7 @@ describe('the build controls', () => {
       expect(c.max).toBeGreaterThan(0);
       expect(d[c.key]).toBe(0);
     }
-    for (const k of ['height', 'upperLeg', 'lowerLeg', 'torso', 'neck', 'upperArm', 'forearm', 'shoulders'] as const) expect(controlSpec(k).unit).toBe('cm');
+    for (const k of ['height', 'upperLeg', 'lowerLeg', 'torso', 'neck', 'upperArm', 'forearm', 'shoulders', 'legGap'] as const) expect(controlSpec(k).unit).toBe('cm');
     for (const k of ['waist', 'hips', 'head', 'hands', 'feet'] as const) expect(controlSpec(k).unit).toBe('%');
     expect(controlSpec('height')).toMatchObject({ min: -30, max: 30 });
   });
@@ -167,7 +167,7 @@ describe('the build key', () => {
   it('is stable for the same numbers and changes with any of them', () => {
     const base = amounts({ height: 5, waist: 3 });
     expect(buildKey(base)).toBe(buildKey(amounts({ height: 5, waist: 3 })));
-    expect(buildKey(base)).toMatch(/^ul:-?\d+\.\d{5}\|ll:.*\|to:.*\|nk:.*\|ua:.*\|fa:.*\|sh:.*\|wa:0\.03000\|hp:0\.00000\|hd:1\.00000\|hn:1\.00000\|ft:1\.00000$/);
+    expect(buildKey(base)).toMatch(/^ul:-?\d+\.\d{5}\|ll:.*\|to:.*\|nk:.*\|ua:.*\|fa:.*\|sh:.*\|wa:0\.03000\|hp:0\.00000\|lg:0\.00000\|hd:1\.00000\|hn:1\.00000\|ft:1\.00000$/);
     const keys = new Set([buildKey(base)]);
     for (const k of BUILD_KEYS) {
       const spec = controlSpec(k);

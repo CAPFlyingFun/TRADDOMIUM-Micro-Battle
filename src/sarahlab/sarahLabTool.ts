@@ -123,6 +123,8 @@ export const SARAH_LAB_ACTION = Object.freeze({
   babyLie: 'sarahlab:baby-lie',
   /** KICK: the next move now, a kick (baby.ts `MOVES`) */
   babyKick: 'sarahlab:baby-kick',
+  /** `${birth}head`: the BIRTH panel's test head on or off */
+  birth: 'sarahlab:birth-',
   outfit: 'sarahlab:outfit',
   model: 'sarahlab:model',
   refine: 'sarahlab:refine',
@@ -188,6 +190,8 @@ export const SARAH_LAB_FIELD = Object.freeze({
   status: 'sarahlab-status',
   /** the baby's week, length and weight while SEE BABY is on */
   baby: 'sarahlab-baby',
+  /** `${birth}<control>`: a BIRTH control's line (holdCm, firmness, headPush); its slider follows it */
+  birth: 'sarahlab-birth-',
   bump: 'sarahlab-bump',
   fingers: 'sarahlab-fingers',
   arms: 'sarahlab-arms',

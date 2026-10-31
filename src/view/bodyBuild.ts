@@ -74,8 +74,8 @@ import type { HumanJoints } from '../actor/humanRig';
 
 type V3 = readonly [number, number, number];
 
-/** What scales a segment's ΔL: a segment's own length, or the shoulders (half to each side). */
-export type BuildAmountKey = BuildSegment | 'shoulders';
+/** What scales a segment's ΔL: a segment's own length, the shoulders or the leg spacing (half to each side). */
+export type BuildAmountKey = BuildSegment | 'shoulders' | 'legGap';
 
 const SEGMENT_KEYS: readonly BuildSegment[] = ['upperLeg', 'lowerLeg', 'torso', 'neck', 'upperArm', 'forearm'];
 
@@ -85,6 +85,10 @@ const ARM_FADE_TO = 0.09;
 /** Where the shoulders' field fades out, metres from the collarbone's line. */
 const SHOULDER_FADE_FROM = 0.14;
 const SHOULDER_FADE_TO = 0.24;
+/** The leg spacing: how far either side of her middle her thigh creases are (metres), and where its field fades out, metres from the line across her hips. */
+const LEG_GAP_CREASE = 0.02;
+const LEG_GAP_FADE_FROM = 0.1;
+const LEG_GAP_FADE_TO = 0.18;
 /** How far up the limb a hand's or a foot's size reaches, metres. */
 const HAND_RAMP = 0.04;
 const FOOT_RAMP = 0.06;
@@ -402,6 +406,21 @@ export function prepareBuildRig(body: THREE.SkinnedMesh, basePos: Float32Array, 
     });
   }
 
+  // THE LEG SPACING (Joshua, 2026-10-30: "offset the hips away from the center of the body some to give maybe 2-3 more
+  // centimeters on each side"): each hip joint, and the leg it carries, moves out across her by half the amount; the
+  // skin her pelvis carries between her middle and her thigh creases (`LEG_GAP_CREASE` either side) stretches evenly
+  // across that, and her pelvis's skin further out moves out whole -- faded with distance from the line across her hips,
+  // so her waist and belly stay as they are
+  const gapFade: readonly [number, number] = [LEG_GAP_FADE_FROM / metresPerUnit, LEG_GAP_FADE_TO / metresPerUnit];
+  for (const [side, hip] of [['L', joints.hipL], ['R', joints.hipR]] as const) {
+    const h = J(hip), mid = J(joints.pelvis)[0], dx = Math.sign(h[0] - mid) * (LEG_GAP_CREASE / metresPerUnit);
+    const start: V3 = [mid, h[1], h[2]];
+    addSegment({
+      name: `legGap ${side}`, amount: 'legGap', share: 0.5, start, end: [mid + dx, h[1], h[2]], fade: gapFade,
+      free: root >= 0 ? [[root, 0], [joints.pelvis, 0]] : [[joints.pelvis, 0]], fixed: [[hip, 1]],
+    });
+  }
+
   // ── girth regions
   const mask = (list: readonly number[]): Uint8Array => { const m = new Uint8Array(n); for (const k of list) m[k] = 1; return m; };
   const ySpine = J(joints.spine)[1];
@@ -491,7 +510,7 @@ export function prepareBuildRig(body: THREE.SkinnedMesh, basePos: Float32Array, 
 
 /** A segment instance's ΔL in geometry units. */
 function segmentAmount(rig: BuildRig, s: BuildSegmentFrame, amounts: BuildAmounts): number {
-  const metres = s.amount === 'shoulders' ? amounts.shoulders : amounts.add[s.amount];
+  const metres = s.amount === 'shoulders' ? amounts.shoulders : s.amount === 'legGap' ? (amounts.legGap ?? 0) : amounts.add[s.amount];
   return (metres * s.share) / rig.metresPerUnit;
 }
 

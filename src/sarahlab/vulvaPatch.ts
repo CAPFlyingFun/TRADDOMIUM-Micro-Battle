@@ -64,6 +64,8 @@ export interface VulvaBake {
   /** for checking: the outline's length in points, and how many points sampled no triangle of hers */
   readonly outline: number;
   readonly missed: number;
+  /** the split laid out flat: its middle and its two ends (flat units are close to metres over her skin) */
+  readonly split: { readonly u: number; readonly mid: number; readonly back: number; readonly front: number };
 }
 
 /**
@@ -355,6 +357,6 @@ export function bakeVulva(rest: ArrayLike<number>, key: ArrayLike<number>, indic
     keep: Uint32Array.from(keep), count: ringOf.length, src: Uint32Array.from(src), bary: Float32Array.from(bary),
     uvSrc: Uint32Array.from(uvSrc), uvBary: Float32Array.from(uvBary),
     ring: Uint16Array.from(ringOf), column: Uint16Array.from(colOf), flat: Float32Array.from(flat), lip: Int8Array.from(lipOf),
-    index: Uint32Array.from(index), outline: M, missed,
+    index: Uint32Array.from(index), outline: M, missed, split: { u: u0m, mid: splitMid.s, back: sB, front: sF },
   };
 }
