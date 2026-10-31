@@ -3284,7 +3284,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             // and the area rebuilt finer, from her own skin, to be able to open (vulvaMesh.ts)
             vulva?.dispose();
             try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest, measure?.joints.pelvis); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
-            try { birthNormals = createBirthNormals(bm!, babyFrame.meshToRest, ix.array, measure ? [measure.joints.hipL, measure.joints.hipR] : []); } catch (error) { console.error('[sarahlab] her birth-pose normals could not be made', error); birthNormals = null; }
+            try { birthNormals = createBirthNormals(bm!, babyFrame.meshToRest, ix.array, measure ? [measure.joints.hipL, measure.joints.hipR] : [], (i) => birthWeights?.maskOf(i) ?? 0, undefined /* the crease planes dented her belly: off (2026-10-31) */); } catch (error) { console.error('[sarahlab] her birth-pose normals could not be made', error); birthNormals = null; }
             try { const jt = measure?.joints; birthRoom = jt ? createBirthRoom(bm!, babyFrame.meshToRest, ix.array, jt.pelvis, jt.hipL, jt.hipR) : null; } catch (error) { console.error('[sarahlab] her birth-pose room could not be made', error); birthRoom = null; }
             try { const jt = measure?.joints; birthWeights = jt ? createBirthWeights(bm!, babyFrame.meshToRest, jt.pelvis, jt.hipL, jt.hipR, jt.kneeL, jt.kneeR, ix.array) : null; } catch (error) { console.error('[sarahlab] her birth-pose weights could not be made', error); birthWeights = null; }
           }

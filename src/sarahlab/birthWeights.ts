@@ -24,6 +24,18 @@ export const BIRTH_WEIGHTS = Object.freeze({
   /** her middle (metres across, either side): within `middle` all torso, out to `middleFade` fading to the cone's say --
    * near her crotch only (within `middleNear`, fading out by `middleFar`; her thighs touch her middle all the way down) */
   middle: 0.03, middleFade: 0.06, middleNear: 0.06, middleFar: 0.12,
+  /** and not her mound: all of it below `moundFrom` metres above the middle of her vulva, none above `moundTo` (her
+   * belly's fold onto her thighs stays her own -- Joshua, 2026-10-31, of its ragged edge) */
+  moundFrom: 0.02, moundTo: 0.045,
+  /**
+   * HER MOUND AND LOWER BELLY ARE HER TORSO'S (Joshua, 2026-10-31: "each hip and leg are separate, and the
+   * torso/belly/pubic/vagina are all together"; his references, legs up and legs wide: the belly runs smoothly into the
+   * mound and the vulva, no crease). Her skin there is partly weighted to her thighs, so a deep hip bend drew her mound
+   * in under her belly's fold. Above her vulva, all of it handed to her pelvis -- from `pubicFrom` above its middle,
+   * fully by `pubicTo` (metres) -- across her front out to `pubicWide` (fading by `pubicWideFade`), except her thigh
+   * itself: inside `thighIn` degrees of the line from hip joint to knee none, outside `thighOut` all
+   */
+  pubic: 1, pubicFrom: 0.015, pubicTo: 0.05, pubicWide: 0.07, pubicWideFade: 0.11, thighIn: 30, thighOut: 60,
   /** whether the thigh cone is used at all (off: only her middle -- the skin round and behind her vulva -- is kept) */
   useCone: false,
   /** and the cone only near the hip joint (metres): out to `coneNear` all of it, gone by `coneFar` */
@@ -47,6 +59,8 @@ export interface BirthWeights {
   apply(share: number): boolean;
   /** how many of her points the mask touches at all */
   readonly touched: number;
+  /** how much of a point the mask hands to her pelvis (0..1, the larger side) */
+  maskOf(i: number): number;
 }
 
 /**
@@ -84,8 +98,10 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
       if (!has) continue;
       d.copy(v).sub(hip[s]);
       const ang = (Math.acos(Math.max(-1, Math.min(1, d.dot(down[s]) / (d.length() || 1)))) * 180) / Math.PI;
-      const cone = smooth(B.inner, B.outer, ang) * smooth(B.coneFar, B.coneNear, d.length()), middle = smooth(B.middleFade, B.middle, Math.abs(v.x)) * smooth(B.middleFar, B.middleNear, v.distanceTo(crotch));
-      const m = Math.max(B.useCone ? cone : 0, middle);
+      const cone = smooth(B.inner, B.outer, ang) * smooth(B.coneFar, B.coneNear, d.length()), middle = smooth(B.middleFade, B.middle, Math.abs(v.x)) * smooth(B.middleFar, B.middleNear, v.distanceTo(crotch)) * smooth(crotch.y + B.moundTo, crotch.y + B.moundFrom, v.y);
+      const pubic = B.pubic * smooth(crotch.y + B.pubicFrom, crotch.y + B.pubicTo, v.y) * smooth(B.pubicWideFade, B.pubicWide, Math.abs(v.x)) * smooth(B.thighIn, B.thighOut, ang);
+      // (stored against the share the scene hands over, so that all of it goes to her pelvis)
+      const m = Math.max(B.useCone ? cone : 0, middle, pubic / B.share);
       mask[i * 2 + s] = m;
       if (m > 0) any = true;
     }
@@ -123,6 +139,7 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   const normalized = sw.normalized, scale = normalized ? (W instanceof Uint8Array ? 255 : W instanceof Uint16Array ? 65535 : 1) : 1;
   return {
     touched,
+    maskOf: (i: number) => Math.max(mask[i * 2], mask[i * 2 + 1]),
     apply(share: number): boolean {
       share = Math.max(0, Math.min(1, share));
       if (share === shareNow) return false;
@@ -135,7 +152,7 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
         for (let c = 0; c < 4; c++) {
           ix[c] = ownI[i * 4 + c]; w[c] = ownW[i * 4 + c];
           const m = ix[c] === thighL ? mL : ix[c] === thighR ? mR : 0;
-          if (m > 0) { const take = w[c] * m * share; w[c] -= take; moved += take; }
+          if (m > 0) { const take = w[c] * Math.min(1, m * share); w[c] -= take; moved += take; }
           if (ix[c] === pelvis && ownW[i * 4 + c] > 0) pel = c;
         }
         if (pel < 0) { for (let c = 1; c < 4; c++) if (w[c] < w[low]) low = c; pel = low; moved += w[pel]; w[pel] = 0; ix[pel] = pelvis; }

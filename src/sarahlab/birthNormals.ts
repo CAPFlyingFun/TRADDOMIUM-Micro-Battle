@@ -26,6 +26,15 @@ export const BIRTH_NORMALS = Object.freeze({
    * `rounds` times before the smoothing and after it
    */
   apart: 0.05, touch: 0.012, gap: 0.0015, rounds: 0, step: 0.003, layer: 0.1,
+  /**
+   * THE GROIN CREASE AS A PLANE (Joshua, 2026-10-31: the belly should run smoothly into the mound; "each hip and leg are
+   * separate, and the torso/belly/pubic/vagina are all together"). A hip bent past ~40 degrees drove the front of each
+   * thigh up into the underside of her belly, and where the two skins crossed her triangles showed as a saw-tooth. For
+   * each side, the plane through her hip joint halfway between her torso (pelvis to spine) and that thigh (hip to knee)
+   * is where the two meet: thigh skin is kept on the thigh's side of it, torso skin on the torso's -- a point across it
+   * is laid back onto it -- within `creaseReach` metres of the joint, in front of it, fading out by `creaseFade`
+   */
+  creaseReach: 0.16, creaseFade: 0.24, creaseGap: 0.002,
 });
 
 export interface BirthNormals {
@@ -38,7 +47,7 @@ export interface BirthNormals {
 
 const smooth = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
 
-export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix4, indices: ArrayLike<number>, thighBones: readonly number[] = []): BirthNormals | null {
+export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix4, indices: ArrayLike<number>, thighBones: readonly number[] = [], layerOf?: (i: number) => number, crease?: { hips: readonly [number, number]; knees: readonly [number, number]; pelvis: number; spine: number }): BirthNormals | null {
   const g = mesh.geometry as THREE.BufferGeometry;
   const si = g.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, sw = g.getAttribute('skinWeight') as THREE.BufferAttribute | undefined, pa = g.getAttribute('position');
   if (!si || !sw || !pa) return null;
@@ -111,7 +120,7 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
       // its triangles, by the triangle's own face (not a point's normal, which a fold makes unreliable)
       const thighOf = new Float64Array(K);
       { const cnt = new Float64Array(K);
-        for (const i of used) { let t = 0; for (let c = 0; c < 4; c++) if (thighBones.includes(si.getComponent(i, c))) t += sw.getComponent(i, c); thighOf[key[i]] += t; cnt[key[i]]++; }
+        for (const i of used) { let t = 0; if (layerOf) t = layerOf(i); else for (let c = 0; c < 4; c++) if (thighBones.includes(si.getComponent(i, c))) t += sw.getComponent(i, c); thighOf[key[i]] += t; cnt[key[i]]++; }
         for (let k = 0; k < K; k++) if (cnt[k]) thighOf[k] /= cnt[k]; }
       const cell = touchG, grid = new Map<number, number[]>(), mv = new Float64Array(K * 3), mc = new Float64Array(K);
       const hash = (x: number, y: number, z: number) => (Math.floor(x / cell) * 73856093) ^ (Math.floor(y / cell) * 19349663) ^ (Math.floor(z / cell) * 83492791);
@@ -177,8 +186,45 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
           if (!moved) break;
         }
       };
+      // the groin crease, per side, as a plane (see BIRTH_NORMALS.creaseReach)
+      const sideOfK = new Int8Array(K), thighW = new Float64Array(K);
+      if (crease) {
+        const tally = new Float64Array(K * 3), cn = new Float64Array(K);
+        for (const i of used) {
+          const k = key[i];
+          for (let c = 0; c < 4; c++) { const b = si.getComponent(i, c), w = sw.getComponent(i, c); if (b === crease.hips[0]) tally[k * 3] += w; else if (b === crease.hips[1]) tally[k * 3 + 1] += w; else tally[k * 3 + 2] += w; }
+          cn[k]++;
+        }
+        for (let k = 0; k < K; k++) { if (!cn[k]) continue; const l = tally[k * 3] / cn[k], r = tally[k * 3 + 1] / cn[k]; sideOfK[k] = l >= r ? 0 : 1; thighW[k] = Math.max(l, r); }
+      }
+      const boneAt = (b: number) => new THREE.Vector3().setFromMatrixPosition(sk.bones[b].matrixWorld).applyMatrix4(mesh.bindMatrixInverse);
+      const layCrease = () => {
+        if (!crease) return;
+        const pel = boneAt(crease.pelvis), up = boneAt(crease.spine).sub(pel).normalize();
+        const reach = B.creaseReach * perMetre, fade = B.creaseFade * perMetre, gap = B.creaseGap * perMetre;
+        for (let side = 0; side < 2; side++) {
+          const H = boneAt(crease.hips[side]), D = boneAt(crease.knees[side]).sub(H).normalize();
+          const nrmP = D.clone().sub(up); if (nrmP.lengthSq() < 1e-9) continue; nrmP.normalize();
+          // only in front of the joint: the way her torso and thigh both lean (their sum)
+          const front = D.clone().add(up).normalize();
+          for (let k = 0; k < K; k++) {
+            if (ks[k] <= 0 || sideOfK[k] !== side) continue;
+            const dx = kp[k * 3] - H.x, dy = kp[k * 3 + 1] - H.y, dz = kp[k * 3 + 2] - H.z, dist = Math.hypot(dx, dy, dz);
+            if (dist > fade) continue;
+            if (dx * front.x + dy * front.y + dz * front.z <= 0) continue;
+            const along = dx * nrmP.x + dy * nrmP.y + dz * nrmP.z, thigh = thighW[k] >= 0.5;
+            // thigh skin belongs on the + side, torso skin on the - side
+            const over = thigh ? gap - along : along + gap;
+            if (over <= 0) continue;
+            const f = ks[k] * smooth(fade, reach, dist), mv2 = (thigh ? over : -over) * f;
+            kp[k * 3] += nrmP.x * mv2; kp[k * 3 + 1] += nrmP.y * mv2; kp[k * 3 + 2] += nrmP.z * mv2;
+            pierced++;
+          }
+        }
+      };
       pierced = 0;
       unPierce();
+      layCrease();
       for (let pass = 0; pass < B.passes; pass++) {
         sumN.fill(0); cntN.fill(0);
         for (let t = 0; t < tris.length; t += 3) for (let q = 0; q < 3; q++) {
@@ -192,6 +238,7 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
         }
       }
       unPierce();
+      layCrease();
       for (const i of used) { const k = key[i]; posed[i * 3] = kp[k * 3]; posed[i * 3 + 1] = kp[k * 3 + 1]; posed[i * 3 + 2] = kp[k * 3 + 2]; }
       acc.fill(0);
       for (let t = 0; t < tris.length; t += 3) {
