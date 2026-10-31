@@ -3602,7 +3602,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             }
           }
           // sharp folds as drawn: triangles sharing an edge, facing more than 120 degrees apart
-          let folds = 0; const foldAt: number[][] = [];
+          let folds = 0; const foldAt: number[][] = [], foldZ = new Array(10).fill(0);
           if (rest) {
             const all = (b.mesh.userData.allIndices as ArrayLike<number> | undefined) ?? b.mesh.geometry.index?.array ?? [];
             const keyOf = new Map<string, number>(), kk = (i: number) => { const s2 = `${Math.round(base[i * 3] * 1e4)},${Math.round(base[i * 3 + 1] * 1e4)},${Math.round(base[i * 3 + 2] * 1e4)}`; let q = keyOf.get(s2); if (q === undefined) { q = keyOf.size; keyOf.set(s2, q); } return q; };
@@ -3614,7 +3614,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
               const nn = B2.sub(A).cross(C2.sub(A)); if (nn.lengthSq() < 1e-16) continue; fn.set(t, nn.normalize().clone());
               for (let q = 0; q < 3; q++) {
                 const a0 = kk(all[t + q]), b0 = kk(all[t + (q + 1) % 3]), e2 = a0 < b0 ? `${a0},${b0}` : `${b0},${a0}`, o = edgeTri.get(e2);
-                if (o === undefined) edgeTri.set(e2, t); else { const no = fn.get(o); if (no && no.dot(fn.get(t)!) < -0.5) { folds++; if (foldAt.length < 12) foldAt.push(r1.toArray().map((x) => +x.toFixed(3))); } }
+                if (o === undefined) edgeTri.set(e2, t); else { const no = fn.get(o); if (no && no.dot(fn.get(t)!) < -0.5) { folds++; foldZ[Math.max(0, Math.min(9, Math.floor((r1.z + 0.3) / 0.05)))]++; if (foldAt.length < 12) foldAt.push(r1.toArray().map((x) => +x.toFixed(3))); } }
               }
             }
           }
@@ -3623,7 +3623,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           let missWorst = 0, missOver1mm = 0;
           { const ex = birthNormals?.expected ?? [], o2 = new THREE.Vector3();
             for (let q = 0; q + 3 < ex.length; q += 4) { b.mesh.getVertexPosition(ex[q], o2); const d = Math.hypot(o2.x - ex[q + 1], o2.y - ex[q + 2], o2.z - ex[q + 3]); if (d > missWorst) missWorst = d; if (d > 0.0011) missOver1mm++; } }
-          return { missWorst: +missWorst.toFixed(5), missOver1mm, meant: (birthNormals?.expected.length ?? 0) / 4, folds, foldAt, unironed: birthNormals?.folded, blow: birthNormals?.blow, worst: +worst.toFixed(3), over05, over2, at, openEdges: oe.length / 2, openAt, near, flipped };
+          return { missWorst: +missWorst.toFixed(5), missOver1mm, meant: (birthNormals?.expected.length ?? 0) / 4, folds, foldZ, foldAt, unironed: birthNormals?.folded, blow: birthNormals?.blow, worst: +worst.toFixed(3), over05, over2, at, openEdges: oe.length / 2, openAt, near, flipped };
         },
         midlineCrossers: () => {
           const b = bodyOf(); if (!b || !babyFrame || !measure || !model) return null;

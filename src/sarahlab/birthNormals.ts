@@ -21,7 +21,7 @@ export const BIRTH_NORMALS = Object.freeze({
   passes: 30, lambda: 0.6,
   /** folds ironed out after it (2026-10-31): two triangles sharing an edge whose facings' dot is below `foldAt` are a
    * fold; the points round it are smoothed `ironLambda` hard, four passes a round, at most `ironRounds` rounds */
-  foldAt: -0.2, ironLambda: 0.8, ironRounds: 40,
+  foldAt: 0.3, ironLambda: 0.8, ironRounds: 60,
   /**
    * her posed skin kept from passing through itself there (the saw-tooth seams under her buttocks and down her groin,
    * where her thigh's underside and her buttock press into each other): two points from far apart on her (`apart`

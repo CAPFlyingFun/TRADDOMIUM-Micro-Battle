@@ -52,7 +52,7 @@ export const BIRTH_WEIGHTS = Object.freeze({
   crotchHalf: 0.035, hipOut: 0.14, hipUp: 0.12, band: 0.02,
   /** ...whole from her front to `backFrom` metres behind the middle of her vulva (7 cm past its back end, beyond her
    * anus), easing by `backFade` to `backShare` of it on her lower buttocks */
-  backFrom: 0.1, backFade: 0.15, backShare: 0.1,
+  backFrom: 0.1, backFade: 0.15, backShare: 0,
   /** and the cone only near the hip joint (metres): out to `coneNear` all of it, gone by `coneFar` */
   coneNear: 0.14, coneFar: 0.22,
   /**
