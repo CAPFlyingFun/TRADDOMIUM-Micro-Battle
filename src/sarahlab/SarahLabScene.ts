@@ -3529,7 +3529,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           const head = bones[j.head].getWorldPosition(new THREE.Vector3());
           return { ...vulva.worldAxes(), toKnees: knee.sub(hip).normalize().toArray().map((x) => +x.toFixed(3)), toHead: head.sub(hip).normalize().toArray().map((x) => +x.toFixed(3)) };
         },
-        birthMask: (share: number | null) => { birthMaskOverride = share; applyLook(); return { touched: birthWeights?.touched ?? null }; },
+        birthMask: (share: number | null) => { birthMaskOverride = share; applyLook(); return { touched: birthWeights?.touched ?? null, debug: birthWeights?.debug }; },
         birthTweak: (t: Partial<BirthSpec> | null) => { birthTweak = t; applyLook(); return true; },
         birthRoom: (on: boolean) => { birthRoomOn = on; birthRoomFor = ''; applyLook(); return { watched: birthRoom?.watched ?? null, largestMm: birthRoom ? +(birthRoom.largest * 1000).toFixed(1) : null, partsMm: birthRoom ? Object.fromEntries(Object.entries(birthRoom.parts).map(([k2, v2]) => [k2, +(v2 * 1000).toFixed(1)])) : null }; },
         // which of her points have come to her middle as posed (pelvis frame |x| < 6 mm) that stood well off it, and where they stood

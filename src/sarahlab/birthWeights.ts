@@ -18,7 +18,7 @@ import { birthAreaCentre, BIRTH_AREA } from './birthArea';
 export const BIRTH_WEIGHTS = Object.freeze({
   /** how much of each thigh's say over the masked skin goes to her pelvis in a birth position (Joshua's look at RECLINE,
    * 2026-10-30: all of it opened her vulva but stretched her inner thighs into sheets; half keeps both) */
-  share: 0,
+  share: 1,
   /* (0 since RECLINE opened to 80 degrees out, 50 up, 2026-10-31: her own weights then leave her belly, mound and vulva
    * smooth, and the mask only pinched her perineum; kept for a pose that needs it) */
   /** the thigh's cone, round the line from hip joint to knee: inside `inner` degrees all thigh, outside `outer` all torso */
@@ -40,6 +40,16 @@ export const BIRTH_WEIGHTS = Object.freeze({
   pubic: 1, pubicFrom: 0.015, pubicTo: 0.05, pubicWide: 0.07, pubicWideFade: 0.11, thighIn: 30, thighOut: 60,
   /** whether the thigh cone is used at all (off: only her middle -- the skin round and behind her vulva -- is kept) */
   useCone: false,
+  /** which of the older terms are used (the middle strip and the mound; both off since the leotard) */
+  useMiddle: false, usePubic: false,
+  /**
+   * THE LEOTARD (Joshua, 2026-10-31: "think of the belly, torso and pubic area as a one piece swimsuit or leotard... and
+   * the legs are separated from it", drawn over his references: the line runs from her hip down her groin crease to
+   * beside her vulva). Each leg opening is a plane through a point `crotchHalf` metres out from her middle at her vulva
+   * and a point `hipOut` metres out from her middle and `hipUp` metres above her vulva (her hip bone's front), running front to back: her skin on the
+   * torso's side of it is carried by her pelvis, the leg's by its thigh, over a band `band` metres either side
+   */
+  crotchHalf: 0.035, hipOut: 0.14, hipUp: 0.12, band: 0.02,
   /** and the cone only near the hip joint (metres): out to `coneNear` all of it, gone by `coneFar` */
   coneNear: 0.14, coneFar: 0.22,
   /**
@@ -63,6 +73,7 @@ export interface BirthWeights {
   readonly touched: number;
   /** how much of a point the mask hands to her pelvis (0..1, the larger side) */
   maskOf(i: number): number;
+  readonly debug: Record<string, unknown>;
 }
 
 /**
@@ -75,7 +86,13 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   if (!si || !sw || !pa || (si as unknown as { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute || (sw as unknown as { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute) return null;
   const n = pa.count, B = BIRTH_WEIGHTS;
   // a bone's bind place in her geometry's frame: bindMatrixInverse * inverse(boneInverse) * origin
-  const at = (b: number) => new THREE.Vector3().applyMatrix4(new THREE.Matrix4().copy(mesh.skeleton.boneInverses[b]).invert()).applyMatrix4(mesh.bindMatrixInverse).applyMatrix4(toRest);
+  // (her bones' bind matrices are not in her geometry's units; so the joint is found from her skin itself: the middle of
+  // the points that bone carries most, weighted by how much -- for a thigh, the ring of skin round its top)
+  const at = (b: number) => {
+    const sum = new THREE.Vector3(), q = new THREE.Vector3(); let wsum = 0;
+    for (let i = 0; i < pa.count; i++) for (let c = 0; c < 4; c++) if (si.getComponent(i, c) === b) { const w = sw.getComponent(i, c); if (w < 0.5) continue; q.set(pa.getX(i), pa.getY(i), pa.getZ(i)).applyMatrix4(toRest); sum.addScaledVector(q, w * w); wsum += w * w; }
+    return wsum > 0 ? sum.divideScalar(wsum) : sum;
+  };
   const hip = [at(thighL), at(thighR)], knee = [at(kneeL), at(kneeR)], thighs = [thighL, thighR];
   const down = [knee[0].clone().sub(hip[0]).normalize(), knee[1].clone().sub(hip[1]).normalize()];
   const hipY = (hip[0].y + hip[1].y) / 2;
@@ -84,6 +101,15 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   for (let i = 0; i < pa.count; i++) q.set(pa.getX(i), pa.getY(i), pa.getZ(i)).applyMatrix4(toRest).toArray(restAll, i * 3);
   const cc = birthAreaCentre(restAll), mAng = (((BIRTH_AREA.front + BIRTH_AREA.back) / 2) * Math.PI) / 180;
   const crotch = cc ? new THREE.Vector3(0, cc.y - 0.047 * Math.cos(mAng), cc.z + 0.047 * Math.sin(mAng)) : new THREE.Vector3(0, hipY - 0.08, 0);
+  // each leg opening's plane (it runs front to back, so in x and y only), its normal toward the leg
+  const planes = [0, 1].map((side) => {
+    const sx = Math.sign(hip[side].x) || (side === 0 ? 1 : -1);
+    const ax = sx * B.crotchHalf, ay = crotch.y, bx = sx * B.hipOut, by = crotch.y + B.hipUp;
+    let nx = by - ay, ny = -(bx - ax);
+    const l = Math.hypot(nx, ny) || 1; nx /= l; ny /= l;
+    if ((knee[side].x - ax) * nx + (knee[side].y - ay) * ny < 0) { nx = -nx; ny = -ny; }
+    return { ax, ay, nx, ny };
+  });
   // her own weights, as plain numbers (a quantized file stores them as normalized integers), kept to come back to
   const ownI = new Uint16Array(n * 4), ownW = new Float32Array(n * 4);
   for (let i = 0; i < n; i++) for (let c = 0; c < 4; c++) { ownI[i * 4 + c] = si.getComponent(i, c); ownW[i * 4 + c] = sw.getComponent(i, c); }
@@ -103,7 +129,9 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
       const cone = smooth(B.inner, B.outer, ang) * smooth(B.coneFar, B.coneNear, d.length()), middle = smooth(B.middleFade, B.middle, Math.abs(v.x)) * smooth(B.middleFar, B.middleNear, v.distanceTo(crotch)) * smooth(crotch.y + B.moundTo, crotch.y + B.moundFrom, v.y);
       const pubic = B.pubic * smooth(crotch.y + B.pubicFrom, crotch.y + B.pubicTo, v.y) * smooth(B.pubicWideFade, B.pubicWide, Math.abs(v.x)) * smooth(B.thighIn, B.thighOut, ang);
       // (stored against the share the scene hands over, so that all of it goes to her pelvis)
-      const m = Math.max(B.useCone ? cone : 0, middle, B.share > 0 ? pubic / B.share : pubic);
+      const pl = planes[s], dLeg = (v.x - pl.ax) * pl.nx + (v.y - pl.ay) * pl.ny;
+      const leotard = smooth(B.band, -B.band, dLeg);
+      const m = Math.max(B.useCone ? cone : 0, B.useMiddle ? middle : 0, B.usePubic ? pubic : 0, leotard);
       mask[i * 2 + s] = m;
       if (m > 0) any = true;
     }
@@ -141,6 +169,7 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   const normalized = sw.normalized, scale = normalized ? (W instanceof Uint8Array ? 255 : W instanceof Uint16Array ? 65535 : 1) : 1;
   return {
     touched,
+    debug: { hip: hip.map((h) => h.toArray().map((x) => +x.toFixed(3))), knee: knee.map((h) => h.toArray().map((x) => +x.toFixed(3))), crotch: crotch.toArray().map((x) => +x.toFixed(3)), planes },
     maskOf: (i: number) => Math.max(mask[i * 2], mask[i * 2 + 1]),
     apply(share: number): boolean {
       share = Math.max(0, Math.min(1, share));

@@ -26,7 +26,7 @@ export const VULVA = Object.freeze({
    * enough for the skin a crowning head domes out (Joshua's references, 2026-10-30: the dome's base is wide) */
   reach: 0.07,
   /** ...and how far from it seen straight on (metres) */
-  round: 0.05,
+  round: 0.04,
   /** where the split's middle is: round the middle the cleft runs round, at this distance from it (metres) */
   shell: 0.047,
   /** half the split's length (metres, along her skin): her groove, front to back */
