@@ -28,6 +28,14 @@ export const BIRTH_WEIGHTS = Object.freeze({
   useCone: false,
   /** and the cone only near the hip joint (metres): out to `coneNear` all of it, gone by `coneFar` */
   coneNear: 0.14, coneFar: 0.22,
+  /**
+   * her weights smoothed over her skin round her groin and under her hips and buttocks in a birth position (Joshua,
+   * 2026-10-31: "finish smoothening these areas"): where her buttock's skin and her thigh's meet, their weights change
+   * abruptly, so a deep hip bend drove the two skins through each other in a saw-tooth seam; blurred over her mesh, the
+   * two bend together into one smooth fold. Within `blurNear` of her crotch (metres) all of it, none past `blurFar`;
+   * `blurPasses` times, each `blurRate` of the way to its neighbours' mean
+   */
+  blurNear: 0.12, blurFar: 0.2, blurPasses: 30, blurRate: 0.5,
   /** and only below her navel (metres above the hip joints): her chest and arms are no thigh's */
   above: 0.2,
 });
@@ -45,7 +53,7 @@ export interface BirthWeights {
  * The mask for `mesh` (her body), from its bind: `pelvis`, `thighL`/`thighR` and `kneeL`/`kneeR` are bone indices in its
  * skeleton; `toRest` takes her geometry to her rest frame (metres, +x her left). Null when it has no skin weights.
  */
-export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix4, pelvis: number, thighL: number, thighR: number, kneeL: number, kneeR: number): BirthWeights | null {
+export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix4, pelvis: number, thighL: number, thighR: number, kneeL: number, kneeR: number, indices?: ArrayLike<number>): BirthWeights | null {
   const g = mesh.geometry as THREE.BufferGeometry;
   const si = g.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, sw = g.getAttribute('skinWeight') as THREE.BufferAttribute | undefined, pa = g.getAttribute('position');
   if (!si || !sw || !pa || (si as unknown as { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute || (sw as unknown as { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute) return null;
@@ -83,6 +91,33 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
     }
     if (any) touched++;
   }
+  // the blur's region, its points welded by place (a seam's vertices share one), their neighbours, and the bones there
+  const blurW = new Float32Array(n), keyOf = new Int32Array(n).fill(-1), keyMap = new Map<string, number>();
+  for (let i = 0; i < n; i++) {
+    v.fromArray(restAll, i * 3);
+    if (v.y > hipY + B.above) continue;
+    const bw = smooth(B.blurFar, B.blurNear, v.distanceTo(crotch));
+    if (bw <= 0) continue;
+    blurW[i] = bw;
+    const k = `${Math.round(pa.getX(i) * 1e4)},${Math.round(pa.getY(i) * 1e4)},${Math.round(pa.getZ(i) * 1e4)}`;
+    let id = keyMap.get(k); if (id === undefined) { id = keyMap.size; keyMap.set(k, id); } keyOf[i] = id;
+  }
+  const KB = keyMap.size, nbStart: number[] = [], nbList: number[] = [];
+  const keyBlur = new Float32Array(KB), bones = new Map<number, number>();
+  for (let i = 0; i < n; i++) if (keyOf[i] >= 0) { keyBlur[keyOf[i]] = Math.max(keyBlur[keyOf[i]], blurW[i]); for (let c = 0; c < 4; c++) if (ownW[i * 4 + c] > 0 && !bones.has(ownI[i * 4 + c])) bones.set(ownI[i * 4 + c], bones.size); }
+  if (!bones.has(pelvis)) bones.set(pelvis, bones.size);
+  {
+    const sets: Set<number>[] = Array.from({ length: KB }, () => new Set<number>());
+    if (indices) for (let t = 0; t + 2 < indices.length; t += 3) {
+      const a = keyOf[indices[t]], b = keyOf[indices[t + 1]], c = keyOf[indices[t + 2]];
+      if (a >= 0 && b >= 0) { sets[a].add(b); sets[b].add(a); }
+      if (b >= 0 && c >= 0) { sets[b].add(c); sets[c].add(b); }
+      if (a >= 0 && c >= 0) { sets[a].add(c); sets[c].add(a); }
+    }
+    for (let k = 0; k < KB; k++) { nbStart.push(nbList.length); for (const o of sets[k]) nbList.push(o); }
+    nbStart.push(nbList.length);
+  }
+  const NB = bones.size, boneOf = [...bones.keys()];
   let shareNow = 0;
   const I = si.array as ArrayLike<number> & { [k: number]: number }, W = sw.array as ArrayLike<number> & { [k: number]: number };
   const normalized = sw.normalized, scale = normalized ? (W instanceof Uint8Array ? 255 : W instanceof Uint16Array ? 65535 : 1) : 1;
@@ -95,7 +130,7 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
       const w = [0, 0, 0, 0], ix = [0, 0, 0, 0];
       for (let i = 0; i < n; i++) {
         const mL = mask[i * 2], mR = mask[i * 2 + 1];
-        if (mL <= 0 && mR <= 0) continue;
+        if (mL <= 0 && mR <= 0) { if (keyOf[i] >= 0) for (let c = 0; c < 4; c++) { I[i * 4 + c] = ownI[i * 4 + c]; W[i * 4 + c] = normalized && scale > 1 ? Math.round(ownW[i * 4 + c] * scale) : ownW[i * 4 + c]; } continue; }
         let moved = 0, pel = -1, low = 0;
         for (let c = 0; c < 4; c++) {
           ix[c] = ownI[i * 4 + c]; w[c] = ownW[i * 4 + c];
@@ -107,6 +142,39 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
         w[pel] += moved;
         const sum = w[0] + w[1] + w[2] + w[3] || 1;
         for (let c = 0; c < 4; c++) { I[i * 4 + c] = ix[c]; W[i * 4 + c] = normalized && scale > 1 ? Math.round((w[c] / sum) * scale) : w[c] / sum; }
+      }
+      // then blurred over her skin there, as much as the share says
+      if (share > 0 && KB && indices) {
+        const kw = new Float32Array(KB * NB), cnt = new Float32Array(KB);
+        for (let i = 0; i < n; i++) {
+          const k = keyOf[i]; if (k < 0) continue;
+          for (let c = 0; c < 4; c++) { const wv = normalized && scale > 1 ? W[i * 4 + c] / scale : W[i * 4 + c]; if (wv > 0) { const bi = bones.get(I[i * 4 + c]); if (bi !== undefined) kw[k * NB + bi] += wv; } }
+          cnt[k]++;
+        }
+        for (let k = 0; k < KB; k++) if (cnt[k] > 1) for (let b = 0; b < NB; b++) kw[k * NB + b] /= cnt[k];
+        const next = new Float32Array(KB * NB);
+        for (let pass = 0; pass < B.blurPasses; pass++) {
+          for (let k = 0; k < KB; k++) {
+            const s0 = nbStart[k], s1 = nbStart[k + 1], rate = B.blurRate * keyBlur[k] * share;
+            if (s1 === s0 || rate <= 0) { for (let b = 0; b < NB; b++) next[k * NB + b] = kw[k * NB + b]; continue; }
+            for (let b = 0; b < NB; b++) {
+              let m = 0;
+              for (let e = s0; e < s1; e++) m += kw[nbList[e] * NB + b];
+              m /= s1 - s0;
+              next[k * NB + b] = kw[k * NB + b] + rate * (m - kw[k * NB + b]);
+            }
+          }
+          kw.set(next);
+        }
+        // back on every vertex of each point: its four strongest, summing to one
+        const order = Array.from({ length: NB }, (_, b) => b);
+        for (let i = 0; i < n; i++) {
+          const k = keyOf[i]; if (k < 0) continue;
+          order.sort((a, b) => kw[k * NB + b] - kw[k * NB + a]);
+          let sum = 0; for (let c = 0; c < 4; c++) sum += kw[k * NB + order[c]] || 0;
+          sum = sum || 1;
+          for (let c = 0; c < 4; c++) { const b = order[c], wv = b !== undefined ? (kw[k * NB + b] || 0) / sum : 0; I[i * 4 + c] = b !== undefined ? boneOf[b] : 0; W[i * 4 + c] = normalized && scale > 1 ? Math.round(wv * scale) : wv; }
+        }
       }
       si.needsUpdate = true; sw.needsUpdate = true;
       return true;
