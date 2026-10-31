@@ -16,6 +16,9 @@ import { birthAreaCentre, BIRTH_AREA } from './birthArea';
 
 /** GAME TUNING. */
 export const BIRTH_WEIGHTS = Object.freeze({
+  /** how much of each thigh's say over the masked skin goes to her pelvis in a birth position (Joshua's look at RECLINE,
+   * 2026-10-30: all of it opened her vulva but stretched her inner thighs into sheets; half keeps both) */
+  share: 0.5,
   /** the thigh's cone, round the line from hip joint to knee: inside `inner` degrees all thigh, outside `outer` all torso */
   inner: 38, outer: 62,
   /** her middle (metres across, either side): within `middle` all torso, out to `middleFade` fading to the cone's say --

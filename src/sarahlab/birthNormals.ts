@@ -14,7 +14,12 @@ import { birthAreaCentre, BIRTH_AREA } from './birthArea';
 export const BIRTH_NORMALS_FIELD = 'shape:birthNormals';
 
 /** GAME TUNING: the band (metres from the middle of her vulva): all of it within `near`, none past `far`. */
-export const BIRTH_NORMALS = Object.freeze({ near: 0.2, far: 0.3, above: 0.12 });
+export const BIRTH_NORMALS = Object.freeze({
+  near: 0.2, far: 0.3, above: 0.12,
+  /** her posed skin there smoothed too (Joshua, 2026-10-30: "smooth under the hips and buttocks... Add more
+   * smoothening"): how many passes, and how far each moves a point toward its neighbours' middle (0..1) */
+  passes: 30, lambda: 0.6,
+});
 
 export interface BirthNormals {
   /** the field for her as posed now (her bones' world matrices current); `pos`/`nrm` her shape as drawn */
@@ -63,6 +68,24 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
       const sk = mesh.skeleton;
       for (let q = 0; q < sk.bones.length; q++) S[q].multiplyMatrices(mesh.bindMatrixInverse, tmp.multiplyMatrices(sk.bones[q].matrixWorld, sk.boneInverses[q])).multiply(mesh.bindMatrix);
       for (const i of used) { v.set(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]).applyMatrix4(blend(i)); posed[i * 3] = v.x; posed[i * 3 + 1] = v.y; posed[i * 3 + 2] = v.z; }
+      // smoothed where she is posed (by point, so a seam stays shut), each point as far as the band's share says
+      const kp = new Float64Array(K * 3), kc = new Float64Array(K), ks = new Float64Array(K);
+      for (const i of used) { const k = key[i]; kp[k * 3] += posed[i * 3]; kp[k * 3 + 1] += posed[i * 3 + 1]; kp[k * 3 + 2] += posed[i * 3 + 2]; kc[k]++; ks[k] = Math.max(ks[k], share[i]); }
+      for (let k = 0; k < K; k++) { kp[k * 3] /= kc[k]; kp[k * 3 + 1] /= kc[k]; kp[k * 3 + 2] /= kc[k]; }
+      const before = Float64Array.from(kp), sumN = new Float64Array(K * 3), cntN = new Float64Array(K);
+      for (let pass = 0; pass < B.passes; pass++) {
+        sumN.fill(0); cntN.fill(0);
+        for (let t = 0; t < tris.length; t += 3) for (let q = 0; q < 3; q++) {
+          const k = key[tris[t + q]];
+          for (let r = 1; r < 3; r++) { const o = key[tris[t + ((q + r) % 3)]]; sumN[k * 3] += kp[o * 3]; sumN[k * 3 + 1] += kp[o * 3 + 1]; sumN[k * 3 + 2] += kp[o * 3 + 2]; cntN[k]++; }
+        }
+        for (let k = 0; k < K; k++) {
+          if (!cntN[k] || ks[k] <= 0) continue;
+          const l = B.lambda * ks[k];
+          for (let c = 0; c < 3; c++) kp[k * 3 + c] += l * (sumN[k * 3 + c] / cntN[k] - kp[k * 3 + c]);
+        }
+      }
+      for (const i of used) { const k = key[i]; posed[i * 3] = kp[k * 3]; posed[i * 3 + 1] = kp[k * 3 + 1]; posed[i * 3 + 2] = kp[k * 3 + 2]; }
       acc.fill(0);
       for (let t = 0; t < tris.length; t += 3) {
         a.fromArray(posed, tris[t] * 3); b.fromArray(posed, tris[t + 1] * 3); cc.fromArray(posed, tris[t + 2] * 3);
@@ -83,7 +106,7 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
         }
         acc.set(sm2);
       }
-      const idx: number[] = [], dn: number[] = [];
+      const idx: number[] = [], dn: number[] = [], dp: number[] = [];
       watched.forEach((i) => {
         const o = key[i] * 3;
         a.set(acc[o], acc[o + 1], acc[o + 2]).multiplyScalar(wind);
@@ -96,8 +119,12 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
         b.set(nrm[i * 3], nrm[i * 3 + 1], nrm[i * 3 + 2]);
         a.sub(b).multiplyScalar(share[i]);
         idx.push(i); dn.push(a.x, a.y, a.z);
+        // and its move, turned back into her rest shape
+        const k = key[i];
+        b.set(kp[k * 3] - before[k * 3], kp[k * 3 + 1] - before[k * 3 + 1], kp[k * 3 + 2] - before[k * 3 + 2]).applyMatrix3(Li);
+        dp.push(b.x, b.y, b.z);
       });
-      return { index: Uint32Array.from(idx), pos: new Float32Array(dn.length), nrm: Float32Array.from(dn) };
+      return { index: Uint32Array.from(idx), pos: Float32Array.from(dp), nrm: Float32Array.from(dn) };
     },
   };
 }

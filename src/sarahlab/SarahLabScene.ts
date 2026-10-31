@@ -86,7 +86,7 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import { setPush, jiggleOf as jiggleOfMesh } from './softBody';
 import { createVulvaPatch, type VulvaPatch } from './vulvaMesh';
 import { BIRTH_THIGHS_FIELD, birthThighsField } from './birthThighs';
-import { createBirthWeights, type BirthWeights } from './birthWeights';
+import { BIRTH_WEIGHTS, createBirthWeights, type BirthWeights } from './birthWeights';
 import { BIRTH_ROOM_FIELD, createBirthRoom, type BirthRoom } from './birthRoom';
 import { BIRTH_NORMALS_FIELD, createBirthNormals, type BirthNormals } from './birthNormals';
 import { attachJiggle, bellyTune, breastTune, createJiggleUniforms, feltAcceleration, restingMass, stepMass, type Mass } from './softBody';
@@ -1201,7 +1201,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     layBuildBones(build);
     // her middle -- the skin round and behind her vulva -- kept with her pelvis in a birth position (birthWeights.ts;
     // Joshua, 2026-10-30, of RECLINE with it: "Looks a lot better"); the rebuilt area reads her weights again
-    if (birthWeights?.apply(birthMaskOverride ?? (isBirthPose(pose) ? 1 : 0))) vulva?.resyncWeights();
+    if (birthWeights?.apply(birthMaskOverride ?? (isBirthPose(pose) ? BIRTH_WEIGHTS.share : 0))) vulva?.resyncWeights();
     // her navel, laid on her as just shaped (navelPiece.ts)
     layNavel(bump);
     // which garments are drawn: the outfit editor's choice, or none while her skin is painted bare (CLOTHES · HIDDEN)
