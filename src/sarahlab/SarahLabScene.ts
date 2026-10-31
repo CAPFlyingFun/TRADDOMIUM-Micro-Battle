@@ -3236,7 +3236,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             }
             // and the area rebuilt finer, from her own skin, to be able to open (vulvaMesh.ts)
             vulva?.dispose();
-            try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
+            try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest, measure?.joints.pelvis); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
           }
         }
         if (babyShown) showBaby(true);
@@ -3446,8 +3446,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // aim straight at her split: from its own facing, at a distance (and turned a little either way)
         vulvaAim: (distance: number, yawOff = 0, pitchOff = 0) => {
           if (!vulva) return null; model?.updateMatrixWorld(true);
-          const f = vulva.facing(); orbit.yaw = f.yaw + yawOff; orbit.pitch = f.pitch + pitchOff; orbit.distance = distance; orbit.target.copy(f.at); turning = false;
-          return { yaw: +f.yaw.toFixed(3), pitch: +f.pitch.toFixed(3) };
+          const ud = vulva.mesh.userData as { face?: ReturnType<VulvaPatch['facing']> };
+          if (!ud.face || vulva.open === 0) ud.face = vulva.facing();
+          const f = ud.face; orbit.yaw = f.yaw + yawOff; orbit.pitch = f.pitch + pitchOff; orbit.distance = distance; orbit.target.copy(f.at); turning = false;
+          return { yaw: +f.yaw.toFixed(3), pitch: +f.pitch.toFixed(3), dbg: vulva.debug() };
         },
         vulvaStats: () => {
           const b = bodyOf(); if (!vulva || !b) return null;

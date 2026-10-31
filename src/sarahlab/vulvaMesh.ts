@@ -9,6 +9,26 @@ import { bakeVulva, type VulvaBake } from './vulvaPatch';
 import { JIGGLE_ATTRIBUTE, PUSH_ATTRIBUTE } from './softBody';
 import { birthAreaCentre } from './birthArea';
 
+/**
+ * GAME TUNING for the opening (Joshua's references, 2026-10-30: at crowning the whole area round the opening domes out
+ * several centimetres, so the opening stands level with her thighs or in front of them, not sunk between them).
+ */
+export const VULVA_OPEN = Object.freeze({
+  /** how far the middle of the area pushes out at full open (metres), and from how open it starts to */
+  dome: 0.055, domeFrom: 0.15,
+  /**
+   * which way the opening faces and the tube runs (degrees from straight down, toward her front, in her rest shape).
+   * BIOLOGICAL SHAPE: standing, the vagina runs up and BACK at about 45 degrees, so its mouth faces down and forward;
+   * reclined, that is toward whoever is in front of her (Joshua, 2026-10-30: "is the split angled the wrong direction?")
+   */
+  tilt: 40,
+  /** from how open the skin round it stretches like a membrane rather than moving with her rest shape, and how far it
+   * leaves the ring back toward her body (0 straight out, 1 at 45 degrees back) */
+  membraneFrom: 0.3, wrap: 0.6,
+  /** how strongly the membrane's curve leaves the ring and arrives at her skin (a share of the distance between) */
+  reachOut: 0.5, reachIn: 0.6,
+});
+
 export interface VulvaPatch {
   readonly mesh: THREE.SkinnedMesh;
   readonly bake: VulvaBake;
@@ -48,7 +68,7 @@ function floatsOf(attr: THREE.BufferAttribute | THREE.InterleavedBufferAttribute
  * Cut the area out of `body` and lay the rebuilt one on her. `basePos`: her rest shape as approved (geometry units, before
  * any field); `meshToRest`: her geometry to her rest frame (metres). Null when the area could not be found.
  */
-export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array, meshToRest: THREE.Matrix4): VulvaPatch | null {
+export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array, meshToRest: THREE.Matrix4, pelvisBone?: number): VulvaPatch | null {
   const g = body.geometry as THREE.BufferGeometry, index = g.index;
   if (!index) return null;
   const n = basePos.length / 3, rest = new Float32Array(basePos.length), v = new THREE.Vector3();
@@ -157,8 +177,24 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   const restPos = new Float32Array(P * 3), restNrm = new Float32Array(P * 3);
   let open = 0, openApplied = -1;
 
-  // the tube: one ring of points per column, from the split inward
-  const K = 14, TV = K * M;
+  // CARRIED BY HER PELVIS as it opens. Her skin there is weighted to her pelvis and both thighs, so a move laid on it in
+  // her rest shape is turned by her thighs as well as her pelvis once she is posed -- every birth pose turns her thighs
+  // a long way, and the two sides of an open ring went two ways. So the move is laid on in her PELVIS's frame: each
+  // frame, a point's rest move is put through the inverse of its own bones' turn and then its pelvis's (her skin keeps
+  // its own weights; closed, nothing moves and nothing is computed). The tube hangs from her pelvis alone.
+  const skI = geom.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, skW = geom.getAttribute('skinWeight') as THREE.BufferAttribute | undefined;
+  let pelvis = 0;
+  if (pelvisBone !== undefined && pelvisBone >= 0) pelvis = pelvisBone;
+  else if (skI && skW) {
+    let jm = 0;
+    for (let j = 0; j < M; j++) if (Math.abs(colQ[j]) < Math.abs(colQ[jm])) jm = j;
+    let best = -1;
+    for (let c = 0; c < 4; c++) if (skW.getComponent(base[jm], c) > best) { best = skW.getComponent(base[jm], c); pelvis = skI.getComponent(base[jm], c); }
+  }
+  /** the opening as laid on her rest shape: the area's points, its normals, how much each moved (0..1), the tube's points */
+  const want = new Float32Array(P * 3), wantNrm = new Float32Array(P * 3), moved = new Float32Array(P);
+  // the tube: one ring of points per column, from the split inward (carried by her pelvis alone)
+  const K = 14, TV = K * M, tubeWant = new Float32Array(TV * 3);
   const tubeGeom = new THREE.BufferGeometry(), tubePos = new Float32Array(TV * 3);
   tubeGeom.setAttribute('position', new THREE.BufferAttribute(tubePos, 3));
   tubeGeom.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(TV * 3), 3));
@@ -166,7 +202,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     const pi = geom.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, pw = geom.getAttribute('skinWeight') as THREE.BufferAttribute | undefined;
     if (pi && pw) {
       const ti = new Uint16Array(TV * 4), tw = new Float32Array(TV * 4);
-      for (let m = 0; m < K; m++) for (let j = 0; j < M; j++) for (let c = 0; c < 4; c++) { ti[(m * M + j) * 4 + c] = pi.getComponent(base[j], c); tw[(m * M + j) * 4 + c] = pw.getComponent(base[j], c); }
+      for (let q = 0; q < TV; q++) { ti[q * 4] = pelvis; tw[q * 4] = 1; }
       tubeGeom.setAttribute('skinIndex', new THREE.BufferAttribute(ti, 4)); tubeGeom.setAttribute('skinWeight', new THREE.BufferAttribute(tw, 4));
     }
     for (const kind of ['position', 'normal'] as const) {
@@ -193,6 +229,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   const rim = new Float32Array(M * 3);
   /** lay the opening on the rest shape just read (restPos) */
   function layOpen(): void {
+    const pos = want;
     pos.set(restPos);
     // the split's frame: its middle, along it (back to front), out of her
     let jm = 0;
@@ -204,8 +241,12 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     tA.addScaledVector(across, -tA.dot(across)).normalize();
     nO.crossVectors(across, tA).normalize();
     if (nO.dot(vv.fromArray(restNrm, base[jm] * 3)) < 0) nO.negate();
+    // turned toward her front by the tube's angle: the way the opening faces and the way the tube runs in
+    { const t = (VULVA_OPEN.tilt * Math.PI) / 180, front = tA.dot(new THREE.Vector3(0, 0, 1).applyMatrix3(inv)) >= 0 ? 1 : -1;
+      const n2 = nO.clone().multiplyScalar(Math.cos(t)).addScaledVector(tA, front * Math.sin(t)), t2 = tA.clone().multiplyScalar(Math.cos(t)).addScaledVector(nO, -front * Math.sin(t));
+      nO.copy(n2).normalize(); tA.copy(t2).normalize(); }
     const halfLen = 0.037, D = 0.1 * open, a = Math.max(halfLen, D / 2), b = Math.min(a, D / 2);
-    const flatten = smooth(0, 1, b / a), dome = 0.03 * smooth(0.25, 1, open);
+    const flatten = smooth(0, 1, b / a), dome = VULVA_OPEN.dome * smooth(VULVA_OPEN.domeFrom, 1, open);
     for (let j = 0; j < M; j++) {
       const q = Math.max(-1, Math.min(1, colQ[j])), v = base[j];
       vv.fromArray(restPos, v * 3);
@@ -216,9 +257,34 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     // every point of the area moves as its column's split point does, less and less out to her own skin
     for (let p = 0; p < P; p++) {
       const j = bake.column[p], w = 0.5 * (1 + Math.cos(Math.PI * Math.min(1, tau[p]))), r0 = base[j];
+      moved[p] = w;
       for (let c = 0; c < 3; c++) pos[p * 3 + c] += w * (rim[j * 3 + c] - restPos[r0 * 3 + c]);
     }
+    // and, opening wide, stretched like a membrane instead (his photos of crowning: the skin runs from the ring round
+    // the head back down to her body in one smooth dome, never folded over itself): for each column a smooth curve from
+    // its point on the ring, leaving outward and back toward her body, to her own skin at the edge, arriving along it
+    const membrane = smooth(VULVA_OPEN.membraneFrom, 1, open);
+    if (membrane > 0) {
+      const rc = new THREE.Vector3();
+      for (let j = 0; j < M; j++) rc.x += rim[j * 3] / M, rc.y += rim[j * 3 + 1] / M, rc.z += rim[j * 3 + 2] / M;
+      const P0 = new THREE.Vector3(), P1 = new THREE.Vector3(), T0 = new THREE.Vector3(), T1 = new THREE.Vector3(), h = new THREE.Vector3();
+      const curves: THREE.Vector3[][] = [];
+      for (let j = 0; j < M; j++) {
+        P0.fromArray(rim, j * 3); P1.fromArray(restPos, base[R * M + j] * 3);
+        const len = P0.distanceTo(P1);
+        T0.copy(P0).sub(rc); T0.addScaledVector(nO, -T0.dot(nO)); if (T0.lengthSq() < 1e-12) T0.copy(tA); T0.normalize().addScaledVector(nO, -VULVA_OPEN.wrap).normalize().multiplyScalar(len * VULVA_OPEN.reachOut);
+        T1.fromArray(restPos, base[R * M + j] * 3).sub(h.fromArray(restPos, base[(R - 2) * M + j] * 3)).normalize().multiplyScalar(len * VULVA_OPEN.reachIn);
+        curves.push([P0.clone(), T0.clone(), P1.clone(), T1.clone()]);
+      }
+      for (let p = 0; p < P; p++) {
+        const [a, ta, b, tb] = curves[bake.column[p]], t = Math.min(1, tau[p]), t2 = t * t, t3 = t2 * t;
+        h.copy(a).multiplyScalar(2 * t3 - 3 * t2 + 1).addScaledVector(ta, t3 - 2 * t2 + t).addScaledVector(b, -2 * t3 + 3 * t2).addScaledVector(tb, t3 - t2);
+        for (let c = 0; c < 3; c++) pos[p * 3 + c] += membrane * (h.getComponent(c) - pos[p * 3 + c]);
+        moved[p] = Math.max(moved[p], membrane * (1 - t));
+      }
+    }
     // its normals: hers, turned as the area's own surface turned
+    const nrm = wantNrm;
     nrm.set(restNrm);
     if (open > 0) {
       const nd = faceNormals(pos), nr = faceNormals(restPos);
@@ -237,12 +303,45 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       const gap = m === 0 ? 0 : 0.0006 * perMetre;
       for (let j = 0; j < M; j++) {
         const o = (m * M + j) * 3;
-        for (let c = 0; c < 3; c++) tubePos[o + c] = C0.getComponent(c) - nO.getComponent(c) * length * f + (rim[j * 3 + c] - C0.getComponent(c)) * scale + across.getComponent(c) * colSide[j] * gap;
+        for (let c = 0; c < 3; c++) tubeWant[o + c] = C0.getComponent(c) - nO.getComponent(c) * length * f + (rim[j * 3 + c] - C0.getComponent(c)) * scale + across.getComponent(c) * colSide[j] * gap;
       }
+    }
+    openApplied = open;
+  }
+  // her bones' turns, each frame: S = bindInverse * bone * boneInverse * bind (what three.js skins with), and its 3x3
+  const S: THREE.Matrix4[] = body.skeleton.bones.map(() => new THREE.Matrix4());
+  const Lv = new THREE.Matrix3(), Lp = new THREE.Matrix3(), Li = new THREE.Matrix3(), tmp = new THREE.Matrix4(), Sv = new THREE.Matrix4(), Spi = new THREE.Matrix4();
+  const e3 = new THREE.Vector3(), f3 = new THREE.Vector3();
+  /** lay the opening (as laid on her rest shape) on her as she is posed now */
+  function poseOpen(): void {
+    if (open <= 0 || !skI || !skW) { pos.set(want); nrm.set(wantNrm); tubePos.set(tubeWant); return; }
+    const sk = body.skeleton;
+    for (let i = 0; i < sk.bones.length; i++) S[i].multiplyMatrices(body.bindMatrixInverse, tmp.multiplyMatrices(sk.bones[i].matrixWorld, sk.boneInverses[i])).multiply(body.bindMatrix);
+    Lp.setFromMatrix4(S[pelvis]);
+    const blend = (v: number, out: THREE.Matrix4) => {
+      const el = out.elements; el.fill(0);
+      for (let c = 0; c < 4; c++) { const w = skW.getComponent(v, c); if (w <= 0) continue; const se = S[skI.getComponent(v, c)].elements; for (let k = 0; k < 16; k++) el[k] += w * se[k]; }
+      return out;
+    };
+    for (let p = 0; p < P; p++) {
+      const o = p * 3;
+      if (moved[p] <= 1e-6) { pos[o] = want[o]; pos[o + 1] = want[o + 1]; pos[o + 2] = want[o + 2]; nrm[o] = wantNrm[o]; nrm[o + 1] = wantNrm[o + 1]; nrm[o + 2] = wantNrm[o + 2]; continue; }
+      Lv.setFromMatrix4(blend(p, Sv)); Li.copy(Lv).invert().multiply(Lp);
+      e3.set(want[o] - restPos[o], want[o + 1] - restPos[o + 1], want[o + 2] - restPos[o + 2]).applyMatrix3(Li);
+      pos[o] = restPos[o] + e3.x; pos[o + 1] = restPos[o + 1] + e3.y; pos[o + 2] = restPos[o + 2] + e3.z;
+      f3.set(wantNrm[o], wantNrm[o + 1], wantNrm[o + 2]); e3.copy(f3).applyMatrix3(Li).normalize().multiplyScalar(moved[p]).addScaledVector(f3, 1 - moved[p]).normalize();
+      nrm[o] = e3.x; nrm[o + 1] = e3.y; nrm[o + 2] = e3.z;
+    }
+    // the tube's mouth where the split's edge is now, in her pelvis's frame; the rest of it as laid out from there
+    Spi.copy(S[pelvis]).invert();
+    for (let j = 0; j < M; j++) {
+      const v = base[j];
+      e3.fromArray(restPos, v * 3).applyMatrix4(blend(v, Sv)).applyMatrix4(Spi);
+      for (let c = 0; c < 3; c++) e3.setComponent(c, e3.getComponent(c) + want[v * 3 + c] - restPos[v * 3 + c]);
+      for (let m = 0; m < K; m++) { const o = (m * M + j) * 3; for (let c = 0; c < 3; c++) tubePos[o + c] = e3.getComponent(c) + tubeWant[o + c] - tubeWant[j * 3 + c]; }
     }
     (tubeGeom.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     tubeGeom.computeVertexNormals();
-    openApplied = open;
   }
   /** each ring-and-column's surface normal (area-weighted, summed over the area's triangles), three a node */
   function faceNormals(at: Float32Array): Float32Array {
@@ -272,9 +371,12 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
         for (let p = 0; p < P; p++) { const l = Math.hypot(restNrm[p * 3], restNrm[p * 3 + 1], restNrm[p * 3 + 2]) || 1; restNrm[p * 3] /= l; restNrm[p * 3 + 1] /= l; restNrm[p * 3 + 2] /= l; }
       }
       layOpen();
+      changed = true;
+    }
+    if (changed || open > 0) {
+      poseOpen();
       (geom.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
       (geom.getAttribute('normal') as THREE.BufferAttribute).needsUpdate = true;
-      changed = true;
     }
     const bpush = pushOf();
     if (bpush && bpush.version !== pushVersion) {
@@ -285,7 +387,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       changed = true;
     }
     mesh.visible = (body.visible || api.solo) && shown;
-    tube.visible = mesh.visible && !api.noTube;
+    tube.visible = mesh.visible && !api.noTube && open > 0.005;
     if (tube.morphTargetInfluences !== body.morphTargetInfluences) tube.morphTargetInfluences = body.morphTargetInfluences;
     if (wireMesh) wireMesh.visible = mesh.visible;
     return changed;
@@ -306,7 +408,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     },
     debug() {
       const bad = (a: ArrayLike<number>) => { let k = 0; for (let i = 0; i < a.length; i++) if (!Number.isFinite(a[i])) k++; return k; };
-      return { restPos: bad(restPos), restNrm: bad(restNrm), rim: bad(rim), pos: bad(pos), tau: bad(tau), colQ: bad(colQ), body: bad((g.getAttribute('position') as THREE.BufferAttribute).array), O: O.toArray(), tA: tA.toArray(), nO: nO.toArray(), across: across.toArray(), perMetre, open };
+      return { pelvisBoneGiven: pelvisBone, pelvis: body.skeleton.bones[pelvis]?.name, pelvisIndex: pelvis, restPos: bad(restPos), restNrm: bad(restNrm), rim: bad(rim), pos: bad(pos), tau: bad(tau), colQ: bad(colQ), body: bad((g.getAttribute('position') as THREE.BufferAttribute).array), O: O.toArray(), tA: tA.toArray(), nO: nO.toArray(), across: across.toArray(), perMetre, open };
     },
     get open() { return open; },
     setOpen(o: number) { open = Number.isFinite(o) ? Math.max(0, Math.min(1, o)) : 0; sync(); },
