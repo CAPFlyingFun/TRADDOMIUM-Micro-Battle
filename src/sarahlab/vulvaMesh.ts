@@ -31,9 +31,10 @@ export const VULVA_OPEN = Object.freeze({
    * outer lip a rounded rise `rise` metres high and `width` metres across beside the split, its edge `tuck` metres in
    * where the two meet (the groove), flattening `flatten` of the way as it stretches open; and from the edge in
    * `inner` metres her skin turns the colour of the inside (a tint on her own skin, as her lips' inner edge is),
-   * darkest right at the edge
+   * darkest right at the edge. Its crest stands `crest` metres back from the edge; opening, the edge curls `roll` metres
+   * on down into the opening, so the lip's inner face shows (see `lipHeight`)
    */
-  rise: 0.0035, width: 0.022, tuck: 0.002, flatten: 0.6, inner: 0.007,
+  rise: 0.007, crest: 0.004, width: 0.02, tuck: 0.003, flatten: 0.6, inner: 0.005, roll: 0.005, maxTip: 1.2,
   innerTint: [1.0, 0.6, 0.64] as const, edgeTint: [0.78, 0.42, 0.48] as const,
 });
 
@@ -236,6 +237,10 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   const tubeGeom = new THREE.BufferGeometry(), tubePos = new Float32Array(TV * 3);
   tubeGeom.setAttribute('position', new THREE.BufferAttribute(tubePos, 3));
   tubeGeom.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(TV * 3), 3));
+  // darker the deeper in (no light reaches far down a canal): ring by ring from the mouth
+  { const col = new Float32Array(TV * 3);
+    for (let m = 0; m < K; m++) { const f = m / (K - 1), k2 = 1 - 0.7 * Math.pow(f, 0.7); for (let j = 0; j < M; j++) col.fill(k2, (m * M + j) * 3, (m * M + j) * 3 + 3); }
+    tubeGeom.setAttribute('color', new THREE.BufferAttribute(col, 3)); }
   {
     const pi = geom.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, pw = geom.getAttribute('skinWeight') as THREE.BufferAttribute | undefined;
     if (pi && pw) {
@@ -253,7 +258,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     for (let m = 0; m + 1 < K; m++) for (let j = 0; j < M; j++) { const j2 = (j + 1) % M, a = m * M + j, b = m * M + j2, c = (m + 1) * M + j, d = (m + 1) * M + j2; ti.push(a, c, b, b, c, d); }
     tubeGeom.setIndex(ti);
   }
-  const tubeMat = new THREE.MeshStandardMaterial({ color: 0xb4545e, roughness: 0.42, metalness: 0, side: THREE.DoubleSide });
+  const tubeMat = new THREE.MeshStandardMaterial({ color: 0xa8505a, roughness: 0.82, metalness: 0, side: THREE.DoubleSide, vertexColors: true, envMapIntensity: 0.35 });
   const tube = new THREE.SkinnedMesh(tubeGeom, tubeMat);
   tube.name = 'sarahVagina';
   tube.frustumCulled = false; tube.castShadow = false; tube.receiveShadow = body.receiveShadow;
@@ -315,38 +320,50 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     const ca = geom.getAttribute('color') as THREE.BufferAttribute | undefined;
     if (ca) ca.needsUpdate = true;
   };
-  /** each ring-and-column's surface normal (area-weighted over the area's triangles), three a node */
-  const nodeNormals = (at: Float32Array) => {
-    const out = new Float32Array((R + 1) * M * 3), ix = bake.index;
-    const a = new THREE.Vector3(), b2 = new THREE.Vector3(), c2 = new THREE.Vector3();
-    for (let t = 0; t < ix.length; t += 3) {
-      a.fromArray(at, ix[t] * 3); b2.fromArray(at, ix[t + 1] * 3); c2.fromArray(at, ix[t + 2] * 3);
-      b2.sub(a); c2.sub(a); b2.cross(c2);
-      for (let q = 0; q < 3; q++) { const k = (bake.ring[ix[t + q]] * M + bake.column[ix[t + q]]) * 3; out[k] += b2.x; out[k + 1] += b2.y; out[k + 2] += b2.z; }
-    }
-    for (let k = 0; k < out.length; k += 3) { const l = Math.hypot(out[k], out[k + 1], out[k + 2]) || 1; out[k] /= l; out[k + 1] /= l; out[k + 2] /= l; }
-    return out;
-  };
   const before = new Float32Array(P * 3);
   /** the lips' shape laid on `at` (along `n`), and `n` turned as the surface turned */
+  /**
+   * THE LIP'S PROFILE (Joshua's marked-up reference, 2026-10-31: "The skin is outwards like lips... almost look like
+   * real lips or a mouth with no teeth"): how far out of her skin (metres) a point stands at `d` metres from the lip's
+   * edge. A rounded crest `crest` metres back from the edge stands `rise` proud; behind it the lip falls away to her
+   * skin by `width`; in front of it the lip rounds over (a quarter round) down to its edge. Closed, the edges tuck into
+   * the groove the two crests make; opening, the edge curls on down into the opening, so the lip's inner face shows.
+   */
+  const lipHeight = (d: number, q: number, t: number): number => {
+    const L = VULVA_OPEN, c = L.crest, H = L.rise * (1 - L.flatten * smooth(0.3, 1, open));
+    const taper = Math.pow(Math.max(0, 1 - q * q), 0.35) * smooth(1, 0.7, t);
+    let h = 0;
+    if (d >= L.width) h = 0;
+    else if (d >= c) { const u = (d - c) / (L.width - c); h = H * Math.cos((Math.PI / 2) * u) ** 2; }
+    else { const r = Math.min(c, H), dx = c - d; h = H - (r - Math.sqrt(Math.max(0, r * r - Math.min(r, dx) ** 2))); }
+    h *= taper;
+    const closed = 1 - smooth(0, 0.3, open), opening = smooth(0, 0.15, open);
+    const tuck = L.tuck * smooth(c, 0, d) * closed * taper;
+    const curl = L.roll * (1 - d / c) ** 2 * (d < c ? 1 : 0) * opening * smooth(1, 0.6, t);
+    return h - tuck - curl;
+  };
   const sculptLips = (at: Float32Array, n: Float32Array) => {
     const L = VULVA_OPEN;
     before.set(at);
-    const amp = 1 - L.flatten * smooth(0, 1, open);
+    const away = new THREE.Vector3(), nn = new THREE.Vector3(), eps = 0.0005;
     for (let p = 0; p < P; p++) {
-      const d = edgeDist[p], q = Math.max(-1, Math.min(1, colQ[bake.column[p]]));
+      const d = edgeDist[p], j = bake.column[p], q = Math.max(-1, Math.min(1, colQ[j]));
       if (d > L.width * 1.2 || tau[p] >= 1) continue;
-      const taper = Math.sqrt(Math.max(0, 1 - q * q)) * smooth(1, 0.7, tau[p]);
-      const bump = d < L.width ? Math.pow(Math.sin(Math.PI * d / L.width), 0.8) : 0;
-      const lift = (L.rise * amp * bump - L.tuck * smooth(L.width * 0.25, 0, d) * (1 - smooth(0, 0.3, open))) * taper * perMetre;
+      const h = lipHeight(d, q, tau[p]);
+      // shaded as shaped: her normal tipped by the profile's slope, away from the edge along her skin
+      // (the round-over is upright at the very edge; its shading tipped at most this far, so the edge does not turn
+      // side-on to the light and flash)
+      const slope = Math.max(-L.maxTip, Math.min(L.maxTip, (lipHeight(d + eps, q, tau[p]) - lipHeight(Math.max(0, d - eps), q, tau[p])) / (d > eps ? 2 * eps : d + eps)));
+      const r = bake.ring[p], a = base[Math.max(0, r - 1) * M + j], c2 = base[Math.min(R, r + 1) * M + j];
+      nn.fromArray(n, p * 3);
+      if (a >= 0 && c2 >= 0 && a !== c2) {
+        away.set(before[c2 * 3] - before[a * 3], before[c2 * 3 + 1] - before[a * 3 + 1], before[c2 * 3 + 2] - before[a * 3 + 2]);
+        away.addScaledVector(nn, -away.dot(nn));
+        if (away.lengthSq() > 1e-14) { away.normalize(); nn.addScaledVector(away, -slope).normalize(); }
+      }
+      const lift = h * perMetre;
       at[p * 3] += n[p * 3] * lift; at[p * 3 + 1] += n[p * 3 + 1] * lift; at[p * 3 + 2] += n[p * 3 + 2] * lift;
-    }
-    const n1 = nodeNormals(at), n0 = nodeNormals(before);
-    for (let p = 0; p < P; p++) {
-      if (tau[p] >= 1) continue;
-      const k = (bake.ring[p] * M + bake.column[p]) * 3, f = smooth(1, 0.8, tau[p]);
-      const x = n[p * 3] + f * (n1[k] - n0[k]), y = n[p * 3 + 1] + f * (n1[k + 1] - n0[k + 1]), z = n[p * 3 + 2] + f * (n1[k + 2] - n0[k + 2]), l = Math.hypot(x, y, z) || 1;
-      n[p * 3] = x / l; n[p * 3 + 1] = y / l; n[p * 3 + 2] = z / l;
+      n[p * 3] = nn.x; n[p * 3 + 1] = nn.y; n[p * 3 + 2] = nn.z;
     }
   };
   /** lay the opening on the rest shape just read (restPos) */
@@ -494,7 +511,6 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       }
       for (let p = 0; p < P; p++) { const k = bake.ring[p] * M + bake.column[p]; if (moved[p] > 0) for (let c = 0; c < 3; c++) pos[p * 3 + c] = at3[k * 3 + c]; }
     }
-    for (let j = 0; j < M; j++) for (let c = 0; c < 3; c++) rim[j * 3 + c] = pos[base[j] * 3 + c];
     // its normals: her skin's where each point now lies
     const nrm = wantNrm;
     nrm.set(restNrm);
@@ -505,6 +521,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     }
     // the lips: shaped on her as they lie now, round beside the split and tucked in where they meet
     sculptLips(pos, nrm);
+    // the canal hangs from the lips' edge as shaped (rolled in), so the two meet
+    for (let j = 0; j < M; j++) for (let c = 0; c < 3; c++) rim[j * 3 + c] = pos[base[j] * 3 + c];
     // the tube: its rings narrower inward at rest, as wide as the opening once it is open
     const C0 = vv.set(0, 0, 0);
     for (let j = 0; j < M; j++) C0.x += rim[j * 3] / M, C0.y += rim[j * 3 + 1] / M, C0.z += rim[j * 3 + 2] / M;
