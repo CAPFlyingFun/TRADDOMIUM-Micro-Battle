@@ -24,9 +24,9 @@ import { BIRTH_AREA } from './birthArea';
 export const VULVA = Object.freeze({
   /** the area: how far over her skin from the split's middle it reaches (metres, measured along her skin) -- far
    * enough for the skin a crowning head domes out (Joshua's references, 2026-10-30: the dome's base is wide) */
-  reach: 0.07,
+  reach: 0.17,
   /** ...and how far from it seen straight on (metres) */
-  round: 0.04,
+  round: 0.1,
   /** where the split's middle is: round the middle the cleft runs round, at this distance from it (metres) */
   shell: 0.047,
   /** half the split's length (metres, along her skin): her groove, front to back */
