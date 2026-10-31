@@ -22,16 +22,15 @@ import { BIRTH_AREA } from './birthArea';
 
 /** GAME TUNING, measured on her (the crotch surface round her split; birthArea.ts). */
 export const VULVA = Object.freeze({
-  /** the area: half its width across her, how far it reaches round her split in front and behind (metres) -- an oval */
-  halfWide: 0.03, halfLong: 0.06, halfBack: 0.052,
-  /** her crotch's own skin: how far from the surface it makes round the split (metres) it may be */
-  nearShell: 0.012,
-  /** the surface round the split: how far from the middle at its middle, and how much further a radian squared */
-  shell: 0.047, shellRise: 0.0174,
-  /** half the split's length (metres): her groove, front to back */
+  /** the area: how far over her skin from the split's middle it reaches (metres, measured along her skin) -- far
+   * enough for the skin a crowning head domes out (Joshua's references, 2026-10-30: the dome's base is wide) */
+  reach: 0.07,
+  /** where the split's middle is: round the middle the cleft runs round, at this distance from it (metres) */
+  shell: 0.047,
+  /** half the split's length (metres, along her skin): her groove, front to back */
   splitHalf: 0.037,
   /** rings from the split out, and how much finer they are toward the split (a power) */
-  rings: 16, fine: 1.7,
+  rings: 32, fine: 1.5,
 });
 
 /** The middle of her split, round the middle the cleft runs round (radians). */
@@ -73,36 +72,61 @@ export interface VulvaBake {
  */
 export function bakeVulva(rest: ArrayLike<number>, key: ArrayLike<number>, indices: ArrayLike<number>, centre: { y: number; z: number }): VulvaBake {
   const V = VULVA, n = Math.floor(rest.length / 3);
-  // every vertex laid out flat, and whether it is in the area
-  const U = new Float64Array(n), S = new Float64Array(n), inside = new Uint8Array(n);
+  // her points (a seam's vertices welded into one), where each is, and the split's middle: the point on her middle
+  // nearest where the cleft's middle meets her skin
+  let nK = 0;
+  for (let i = 0; i < n; i++) nK = Math.max(nK, key[i] + 1);
+  const KP = new Float64Array(nK * 3);
+  for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) KP[key[i] * 3 + c] = rest[i * 3 + c];
+  const ty = centre.y - V.shell * Math.cos(MIDDLE), tz = centre.z + V.shell * Math.sin(MIDDLE);
+  let mid = -1, md = Infinity;
   for (let i = 0; i < n; i++) {
-    const q = laidOut(rest[i * 3], rest[i * 3 + 1], rest[i * 3 + 2], centre);
-    U[i] = q.u; S[i] = q.s;
-    const tip = q.s / BIRTH_AREA.centreUp, shell = V.shell + V.shellRise * tip * tip;
-    if ((q.u / V.halfWide) ** 2 + (q.s / (q.s < 0 ? V.halfBack : V.halfLong)) ** 2 < 1 && Math.abs(q.r - shell) < V.nearShell) inside[i] = 1;
+    if (Math.abs(rest[i * 3]) > 1e-4) continue;
+    const d = Math.hypot(rest[i * 3 + 1] - ty, rest[i * 3 + 2] - tz);
+    if (d < md) { md = d; mid = key[i]; }
+  }
+  // how far each point is from it over her skin (along her triangles' edges), out to a little past the area
+  const T = Math.floor(indices.length / 3), mx = KP[mid * 3], my = KP[mid * 3 + 1], mz = KP[mid * 3 + 2];
+  const nearMid = (k: number) => Math.hypot(KP[k * 3] - mx, KP[k * 3 + 1] - my, KP[k * 3 + 2] - mz) < 2 * V.reach;
+  const nbr = new Map<number, Map<number, number>>();
+  const link = (a: number, b: number) => {
+    if (a === b) return;
+    const l = Math.hypot(KP[a * 3] - KP[b * 3], KP[a * 3 + 1] - KP[b * 3 + 1], KP[a * 3 + 2] - KP[b * 3 + 2]);
+    (nbr.get(a) ?? nbr.set(a, new Map()).get(a)!).set(b, l); (nbr.get(b) ?? nbr.set(b, new Map()).get(b)!).set(a, l);
+  };
+  for (let t = 0; t < T; t++) {
+    const a = key[indices[t * 3]], b = key[indices[t * 3 + 1]], c = key[indices[t * 3 + 2]];
+    if (nearMid(a) && nearMid(b) && nearMid(c)) { link(a, b); link(b, c); link(c, a); }
+  }
+  const dist = new Float64Array(nK).fill(Infinity);
+  { // Dijkstra, a small binary heap
+    const heap: [number, number][] = [[0, mid]]; dist[mid] = 0;
+    const push = (e: [number, number]) => { heap.push(e); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+    const pop = () => { const top = heap[0], last = heap.pop()!; if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+    while (heap.length) {
+      const [d, k] = pop();
+      if (d > dist[k] || d > 1.4 * V.reach) continue;
+      for (const [o, l] of nbr.get(k) ?? []) if (d + l < dist[o]) { dist[o] = d + l; push([d + l, o]); }
+    }
   }
   // the area's triangles: all three points in it; then its edge evened out -- a triangle in a notch of it (two of its
   // edges on the area) is taken in, a spike (two of its edges on the outside) is left out -- so the outline is smooth
   // at the size of her triangles, not their zig-zag
-  const T = Math.floor(indices.length / 3), sel = new Uint8Array(T), near = new Uint8Array(n);
-  for (let i = 0; i < n; i++) {
-    const tip = S[i] / BIRTH_AREA.centreUp, shell = V.shell + V.shellRise * tip * tip;
-    const r = Math.hypot(rest[i * 3 + 1] - centre.y, rest[i * 3 + 2] - centre.z);
-    if ((U[i] / V.halfWide) ** 2 + (S[i] / (S[i] < 0 ? V.halfBack : V.halfLong)) ** 2 < 1.3 && Math.abs(r - shell) < 2 * V.nearShell) near[i] = 1;
-  }
+  const sel = new Uint8Array(T);
+  const inK = (k: number) => dist[k] < V.reach, nearK = (k: number) => dist[k] < 1.3 * V.reach;
   const edgeTris = new Map<string, number[]>();
   const pk = (a: number, b: number) => (key[a] < key[b] ? `${key[a]},${key[b]}` : `${key[b]},${key[a]}`);
   for (let t = 0; t < T; t++) {
     const a = indices[t * 3], b = indices[t * 3 + 1], c = indices[t * 3 + 2];
-    if (inside[a] && inside[b] && inside[c]) sel[t] = 1;
-    if (!(near[a] && near[b] && near[c])) continue;
+    if (inK(key[a]) && inK(key[b]) && inK(key[c])) sel[t] = 1;
+    if (!(nearK(key[a]) && nearK(key[b]) && nearK(key[c]))) continue;
     for (const [x, y] of [[a, b], [b, c], [c, a]]) { const k = pk(x, y); const l = edgeTris.get(k) ?? []; l.push(t); edgeTris.set(k, l); }
   }
   for (let round = 0; round < 6; round++) {
     let changed = 0;
     for (let t = 0; t < T; t++) {
       const a = indices[t * 3], b = indices[t * 3 + 1], c = indices[t * 3 + 2];
-      if (!(near[a] && near[b] && near[c])) continue;
+      if (!(nearK(key[a]) && nearK(key[b]) && nearK(key[c]))) continue;
       let inner = 0;
       for (const [x, y] of [[a, b], [b, c], [c, a]]) if ((edgeTris.get(pk(x, y)) ?? []).some((o) => o !== t && sel[o])) inner++;
       if (!sel[t] && inner >= 2) { sel[t] = 1; changed++; } else if (sel[t] && inner <= 1) { sel[t] = 0; changed++; }
@@ -111,12 +135,6 @@ export function bakeVulva(rest: ArrayLike<number>, key: ArrayLike<number>, indic
   }
   const tris: number[] = [], keep: number[] = [];
   for (let t = 0; t < T; t++) (sel[t] ? tris : keep).push(indices[t * 3], indices[t * 3 + 1], indices[t * 3 + 2]);
-  // the pieces of her texture: triangles joined by a shared vertex (a seam's two sides are two vertices)
-  const up = new Map<number, number>();
-  const find = (x: number): number => { let r = x; while (up.has(r) && up.get(r) !== r) r = up.get(r)!; up.set(x, r); return r; };
-  for (let t = 0; t < tris.length; t += 3) { const r = find(tris[t]); up.set(find(tris[t + 1]), r); up.set(find(tris[t + 2]), find(r)); }
-  const chartOfVertex = (v: number) => find(v);
-  const chartOfTri = (t: number) => find(tris[t]);
 
   // its outline: edges (by point, seams welded) only one of its triangles has, chained into loops; the longest is it
   const count = new Map<string, number>(), dir = new Map<string, [number, number]>();
@@ -137,48 +155,70 @@ export function bakeVulva(rest: ArrayLike<number>, key: ArrayLike<number>, indic
     loops.push(loop);
   }
   loops.sort((a, b) => b.length - a.length);
-  const pts = (loops[0] ?? []).map((k) => { const verts = vertexOf.get(k)!, v = verts[0]; return { u: U[v], s: S[v], verts }; });
-  // round the way the angle grows (from her back, her right side first), starting at the column nearest her middle behind
-  let area = 0;
-  for (let j = 0; j < pts.length; j++) { const a = pts[j], b = pts[(j + 1) % pts.length]; area += a.s * b.u - b.s * a.u; }
-  if (area < 0) pts.reverse();
-  const M = pts.length;
-  const nearestMiddle = (behind: boolean) => { let best = 0, bu = Infinity; for (let j = 0; j < M; j++) if ((pts[j].s < 0) === behind && Math.abs(pts[j].u) < bu) { bu = Math.abs(pts[j].u); best = j; } return best; };
-  const jb0 = nearestMiddle(true);
-  const ring0 = [...pts.slice(jb0), ...pts.slice(0, jb0)];
-  const jf = nearestMiddle(false) >= jb0 ? nearestMiddle(false) - jb0 : nearestMiddle(false) - jb0 + M;
-  // each column's place along the split: by its outline point's angle round the area (an oval's angle, so the columns
-  // fan evenly over its front and back), kept in order along each side; the tips are the columns on her middle
-  const L = V.splitHalf, splitS: number[] = new Array(M).fill(0), lipSide: number[] = new Array(M).fill(0);
-  const sideA = Math.sign(ring0.slice(1, jf).reduce((m, p) => m + p.u, 0)) || -1;
-  const along = (o: { u: number; s: number }) => L * Math.cos(Math.atan2(Math.abs(o.u) / V.halfWide, o.s / (o.s < 0 ? V.halfBack : V.halfLong)));
-  let run = -L;
-  for (let j = 0; j <= jf; j++) { run = Math.max(run, along(ring0[j])); splitS[j] = j === 0 ? -L : j === jf ? L : run; }
-  run = L;
-  for (let j = jf; j <= M; j++) { const jj = j % M; run = Math.min(run, along(ring0[jj])); splitS[jj] = jj === 0 ? -L : jj === jf ? L : run; }
-  for (let j = 0; j < M; j++) lipSide[j] = Math.abs(splitS[j]) >= L - 1e-9 ? 0 : j < jf ? sideA : -sideA;
+  const outlineKeys = loops[0] ?? [];
 
-  // the rings, laid out flat: straight from the split to the outline, finer toward the split, then smoothed round each
-  // ring so a notch in her outline does not cross the rings inside it
-  const R = V.rings, fu: number[][] = [], fs: number[][] = [];
-  for (let k = 0; k <= R; k++) {
-    const t = Math.pow(k / R, V.fine);
-    fu.push(ring0.map((o) => o.u * t)); fs.push(ring0.map((o, j) => splitS[j] + (o.s - splitS[j]) * t));
+  // LAID OUT FLAT, the way a soap film would lie (a harmonic map): the outline round a circle by its length, her middle
+  // where it crosses the outline at the circle's front and back, every other point where its neighbours pull it (mean
+  // value weights, so nothing folds); the area keeps her proportions closely enough for the rings to be even
+  const U = new Float64Array(n), S = new Float64Array(n);
+  const FU = new Float64Array(nK), FS = new Float64Array(nK), fixed = new Uint8Array(nK), inArea = new Uint8Array(nK);
+  for (const v of tris) inArea[key[v]] = 1;
+  function laidOutS(k: number): number { return laidOut(KP[k * 3], KP[k * 3 + 1], KP[k * 3 + 2], centre).s; }
+  const Mo = outlineKeys.length;
+  const crossing = (behind: boolean) => { let best = 0, bx = Infinity; for (let j = 0; j < Mo; j++) { const k = outlineKeys[j]; if ((laidOutS(k) < 0) === behind && Math.abs(KP[k * 3]) < bx) { bx = Math.abs(KP[k * 3]); best = j; } } return best; };
+  const cb = crossing(true), cf = crossing(false);
+  const olen = [0];
+  for (let j = 1; j <= Mo; j++) { const a = outlineKeys[(cb + j - 1) % Mo], b = outlineKeys[(cb + j) % Mo]; olen.push(olen[j - 1] + Math.hypot(KP[a * 3] - KP[b * 3], KP[a * 3 + 1] - KP[b * 3 + 1], KP[a * 3 + 2] - KP[b * 3 + 2])); }
+  const jfo = (cf - cb + Mo) % Mo, Rf = olen[Mo] / (2 * Math.PI);
+  const sideOf = (from: number, to: number) => { let sx = 0; for (let j = from; j < to; j++) sx += KP[outlineKeys[(cb + j) % Mo] * 3]; return Math.sign(sx) || 1; };
+  const sd1 = sideOf(1, jfo), sd2 = sideOf(jfo + 1, Mo);
+  for (let j = 0; j < Mo; j++) {
+    const k = outlineKeys[(cb + j) % Mo];
+    const th = j <= jfo ? Math.PI * (1 - olen[j] / olen[jfo]) : Math.PI * ((olen[j] - olen[jfo]) / (olen[Mo] - olen[jfo]));
+    const sd = j <= jfo ? sd1 : sd2;
+    FU[k] = sd * Rf * Math.sin(th); FS[k] = Rf * Math.cos(th); fixed[k] = 1;
   }
-  for (let pass = 0; pass < 24; pass++) for (let k = 1; k < R; k++) {
-    const a = 0.5 * Math.min(1, 2 * (1 - k / R)) * Math.max(0, (k - 2) / (R - 2)), u0 = fu[k].slice(), s0 = fs[k].slice();
-    for (let j = 0; j < M; j++) {
-      const jm = (j + M - 1) % M, jp = (j + 1) % M;
-      fu[k][j] = (1 - a) * u0[j] + (a / 2) * (u0[jm] + u0[jp]); fs[k][j] = (1 - a) * s0[j] + (a / 2) * (s0[jm] + s0[jp]);
+  // mean value weights, from her rest shape
+  const W = new Map<number, Map<number, number>>();
+  const addW = (a: number, b: number, w: number) => { const m = W.get(a) ?? W.set(a, new Map()).get(a)!; m.set(b, (m.get(b) ?? 0) + w); };
+  for (let t = 0; t < tris.length; t += 3) {
+    const k3 = [key[tris[t]], key[tris[t + 1]], key[tris[t + 2]]];
+    for (let c = 0; c < 3; c++) {
+      const i = k3[c], j = k3[(c + 1) % 3], k = k3[(c + 2) % 3];
+      const ex = [KP[j * 3] - KP[i * 3], KP[j * 3 + 1] - KP[i * 3 + 1], KP[j * 3 + 2] - KP[i * 3 + 2]], fx = [KP[k * 3] - KP[i * 3], KP[k * 3 + 1] - KP[i * 3 + 1], KP[k * 3 + 2] - KP[i * 3 + 2]];
+      const le = Math.hypot(ex[0], ex[1], ex[2]), lf = Math.hypot(fx[0], fx[1], fx[2]);
+      if (le < 1e-9 || lf < 1e-9) continue;
+      const ang = Math.acos(Math.max(-1, Math.min(1, (ex[0] * fx[0] + ex[1] * fx[1] + ex[2] * fx[2]) / (le * lf)))), h = Math.tan(ang / 2);
+      addW(i, j, h / le); addW(i, k, h / lf);
     }
   }
-
-  // and the last few rings smoothed both ways, so they take up the outline's notches (her triangles' own zig-zag)
-  for (let pass = 0; pass < 40; pass++) for (let k = R - 3; k < R; k++) for (let j = 0; j < M; j++) {
-    const jm = (j + M - 1) % M, jp = (j + 1) % M;
-    fu[k][j] = 0.5 * fu[k][j] + 0.125 * (fu[k][jm] + fu[k][jp] + fu[k - 1][j] + fu[k + 1][j]);
-    fs[k][j] = 0.5 * fs[k][j] + 0.125 * (fs[k][jm] + fs[k][jp] + fs[k - 1][j] + fs[k + 1][j]);
+  const free: number[] = [];
+  for (let k = 0; k < nK; k++) if (inArea[k] && !fixed[k]) {
+    free.push(k);
+    // a start: as it lies round the cleft, scaled to the circle
+    const q = laidOut(KP[k * 3], KP[k * 3 + 1], KP[k * 3 + 2], centre); FU[k] = q.u; FS[k] = q.s;
   }
+  for (let it = 0; it < 3000; it++) {
+    let moved = 0;
+    for (const k of free) {
+      let su = 0, ss = 0, sw = 0;
+      for (const [o, w] of W.get(k) ?? []) { su += w * FU[o]; ss += w * FS[o]; sw += w; }
+      if (sw <= 0) continue;
+      const nu = FU[k] + 1.6 * (su / sw - FU[k]), ns = FS[k] + 1.6 * (ss / sw - FS[k]);
+      moved = Math.max(moved, Math.abs(nu - FU[k]), Math.abs(ns - FS[k]));
+      FU[k] = nu; FS[k] = ns;
+    }
+    if (moved < 1e-9) break;
+  }
+  for (let i = 0; i < n; i++) if (inArea[key[i]]) { U[i] = FU[key[i]]; S[i] = FS[key[i]]; }
+  const splitMid = { u: FU[mid], s: FS[mid] };
+
+  // the pieces of her texture: triangles joined by a shared vertex (a seam's two sides are two vertices)
+  const up = new Map<number, number>();
+  const find = (x: number): number => { let r = x; while (up.has(r) && up.get(r) !== r) r = up.get(r)!; up.set(x, r); return r; };
+  for (let t = 0; t < tris.length; t += 3) { const r = find(tris[t]); up.set(find(tris[t + 1]), r); up.set(find(tris[t + 2]), find(r)); }
+  const chartOfVertex = (v: number) => find(v);
+  const chartOfTri = (t: number) => find(tris[t]);
 
   // where a point lies among her triangles (a grid of buckets over them, laid out flat)
   const cell = 0.004, grid = new Map<string, number[]>();
@@ -211,6 +251,58 @@ export function bakeVulva(rest: ArrayLike<number>, key: ArrayLike<number>, indic
     return { t: bt, w: bw, out: bo };
   };
 
+  const pts = (loops[0] ?? []).map((k) => { const verts = vertexOf.get(k)!, v = verts[0]; return { u: U[v], s: S[v], verts }; });
+  // round the way the angle grows (from her back, her right side first), starting at the column nearest her middle behind
+  let area = 0;
+  for (let j = 0; j < pts.length; j++) { const a = pts[j], b = pts[(j + 1) % pts.length]; area += a.s * b.u - b.s * a.u; }
+  if (area < 0) pts.reverse();
+  const M = pts.length;
+  const nearestMiddle = (behind: boolean) => { let best = 0, bu = Infinity; for (let j = 0; j < M; j++) if ((pts[j].s < 0) === behind && Math.abs(pts[j].u) < bu) { bu = Math.abs(pts[j].u); best = j; } return best; };
+  const jb0 = nearestMiddle(true);
+  const ring0 = [...pts.slice(jb0), ...pts.slice(0, jb0)];
+  const jf = nearestMiddle(false) >= jb0 ? nearestMiddle(false) - jb0 : nearestMiddle(false) - jb0 + M;
+  // the split's two ends, laid out flat: along her middle from its middle, as far as half its length over her skin
+  const u0m = splitMid.u;
+  const skinAt = (u: number, s: number) => { const at = locate(u, s, null, true); let x = 0, y = 0, z = 0; for (let c = 0; c < 3; c++) { const v = tris[at.t + c], w = at.w[c]; x += w * rest[v * 3]; y += w * rest[v * 3 + 1]; z += w * rest[v * 3 + 2]; } return [x, y, z]; };
+  const endAt = (dirn: number) => {
+    let s = splitMid.s, gone = 0, was = skinAt(u0m, s);
+    for (let guard = 0; guard < 4000 && gone < V.splitHalf; guard++) { s += dirn * 0.0002; const now = skinAt(u0m, s); gone += Math.hypot(now[0] - was[0], now[1] - was[1], now[2] - was[2]); was = now; }
+    return s;
+  };
+  const sB = endAt(-1), sF = endAt(1);
+  // each column's place along the split: by its outline point's angle round the circle, kept in order along each side;
+  // the tips are the columns on her middle
+  const splitS: number[] = new Array(M).fill(0), lipSide: number[] = new Array(M).fill(0);
+  const sideA = Math.sign(ring0.slice(1, jf).reduce((m, p) => m + p.u, 0)) || -1;
+  const along = (o: { u: number; s: number }) => { const q = Math.cos(Math.atan2(Math.abs(o.u - u0m), o.s)); return q >= 0 ? splitMid.s + (sF - splitMid.s) * q : splitMid.s + (splitMid.s - sB) * q; };
+  let run = sB;
+  for (let j = 0; j <= jf; j++) { run = Math.max(run, along(ring0[j])); splitS[j] = j === 0 ? sB : j === jf ? sF : run; }
+  run = sF;
+  for (let j = jf; j <= M; j++) { const jj = j % M; run = Math.min(run, along(ring0[jj])); splitS[jj] = jj === 0 ? sB : jj === jf ? sF : run; }
+  for (let j = 0; j < M; j++) lipSide[j] = splitS[j] <= sB + 1e-9 || splitS[j] >= sF - 1e-9 ? 0 : j < jf ? sideA : -sideA;
+
+  // the rings, laid out flat: straight from the split to the outline, finer toward the split, then smoothed round each
+  // ring so a notch in her outline does not cross the rings inside it
+  const R = V.rings, fu: number[][] = [], fs: number[][] = [];
+  for (let k = 0; k <= R; k++) {
+    const t = Math.pow(k / R, V.fine);
+    fu.push(ring0.map((o) => u0m + (o.u - u0m) * t)); fs.push(ring0.map((o, j) => splitS[j] + (o.s - splitS[j]) * t));
+  }
+  for (let pass = 0; pass < 24; pass++) for (let k = 1; k < R; k++) {
+    const a = 0.5 * Math.min(1, 2 * (1 - k / R)) * Math.max(0, (k - 2) / (R - 2)), u0 = fu[k].slice(), s0 = fs[k].slice();
+    for (let j = 0; j < M; j++) {
+      const jm = (j + M - 1) % M, jp = (j + 1) % M;
+      fu[k][j] = (1 - a) * u0[j] + (a / 2) * (u0[jm] + u0[jp]); fs[k][j] = (1 - a) * s0[j] + (a / 2) * (s0[jm] + s0[jp]);
+    }
+  }
+
+  // and the last few rings smoothed both ways, so they take up the outline's notches (her triangles' own zig-zag)
+  for (let pass = 0; pass < 40; pass++) for (let k = R - 3; k < R; k++) for (let j = 0; j < M; j++) {
+    const jm = (j + M - 1) % M, jp = (j + 1) % M;
+    fu[k][j] = 0.5 * fu[k][j] + 0.125 * (fu[k][jm] + fu[k][jp] + fu[k - 1][j] + fu[k + 1][j]);
+    fs[k][j] = 0.5 * fs[k][j] + 0.125 * (fs[k][jm] + fs[k][jp] + fs[k - 1][j] + fs[k + 1][j]);
+  }
+
   // the points: one per ring and column, sampled where they lie; the outline's are her own vertices
   const src: number[] = [], bary: number[] = [], uvSrc: number[] = [], uvBary: number[] = [], ringOf: number[] = [], colOf: number[] = [], flat: number[] = [], lipOf: number[] = [], chartOf: number[] = [];
   const id: number[][] = [];
@@ -222,7 +314,7 @@ export function bakeVulva(rest: ArrayLike<number>, key: ArrayLike<number>, indic
   for (let k = 0; k <= R; k++) {
     const row: number[] = [];
     for (let j = 0; j < M; j++) {
-      const u = k === 0 ? 0 : fu[k][j], s = k === 0 ? splitS[j] : fs[k][j], lip = k === 0 ? lipSide[j] : 0;
+      const u = k === 0 ? u0m : fu[k][j], s = k === 0 ? splitS[j] : fs[k][j], lip = k === 0 ? lipSide[j] : 0;
       if (k === R) { const v = ring0[j].verts[0]; row.push(push([v, v, v], [1, 0, 0], [v, v, v], [1, 0, 0], chartOfVertex(v), k, j, u, s, 0)); continue; }
       const at = locate(u, s, null, true);
       if (at.out > 0.05) missed++;
