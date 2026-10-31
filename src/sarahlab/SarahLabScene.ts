@@ -3539,6 +3539,26 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           }
           return Object.entries(out).sort((a2, b2) => b2[1] - a2[1]).slice(0, 25);
         },
+        // what of her stands between the camera and her vulva (within 2.5 cm of the line from the camera to its middle)
+        occluders: () => {
+          const b = bodyOf(); if (!b || !vulva || !babyFrame || !model) return null;
+          model.updateMatrixWorld(true);
+          const f = vulva.facing(), cam = camera.position.clone(), dir = f.at.clone().sub(cam), len = dir.length(); dir.normalize();
+          const v = new THREE.Vector3(), r = new THREE.Vector3(), out: Record<string, number> = {}, m = b.mesh, pa = m.geometry.getAttribute('position'), si = m.geometry.getAttribute('skinIndex'), sw = m.geometry.getAttribute('skinWeight');
+          let count = 0;
+          for (let i = 0; i < pa.count; i++) {
+            m.getVertexPosition(i, v); m.localToWorld(v);
+            const t = v.clone().sub(cam).dot(dir);
+            if (t < 0.05 * M || t > len - 0.015 * M) continue;
+            if (v.clone().sub(cam).addScaledVector(dir, -t).length() > 0.025 * M) continue;
+            r.set(pa.getX(i), pa.getY(i), pa.getZ(i)).applyMatrix4(babyFrame.meshToRest);
+            let bone = -1, bw = -1; for (let c = 0; c < 4; c++) if (sw.getComponent(i, c) > bw) { bw = sw.getComponent(i, c); bone = si.getComponent(i, c); }
+            const k = `${m.skeleton.bones[bone]?.name}|y${r.y.toFixed(2)}|z${r.z.toFixed(2)}|x${Math.abs(r.x).toFixed(2)}`;
+            out[k] = (out[k] ?? 0) + 1; count++;
+          }
+          const jn = measure ? Object.fromEntries(Object.entries(measure.joints).map(([k2, i2]) => [k2, `${i2}:${m.skeleton.bones[i2 as number]?.name}`])) : null;
+          return { joints: jn, count, cam: cam.divideScalar(M).toArray().map((x) => +x.toFixed(3)), top: Object.entries(out).sort((a2, b2) => b2[1] - a2[1]).slice(0, 20) };
+        },
         vulvaOpen: (o: number) => { if (!vulva) return null; vulva.setOpen(o); return vulva.open; },
         vulva: (on: boolean, wire = false) => { if (!vulva) return null; vulva.show(on); vulva.wire(on && wire); const sk = model && findSkinnedMesh(model), m = vulva.mesh, c = new THREE.Vector3(), v = new THREE.Vector3(); let k = 0;
           model?.updateMatrixWorld(true);

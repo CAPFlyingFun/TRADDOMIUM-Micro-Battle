@@ -20,7 +20,9 @@ export const BIRTH_WEIGHTS = Object.freeze({
   inner: 38, outer: 62,
   /** her middle (metres across, either side): within `middle` all torso, out to `middleFade` fading to the cone's say --
    * near her crotch only (within `middleNear`, fading out by `middleFar`; her thighs touch her middle all the way down) */
-  middle: 0.025, middleFade: 0.045, middleNear: 0.045, middleFar: 0.075,
+  middle: 0.03, middleFade: 0.1, middleNear: 0.08, middleFar: 0.17,
+  /** whether the thigh cone is used at all (off: only her middle -- the skin round and behind her vulva -- is kept) */
+  useCone: false,
   /** and the cone only near the hip joint (metres): out to `coneNear` all of it, gone by `coneFar` */
   coneNear: 0.14, coneFar: 0.22,
   /** and only below her navel (metres above the hip joints): her chest and arms are no thigh's */
@@ -72,7 +74,7 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
       d.copy(v).sub(hip[s]);
       const ang = (Math.acos(Math.max(-1, Math.min(1, d.dot(down[s]) / (d.length() || 1)))) * 180) / Math.PI;
       const cone = smooth(B.inner, B.outer, ang) * smooth(B.coneFar, B.coneNear, d.length()), middle = smooth(B.middleFade, B.middle, Math.abs(v.x)) * smooth(B.middleFar, B.middleNear, v.distanceTo(crotch));
-      const m = Math.max(cone, middle);
+      const m = Math.max(B.useCone ? cone : 0, middle);
       mask[i * 2 + s] = m;
       if (m > 0) any = true;
     }

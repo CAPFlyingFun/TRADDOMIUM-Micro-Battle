@@ -25,6 +25,15 @@ export const BIRTH_ROOM = Object.freeze({
    * references of women in labour -- all of it within `openNear` of her crotch, none past `openFar`; her vulva itself
    * (standing within `own` of her middle) is not held */
   open: 0.04, openNear: 0.06, openFar: 0.12, own: 0.022,
+  /**
+   * THE THIGH ROOTS (Joshua, 2026-10-30: "Reshape thigh roots"): the way her vulva faces (degrees from straight down
+   * toward her front, as vulvaMesh.ts's tube), and a clear cone in front of it -- `clear` metres wide at her skin, opening
+   * out at `cone` degrees -- that no thigh may stand in; a thigh root standing in it goes back into her thigh, along the
+   * way her vulva faces, as far as it must
+   */
+  tilt: 40, clear: 0.045, cone: 40,
+  /** her vulva itself, which the cone keeps clear for: within this of its middle (metres) nothing is pushed back */
+  ownRound: 0.03,
   /** which points: across from her middle (metres, between), within this of her crotch (metres), and carried at least
    * this much by a thigh bone */
   nearest: 0.003, farthest: 0.16, reach: 0.2, thigh: 0.02,
@@ -87,9 +96,16 @@ export function createBirthRoom(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix4, 
     floor[k] = B.open * sm(B.openFar, B.openNear, v.fromArray(rest, i * 3).distanceTo(crotch)) * sm(B.own, B.own + 0.015, ax);
   });
   const last = new Float32Array(W * 3);
+  // her vulva's middle and the way it faces, in her geometry (her pelvis's bind frame)
+  const tilt = (B.tilt * Math.PI) / 180, faces = new THREE.Vector3(0, -Math.cos(tilt), Math.sin(tilt)).applyMatrix3(toGeom).normalize();
+  const middle = crotch.clone().applyMatrix4(new THREE.Matrix4().copy(toRest).invert());
+  const tanCone = Math.tan((B.cone * Math.PI) / 180);
+  const notOwn = new Float32Array(W);
+  // (her vulva itself -- its lips round the split -- is not pushed: everything else in front of it is, her middle included)
+  watched.forEach((i, k) => { notOwn[k] = sm(B.ownRound, B.ownRound + 0.015, v.fromArray(rest, i * 3).distanceTo(crotch)); });
   const S = mesh.skeleton.bones.map(() => new THREE.Matrix4()), tmp = new THREE.Matrix4(), Sv = new THREE.Matrix4(), Spi = new THREE.Matrix4();
   const Lv = new THREE.Matrix3(), Lp = new THREE.Matrix3(), q = new THREE.Vector3(), d = new THREE.Vector3();
-  const pushP = new Float32Array(P);
+  const pushP = new Float32Array(P), backP = new Float32Array(P), rel = new THREE.Vector3();
   let largest = 0;
   return {
     watched: W,
@@ -98,7 +114,7 @@ export function createBirthRoom(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix4, 
       const sk = mesh.skeleton;
       for (let b = 0; b < sk.bones.length; b++) S[b].multiplyMatrices(mesh.bindMatrixInverse, tmp.multiplyMatrices(sk.bones[b].matrixWorld, sk.boneInverses[b])).multiply(mesh.bindMatrix);
       Spi.copy(S[pelvis]).invert(); Lp.setFromMatrix4(S[pelvis]);
-      pushP.fill(0); largest = 0;
+      pushP.fill(0); backP.fill(0); largest = 0;
       const blend = (i: number) => { const el = Sv.elements; el.fill(0); for (let k = 0; k < 4; k++) { const w = sw.getComponent(i, k); if (w <= 0) continue; const se = S[si.getComponent(i, k)].elements; for (let e = 0; e < 16; e++) el[e] += w * se[e]; } return Sv; };
       // the push each needs, in her pelvis's frame (along her across), welded by place
       const pushQ = new Float32Array(W);
@@ -108,27 +124,35 @@ export function createBirthRoom(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix4, 
         const side = Math.sign(rest[i * 3]), now = side * q.dot(across) / perMetre, allowed = Math.max(B.keep * standing[k], floor[k]);
         pushQ[k] = Math.max(0, allowed - now);
         if (pushQ[k] > Math.abs(pushP[keyOf[k]])) pushP[keyOf[k]] = pushQ[k] * side;
+        // and back out of the clear cone in front of her vulva
+        rel.copy(q).sub(middle).divideScalar(perMetre);
+        const h = rel.dot(faces), rho = Math.hypot(rel.x - h * faces.x, rel.y - h * faces.y, rel.z - h * faces.z);
+        const hMax = Math.max(0, (rho - B.clear) / tanCone), back = Math.max(0, h - hMax) * notOwn[k];
+        if (back > backP[keyOf[k]]) backP[keyOf[k]] = back;
       }
       // smoothed over her mesh, held at nothing on the watched area's edge
-      const a = new Float32Array(P), bb = new Float32Array(P);
-      a.set(pushP);
-      for (let pass = 0; pass < B.smoothPasses; pass++) {
-        for (let p = 0; p < P; p++) {
-          if (edge[p]) { bb[p] = 0; continue; }
-          let s = a[p], k = 1;
-          for (const o of nb[p]) { s += a[o]; k++; }
-          bb[p] = Math.max(Math.abs(a[p]), Math.abs(s / k)) * Math.sign(a[p] || s);
+      const smoothOver = (src: Float32Array) => {
+        const a = Float32Array.from(src), bb = new Float32Array(P);
+        for (let pass = 0; pass < B.smoothPasses; pass++) {
+          for (let p = 0; p < P; p++) {
+            if (edge[p]) { bb[p] = 0; continue; }
+            let s2 = a[p], k = 1;
+            for (const o of nb[p]) { s2 += a[o]; k++; }
+            bb[p] = Math.max(Math.abs(a[p]), Math.abs(s2 / k)) * Math.sign(a[p] || s2);
+          }
+          a.set(bb);
         }
-        a.set(bb);
-      }
+        return a;
+      };
+      const a = smoothOver(pushP), bk = smoothOver(backP);
       // into her rest shape: through the inverse of the point's own bones' turn, then her pelvis's
       const idx: number[] = [], out: number[] = [];
       for (let k = 0; k < W; k++) {
-        const i = watched[k], amount = a[keyOf[k]];
-        if (Math.abs(amount) < 1e-6) { last[k * 3] = last[k * 3 + 1] = last[k * 3 + 2] = 0; continue; }
-        largest = Math.max(largest, Math.abs(amount));
+        const i = watched[k], amount = a[keyOf[k]], back = bk[keyOf[k]];
+        if (Math.abs(amount) < 1e-6 && back < 1e-6) { last[k * 3] = last[k * 3 + 1] = last[k * 3 + 2] = 0; continue; }
+        largest = Math.max(largest, Math.abs(amount), back);
         Lv.setFromMatrix4(blend(i)).invert().multiply(Lp);
-        d.copy(across).multiplyScalar(amount * perMetre).applyMatrix3(Lv);
+        d.copy(across).multiplyScalar(amount * perMetre).addScaledVector(faces, -back * perMetre).applyMatrix3(Lv);
         last[k * 3] = d.x; last[k * 3 + 1] = d.y; last[k * 3 + 2] = d.z;
         idx.push(i); out.push(d.x, d.y, d.z);
       }
