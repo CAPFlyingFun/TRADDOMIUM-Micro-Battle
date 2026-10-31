@@ -31,6 +31,8 @@ export interface BirthPose {
   readonly seconds: number;
   /** Her belly against full term (1 at 100%): her thighs open wider round a bigger one. */
   readonly bump: number;
+  /** A tester's change to the position's angles (the room's probes step the hip bend to find where her skin fails). */
+  readonly tweak?: Partial<BirthSpec>;
 }
 
 export interface BirthSpec {
@@ -98,13 +100,13 @@ export function birthSpread(style: BirthStyle, bump: number): number {
  */
 export function poseBirth(measure: HumanMeasure, bind: readonly BindJoint[], pose: BirthPose, out: MutableJointTurn[]): readonly JointTurn[] {
   while (out.length < BIRTH_TURNS) out.push(newJointTurn());
-  const j = measure.joints, L = measure.leftSign < 0 ? -1 : 1, s = BIRTH_POSES[pose.style];
+  const j = measure.joints, L = measure.leftSign < 0 ? -1 : 1, s: BirthSpec = pose.tweak ? { ...BIRTH_POSES[pose.style], ...pose.tweak } : BIRTH_POSES[pose.style];
   const breath = Math.sin(pose.seconds * 2 * Math.PI * BREATH_HZ) * BREATH;
   write(out[0], j.spine, rx(s.spine * DEG));
   write(out[1], j.chest, rx(s.chest * DEG - breath));
   write(out[2], j.neck, rx(s.neck * DEG + breath * 0.5));
   write(out[3], j.head, rx(0));
-  const spread = birthSpread(pose.style, pose.bump) * DEG;
+  const spread = (pose.tweak?.spread !== undefined ? s.spread + s.spreadPerBump * Math.min(2, Math.max(0, pose.bump)) : birthSpread(pose.style, pose.bump)) * DEG;
   // a bone's own lean in the bind (how far it hangs back from plumb, the sense Rx(+θ) swings it): the flex is from there
   const lean = (a: number, b: number) => Math.atan2(-(bind[b].z - bind[a].z), -(bind[b].y - bind[a].y));
   const leg = (i: number, hip: number, knee: number, ankle: number, side: number) => {

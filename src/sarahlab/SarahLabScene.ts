@@ -80,7 +80,7 @@ import { BUILD_PROFILES, buildAmounts, buildKey, heightLine, heldSegments, profi
 import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields, prepareBuildRig, standingLift, type BuildMeshFields, type BuildRig } from '../view/bodyBuild';
 import { dropIdleMorphs } from '../view/morphPrune';
 import { BIRTH_CLEFT_FIELD, BIRTH_LIPS_FIELD, birthAreaCentre, birthAreaFields, LIPS_COVERED, patchBirthShade } from './birthArea';
-import { BIRTH_POSES, poseBirth } from '../actor/humanBirth';
+import { BIRTH_POSES, poseBirth, type BirthSpec } from '../actor/humanBirth';
 import { AUTO_LIES, BABIES_NAME, BABY_MODEL, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { setPush, jiggleOf as jiggleOfMesh } from './softBody';
@@ -335,6 +335,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let babyFrame: { bone: THREE.Bone; matrix: THREE.Matrix4; meshToRest: THREE.Matrix4 } | null = null;
   /** her vulva, rebuilt finer from her own skin to be able to open (vulvaMesh.ts) */
   let vulva: VulvaPatch | null = null;
+  /** a probe's change to the birth position's angles (humanBirth.ts `tweak`) */
+  let birthTweak: Partial<BirthSpec> | null = null;
   /** her middle kept with her pelvis in a birth position (birthWeights.ts), and a probe's override of how much */
   let birthWeights: BirthWeights | null = null, birthMaskOverride: number | null = null;
   let babyFitAt = -Infinity, babyPushField: BellyPush | null = null, babyPushOff = false;
@@ -2494,7 +2496,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     if (isBirthPose(p)) {
       // a birth position: her standing arms, her back and legs as the position has them (actor/humanBirth.ts)
       const stood = poseHuman(measure, rig.bind, { stance: 'stand', phase: 0, seconds, lean: 0, carry: bump / 100 }, out);
-      const birth = poseBirth(measure, rig.bind, { style: p, seconds, bump: bump / 100 }, birthOut);
+      const birth = poseBirth(measure, rig.bind, { style: p, seconds, bump: bump / 100, ...(birthTweak ? { tweak: birthTweak } : {}) }, birthOut);
       const mine = new Set(birth.map((t) => t.joint));
       base = [...stood.filter((t) => !mine.has(t.joint)), ...birth];
     } else if (p === 'sit') base = poseSeated(measure, rig.bind, { style: 'sit', seconds, posture: 'pregnant', bump: bump / 100, settled: settledSitFor(SARAH_LAB_MODELS[modelIndex].id) }, out);
@@ -3491,6 +3493,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           return { ...vulva.worldAxes(), toKnees: knee.sub(hip).normalize().toArray().map((x) => +x.toFixed(3)), toHead: head.sub(hip).normalize().toArray().map((x) => +x.toFixed(3)) };
         },
         birthMask: (share: number | null) => { birthMaskOverride = share; applyLook(); return { touched: birthWeights?.touched ?? null }; },
+        birthTweak: (t: Partial<BirthSpec> | null) => { birthTweak = t; applyLook(); return true; },
         vulvaOpen: (o: number) => { if (!vulva) return null; vulva.setOpen(o); return vulva.open; },
         vulva: (on: boolean, wire = false) => { if (!vulva) return null; vulva.show(on); vulva.wire(on && wire); const sk = model && findSkinnedMesh(model), m = vulva.mesh, c = new THREE.Vector3(), v = new THREE.Vector3(); let k = 0;
           model?.updateMatrixWorld(true);
