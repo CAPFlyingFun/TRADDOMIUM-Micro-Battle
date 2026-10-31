@@ -88,6 +88,7 @@ import { createVulvaPatch, type VulvaPatch } from './vulvaMesh';
 import { BIRTH_THIGHS_FIELD, birthThighsField } from './birthThighs';
 import { createBirthWeights, type BirthWeights } from './birthWeights';
 import { BIRTH_ROOM_FIELD, createBirthRoom, type BirthRoom } from './birthRoom';
+import { BIRTH_NORMALS_FIELD, createBirthNormals, type BirthNormals } from './birthNormals';
 import { attachJiggle, bellyTune, breastTune, createJiggleUniforms, feltAcceleration, restingMass, stepMass, type Mass } from './softBody';
 import { applyMilk, applyWomb, applyZeroRefine, babyAnchors, babyWeightState, chestAnchors, chestFieldWeights, groinAnchors, groinFieldWeights, loadMilk, milkAnchors, milkBalanceState, milkFieldWeights, milkState, MILK_PATH, babyFieldWeights, loadWomb, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, WOMB_PATH, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
 import { NAVEL_MORPHS, type NavelPiece } from './navelPiece';
@@ -339,7 +340,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** a probe's change to the birth position's angles (humanBirth.ts `tweak`) */
   let birthTweak: Partial<BirthSpec> | null = null;
   /** room kept between her thighs as she is posed (birthRoom.ts): the watcher, whether it is on, what it was last worked out for */
-  let birthRoom: BirthRoom | null = null, birthRoomOn = true, birthRoomFor = '';
+  let birthRoom: BirthRoom | null = null, birthRoomOn = false, birthRoomFor = '';
+  /** her groin lit as it is bent (birthNormals.ts), and whether it is on */
+  let birthNormals: BirthNormals | null = null, birthNormalsOn = true;
   /** her middle kept with her pelvis in a birth position (birthWeights.ts), and a probe's override of how much */
   let birthWeights: BirthWeights | null = null, birthMaskOverride: number | null = null;
   let babyFitAt = -Infinity, babyPushField: BellyPush | null = null, babyPushOff = false;
@@ -1167,6 +1170,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // her inner thighs out of the way of her birth area in a birth position (birthThighs.ts)
     out[BIRTH_THIGHS_FIELD] = isBirthPose(pose) ? 1 : 0;
     out[BIRTH_ROOM_FIELD] = isBirthPose(pose) && birthRoomOn ? 1 : 0;
+    out[BIRTH_NORMALS_FIELD] = isBirthPose(pose) && birthNormalsOn ? 1 : 0;
     // AUTO DEPTH: her belly deepened by as much as her babies need (baby.ts, `babiesInHer`), on her own DEPTH
     if (babyAutoDepth) out[DEPTH_FIELD] = (out[DEPTH_FIELD] ?? 0) + bodyShapeFieldWeights({ ...body, bellyDepth: babyAutoDepth }, b, bellyCurve)[DEPTH_FIELD];
     // her upper belly smoothed, by each belly key's own weight (zeroRefine.ts)
@@ -1195,9 +1199,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // were normalized here too, and at 0-50% the large belly offsets flipped normals in the fold under her belly
     }, { normalizeNormals: !(mesh.userData.recoveredShirt || mesh.userData.recoveredLeggings), post: buildPost(mesh, fields, build) });
     layBuildBones(build);
-    // her middle kept with her pelvis (birthWeights.ts): OFF unless a probe asks -- at RECLINE's 92-degree hip bend a hard
-    // split between torso and thigh tears her skin (tried 2026-10-30); the rebuilt area reads her weights again
-    if (birthWeights?.apply(birthMaskOverride ?? 0)) vulva?.resyncWeights();
+    // her middle -- the skin round and behind her vulva -- kept with her pelvis in a birth position (birthWeights.ts;
+    // Joshua, 2026-10-30, of RECLINE with it: "Looks a lot better"); the rebuilt area reads her weights again
+    if (birthWeights?.apply(birthMaskOverride ?? (isBirthPose(pose) ? 1 : 0))) vulva?.resyncWeights();
     // her navel, laid on her as just shaped (navelPiece.ts)
     layNavel(bump);
     // which garments are drawn: the outfit editor's choice, or none while her skin is painted bare (CLOTHES · HIDDEN)
@@ -2859,19 +2863,26 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    */
   function keepBirthRoom(): void {
     const b = bodyOf(), sb = b ? shaped.find((x) => x.mesh === b.mesh) : undefined;
-    if (!birthRoom || !b || !sb || !model) return;
-    if (!isBirthPose(pose) || !birthRoomOn) { birthRoomFor = ''; return; }
-    const shapeKey = sb.fields.last.split('|').filter((k) => !k.startsWith(BIRTH_ROOM_FIELD)).join('|');
-    const sig = `${pose}|${JSON.stringify(birthTweak)}|${Math.round(bump)}|${shapeKey}`;
+    if (!b || !sb || !model) return;
+    if (!isBirthPose(pose) || (!birthRoomOn && !birthNormalsOn)) { birthRoomFor = ''; return; }
+    const shapeKey = sb.fields.last.split('|').filter((k) => !k.startsWith(BIRTH_ROOM_FIELD) && !k.startsWith(BIRTH_NORMALS_FIELD)).join('|');
+    const sig = `${pose}|${JSON.stringify(birthTweak)}|${Math.round(bump)}|${birthRoomOn}|${birthNormalsOn}|${birthMaskOverride}|${shapeKey}`;
     if (sig === birthRoomFor) return;
     birthRoomFor = sig;
+    // her shape without either of these first: each is worked out on her as she would be without it
+    const bare = new Map(sb.fields.fields);
+    bare.delete(BIRTH_ROOM_FIELD); bare.delete(BIRTH_NORMALS_FIELD);
+    sb.fields = { ...sb.fields, fields: bare, last: '' };
+    applyLook();
     model.updateMatrixWorld(true);
-    const field = birthRoom.compute((b.mesh.geometry.getAttribute('position') as THREE.BufferAttribute).array as Float32Array);
-    const map = new Map(sb.fields.fields);
-    map.set(BIRTH_ROOM_FIELD, field);
+    const g = b.mesh.geometry, P = (g.getAttribute('position') as THREE.BufferAttribute).array as Float32Array, N = (g.getAttribute('normal') as THREE.BufferAttribute).array as Float32Array;
+    const map = new Map(bare);
+    if (birthRoom && birthRoomOn) map.set(BIRTH_ROOM_FIELD, birthRoom.compute(P));
+    if (birthNormals && birthNormalsOn) map.set(BIRTH_NORMALS_FIELD, birthNormals.compute(P, N));
     sb.fields = { ...sb.fields, fields: map, last: '' };
     applyLook();
   }
+
   function restOfMesh(mesh: THREE.SkinnedMesh, root: THREE.Object3D): THREE.Matrix4 {
     const sk = mesh.skeleton, bone = sk.bones[0];
     const skin = new THREE.Matrix4().copy(mesh.bindMatrixInverse).multiply(bone.matrixWorld).multiply(sk.boneInverses[0]).multiply(mesh.bindMatrix);
@@ -3273,6 +3284,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             // and the area rebuilt finer, from her own skin, to be able to open (vulvaMesh.ts)
             vulva?.dispose();
             try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest, measure?.joints.pelvis); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
+            try { birthNormals = createBirthNormals(bm!, babyFrame.meshToRest, ix.array); } catch (error) { console.error('[sarahlab] her birth-pose normals could not be made', error); birthNormals = null; }
             try { const jt = measure?.joints; birthRoom = jt ? createBirthRoom(bm!, babyFrame.meshToRest, ix.array, jt.pelvis, jt.hipL, jt.hipR) : null; } catch (error) { console.error('[sarahlab] her birth-pose room could not be made', error); birthRoom = null; }
             try { const jt = measure?.joints; birthWeights = jt ? createBirthWeights(bm!, babyFrame.meshToRest, jt.pelvis, jt.hipL, jt.hipR, jt.kneeL, jt.kneeR) : null; } catch (error) { console.error('[sarahlab] her birth-pose weights could not be made', error); birthWeights = null; }
           }
@@ -3519,7 +3531,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         },
         birthMask: (share: number | null) => { birthMaskOverride = share; applyLook(); return { touched: birthWeights?.touched ?? null }; },
         birthTweak: (t: Partial<BirthSpec> | null) => { birthTweak = t; applyLook(); return true; },
-        birthRoom: (on: boolean) => { birthRoomOn = on; birthRoomFor = ''; applyLook(); return { watched: birthRoom?.watched ?? null, largestMm: birthRoom ? +(birthRoom.largest * 1000).toFixed(1) : null }; },
+        birthRoom: (on: boolean) => { birthRoomOn = on; birthRoomFor = ''; applyLook(); return { watched: birthRoom?.watched ?? null, largestMm: birthRoom ? +(birthRoom.largest * 1000).toFixed(1) : null, partsMm: birthRoom ? Object.fromEntries(Object.entries(birthRoom.parts).map(([k2, v2]) => [k2, +(v2 * 1000).toFixed(1)])) : null }; },
         // which of her points have come to her middle as posed (pelvis frame |x| < 6 mm) that stood well off it, and where they stood
         midlineCrossers: () => {
           const b = bodyOf(); if (!b || !babyFrame || !measure || !model) return null;
@@ -3559,6 +3571,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           const jn = measure ? Object.fromEntries(Object.entries(measure.joints).map(([k2, i2]) => [k2, `${i2}:${m.skeleton.bones[i2 as number]?.name}`])) : null;
           return { joints: jn, count, cam: cam.divideScalar(M).toArray().map((x) => +x.toFixed(3)), top: Object.entries(out).sort((a2, b2) => b2[1] - a2[1]).slice(0, 20) };
         },
+        birthNormals: (on: boolean) => { birthNormalsOn = on; birthRoomFor = ''; applyLook(); return { watched: birthNormals?.watched ?? null }; },
         vulvaOpen: (o: number) => { if (!vulva) return null; vulva.setOpen(o); return vulva.open; },
         vulva: (on: boolean, wire = false) => { if (!vulva) return null; vulva.show(on); vulva.wire(on && wire); const sk = model && findSkinnedMesh(model), m = vulva.mesh, c = new THREE.Vector3(), v = new THREE.Vector3(); let k = 0;
           model?.updateMatrixWorld(true);
