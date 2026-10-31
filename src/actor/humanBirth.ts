@@ -46,6 +46,12 @@ export interface BirthSpec {
   readonly spine: number; readonly chest: number; readonly neck: number;
   /** her whole body leaned back about her hips onto what holds her up (degrees; the owner turns her) */
   readonly leanBack: number;
+  /**
+   * the thigh brought forward FIRST and then swung out about the vertical by `spread` (a deep squat: knees out wide and
+   * up, each shin hanging down to its foot under the knee -- Joshua's references, 2026-10-31), rather than opened to the
+   * side while it hangs and then brought forward (absent: false)
+   */
+  readonly swing?: boolean;
 }
 
 /**
@@ -54,7 +60,9 @@ export interface BirthSpec {
  */
 export const BIRTH_POSES: Readonly<Record<BirthStyle, BirthSpec>> = Object.freeze({
   apart: { spread: 18, spreadPerBump: 6, flex: 16, knee: 30, turnOut: 18, footFlat: true, spine: 6, chest: 2, neck: -4, leanBack: 0 },
-  squat: { spread: 48, spreadPerBump: 10, flex: 112, knee: 132, turnOut: 36, footFlat: true, spine: 22, chest: 8, neck: -24, leanBack: 0 },
+  // (a deep squat as Joshua's references show it, 2026-10-31: low, knees wide and above her hips, shins down to her
+  // feet under them, her back upright)
+  squat: { spread: 50, spreadPerBump: 6, flex: 118, knee: 150, turnOut: 30, footFlat: true, spine: 4, chest: 2, neck: -6, leanBack: 0, swing: true },
   recline: { spread: 80, spreadPerBump: 4, flex: 50, knee: 96, turnOut: 12, footFlat: false, spine: -2, chest: 10, neck: 26, leanBack: 40 },
 });
 
@@ -111,7 +119,7 @@ export function poseBirth(measure: HumanMeasure, bind: readonly BindJoint[], pos
   const lean = (a: number, b: number) => Math.atan2(-(bind[b].z - bind[a].z), -(bind[b].y - bind[a].y));
   const leg = (i: number, hip: number, knee: number, ankle: number, side: number) => {
     const flex = s.flex * DEG + lean(hip, knee), bend = s.knee * DEG + lean(knee, ankle) - lean(hip, knee);
-    const hipQ = qMul(rx(-flex), rz(side * spread)), kneeQ = rx(bend);
+    const hipQ = s.swing ? qMul(ry(side * spread), rx(-flex)) : qMul(rx(-flex), rz(side * spread)), kneeQ = rx(bend);
     write(out[i], hip, hipQ);
     write(out[i + 1], knee, kneeQ);
     // flat: everything above it undone, then turned out about the vertical; else it follows the shin, a little pointed
