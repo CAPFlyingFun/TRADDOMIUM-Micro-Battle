@@ -25,7 +25,7 @@ export const BIRTH_NORMALS = Object.freeze({
    * metres at rest) that have come within `touch` metres and one is behind the other's skin are pushed apart to `gap`,
    * `rounds` times before the smoothing and after it
    */
-  apart: 0.05, touch: 0.02, gap: 0.001, rounds: 0, step: 0.0015,
+  apart: 0.05, touch: 0.012, gap: 0.0015, rounds: 0, step: 0.003, layer: 0.1,
 });
 
 export interface BirthNormals {
@@ -38,7 +38,7 @@ export interface BirthNormals {
 
 const smooth = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
 
-export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix4, indices: ArrayLike<number>): BirthNormals | null {
+export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix4, indices: ArrayLike<number>, thighBones: readonly number[] = []): BirthNormals | null {
   const g = mesh.geometry as THREE.BufferGeometry;
   const si = g.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, sw = g.getAttribute('skinWeight') as THREE.BufferAttribute | undefined, pa = g.getAttribute('position');
   if (!si || !sw || !pa) return null;
@@ -106,55 +106,72 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
       for (const i of watched) { const o = key[i] * 3; agree0 += Math.sign(kn[o] * nrmPosed(i, 0, nrm) + kn[o + 1] * nrmPosed(i, 1, nrm) + kn[o + 2] * nrmPosed(i, 2, nrm)); }
       const out0 = agree0 >= 0 ? 1 : -1;
       // kept from passing through itself
+      // KEPT FROM PASSING THROUGH ITSELF, one side giving way: her thigh's skin (mostly carried by a thigh bone) that has
+      // gone in behind her buttock's or her mound's (mostly not) is laid back on that skin's surface -- the nearest of
+      // its triangles, by the triangle's own face (not a point's normal, which a fold makes unreliable)
+      const thighOf = new Float64Array(K);
+      { const cnt = new Float64Array(K);
+        for (const i of used) { let t = 0; for (let c = 0; c < 4; c++) if (thighBones.includes(si.getComponent(i, c))) t += sw.getComponent(i, c); thighOf[key[i]] += t; cnt[key[i]]++; }
+        for (let k = 0; k < K; k++) if (cnt[k]) thighOf[k] /= cnt[k]; }
       const cell = touchG, grid = new Map<number, number[]>(), mv = new Float64Array(K * 3), mc = new Float64Array(K);
       const hash = (x: number, y: number, z: number) => (Math.floor(x / cell) * 73856093) ^ (Math.floor(y / cell) * 19349663) ^ (Math.floor(z / cell) * 83492791);
+      const A3 = new THREE.Vector3(), B3 = new THREE.Vector3(), C3 = new THREE.Vector3(), P3 = new THREE.Vector3(), Q3 = new THREE.Vector3(), N3 = new THREE.Vector3(), tri3 = new THREE.Triangle();
       const unPierce = () => {
         for (let round = 0; round < B.rounds; round++) {
           keyNormals(out0);
+          // her other skin's triangles, by where they are now
           grid.clear();
-          for (let k = 0; k < K; k++) { if (ks[k] <= 0) continue; const h = hash(kp[k * 3], kp[k * 3 + 1], kp[k * 3 + 2]); const l = grid.get(h); if (l) l.push(k); else grid.set(h, [k]); }
+          for (let t = 0; t < tris.length; t += 3) {
+            const k0 = key[tris[t]], k1 = key[tris[t + 1]], k2 = key[tris[t + 2]];
+            const x = (kp[k0 * 3] + kp[k1 * 3] + kp[k2 * 3]) / 3, y = (kp[k0 * 3 + 1] + kp[k1 * 3 + 1] + kp[k2 * 3 + 1]) / 3, z = (kp[k0 * 3 + 2] + kp[k1 * 3 + 2] + kp[k2 * 3 + 2]) / 3;
+            const h = hash(x, y, z), l = grid.get(h); if (l) l.push(t); else grid.set(h, [t]);
+          }
           mv.fill(0); mc.fill(0);
           let moved = 0;
           for (let k = 0; k < K; k++) {
             if (ks[k] <= 0) continue;
-            const x = kp[k * 3], y = kp[k * 3 + 1], z = kp[k * 3 + 2];
+            P3.set(kp[k * 3], kp[k * 3 + 1], kp[k * 3 + 2]);
+            let best = Infinity, bx = 0, by = 0, bz = 0, bnx = 0, bny = 0, bnz = 0;
             for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
-              const l = grid.get(hash(x + dx * cell, y + dy * cell, z + dz * cell));
+              const l = grid.get(hash(P3.x + dx * cell, P3.y + dy * cell, P3.z + dz * cell));
               if (!l) continue;
-              for (const o of l) {
-                if (o === k) continue;
-                const ex = x - kp[o * 3], ey = y - kp[o * 3 + 1], ez = z - kp[o * 3 + 2];
-                if (ex * ex + ey * ey + ez * ez > touchG * touchG) continue;
-                if (Math.hypot(restK[k * 3] - restK[o * 3], restK[k * 3 + 1] - restK[o * 3 + 1], restK[k * 3 + 2] - restK[o * 3 + 2]) < B.apart) continue;
-                // one side gives way, always the same one: the skin that stands lower at rest (her thigh, under her
-                // buttock's fold or her mound's crease) goes to the other's surface; the other stays
-                if (restK[k * 3 + 1] >= restK[o * 3 + 1]) continue;
-                // k behind o's skin (or nearer it than the gap): out along o's normal, half the way (o does the other half)
-                const depth = ex * kn[o * 3] + ey * kn[o * 3 + 1] + ez * kn[o * 3 + 2];
-                if (depth >= gapG) continue;
-                // only where the two skins have truly crossed: facing each other, each behind the other
-                if (kn[k * 3] * kn[o * 3] + kn[k * 3 + 1] * kn[o * 3 + 1] + kn[k * 3 + 2] * kn[o * 3 + 2] > -0.3) continue;
-                if (-(ex * kn[k * 3] + ey * kn[k * 3 + 1] + ez * kn[k * 3 + 2]) >= gapG) continue;
-                const push = (gapG - depth) * ks[k];
-                mv[k * 3] += kn[o * 3] * push; mv[k * 3 + 1] += kn[o * 3 + 1] * push; mv[k * 3 + 2] += kn[o * 3 + 2] * push; mc[k]++;
+              for (const t of l) {
+                const k0 = key[tris[t]], k1 = key[tris[t + 1]], k2 = key[tris[t + 2]];
+                if (k0 === k || k1 === k || k2 === k) continue;
+                // only skin carried less by a thigh than k is: the thigh's goes under, the other stays
+                if (thighOf[k] < (thighOf[k0] + thighOf[k1] + thighOf[k2]) / 3 + B.layer) continue;
+                if (Math.hypot(restK[k * 3] - restK[k0 * 3], restK[k * 3 + 1] - restK[k0 * 3 + 1], restK[k * 3 + 2] - restK[k0 * 3 + 2]) < B.apart) continue;
+                A3.set(kp[k0 * 3], kp[k0 * 3 + 1], kp[k0 * 3 + 2]); B3.set(kp[k1 * 3], kp[k1 * 3 + 1], kp[k1 * 3 + 2]); C3.set(kp[k2 * 3], kp[k2 * 3 + 1], kp[k2 * 3 + 2]);
+                tri3.set(A3, B3, C3); tri3.closestPointToPoint(P3, Q3);
+                const d = P3.distanceTo(Q3);
+                if (d >= best || d > touchG) continue;
+                tri3.getNormal(N3); N3.multiplyScalar(out0);
+                best = d; bx = Q3.x; by = Q3.y; bz = Q3.z; bnx = N3.x; bny = N3.y; bnz = N3.z;
               }
             }
+            if (best === Infinity) continue;
+            const signed = (P3.x - bx) * bnx + (P3.y - by) * bny + (P3.z - bz) * bnz;
+            if (signed >= gapG) continue;
+            // in under that skin, along its OWN normal, never more than the reach (small and steady: no shards)
+            const go = Math.min(touchG, gapG - signed);
+            mv[k * 3] = -kn[k * 3] * go; mv[k * 3 + 1] = -kn[k * 3 + 1] * go; mv[k * 3 + 2] = -kn[k * 3 + 2] * go; mc[k] = 1;
           }
-          // each move small, and shared with its neighbours (so a crease is eased out, never torn into shards)
-          for (let k = 0; k < K; k++) if (mc[k]) { mv[k * 3] /= mc[k]; mv[k * 3 + 1] /= mc[k]; mv[k * 3 + 2] /= mc[k]; }
+          // each move small, and eased into its neighbours (so a crease is laid flat, never torn into shards)
           sumN.fill(0); cntN.fill(0);
           for (let t = 0; t < tris.length; t += 3) for (let q = 0; q < 3; q++) {
             const k = key[tris[t + q]];
-            for (let r = 0; r < 3; r++) { const o = key[tris[t + ((q + r) % 3)]]; sumN[k * 3] += mv[o * 3]; sumN[k * 3 + 1] += mv[o * 3 + 1]; sumN[k * 3 + 2] += mv[o * 3 + 2]; cntN[k]++; }
+            for (let r = 0; r < 3; r++) { const o = key[tris[t + ((q + r) % 3)]]; if (!mc[o]) continue; sumN[k * 3] += mv[o * 3]; sumN[k * 3 + 1] += mv[o * 3 + 1]; sumN[k * 3 + 2] += mv[o * 3 + 2]; cntN[k]++; }
           }
           const stepG = B.step * perMetre;
           for (let k = 0; k < K; k++) {
-            if (!cntN[k] || ks[k] <= 0) continue;
-            let x = sumN[k * 3] / cntN[k], y = sumN[k * 3 + 1] / cntN[k], z = sumN[k * 3 + 2] / cntN[k];
+            if (ks[k] <= 0) continue;
+            const own = mc[k] ? 1 : 0, c = cntN[k] + own;
+            if (!c) continue;
+            let x = (sumN[k * 3] + mv[k * 3] * own) / c, y = (sumN[k * 3 + 1] + mv[k * 3 + 1] * own) / c, z = (sumN[k * 3 + 2] + mv[k * 3 + 2] * own) / c;
             const l = Math.hypot(x, y, z);
             if (l < 1e-9) continue;
             if (l > stepG) { x *= stepG / l; y *= stepG / l; z *= stepG / l; }
-            kp[k * 3] += x; kp[k * 3 + 1] += y; kp[k * 3 + 2] += z; moved++;
+            kp[k * 3] += x * ks[k]; kp[k * 3 + 1] += y * ks[k]; kp[k * 3 + 2] += z * ks[k]; moved++;
           }
           pierced = Math.max(pierced, moved);
           if (!moved) break;

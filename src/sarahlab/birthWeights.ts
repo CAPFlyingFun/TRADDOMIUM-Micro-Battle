@@ -23,7 +23,7 @@ export const BIRTH_WEIGHTS = Object.freeze({
   inner: 38, outer: 62,
   /** her middle (metres across, either side): within `middle` all torso, out to `middleFade` fading to the cone's say --
    * near her crotch only (within `middleNear`, fading out by `middleFar`; her thighs touch her middle all the way down) */
-  middle: 0.03, middleFade: 0.14, middleNear: 0.1, middleFar: 0.24,
+  middle: 0.03, middleFade: 0.06, middleNear: 0.06, middleFar: 0.12,
   /** whether the thigh cone is used at all (off: only her middle -- the skin round and behind her vulva -- is kept) */
   useCone: false,
   /** and the cone only near the hip joint (metres): out to `coneNear` all of it, gone by `coneFar` */
@@ -35,7 +35,7 @@ export const BIRTH_WEIGHTS = Object.freeze({
    * two bend together into one smooth fold. Within `blurNear` of her crotch (metres) all of it, none past `blurFar`;
    * `blurPasses` times, each `blurRate` of the way to its neighbours' mean
    */
-  blurNear: 0.12, blurFar: 0.2, blurPasses: 30, blurRate: 0.5,
+  blurNear: 0.12, blurFar: 0.2, blurPasses: 0, blurRate: 0.5,
   /** and only below her navel (metres above the hip joints): her chest and arms are no thigh's */
   above: 0.2,
 });
