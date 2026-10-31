@@ -86,6 +86,7 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import { setPush, jiggleOf as jiggleOfMesh } from './softBody';
 import { createVulvaPatch, type VulvaPatch } from './vulvaMesh';
 import { BIRTH_THIGHS_FIELD, birthThighsField } from './birthThighs';
+import { BIRTH_SEAT_FIELD, birthSeatField } from './birthSeat';
 import { BIRTH_WEIGHTS, createBirthWeights, type BirthWeights } from './birthWeights';
 import { BIRTH_ROOM_FIELD, createBirthRoom, type BirthRoom } from './birthRoom';
 import { BIRTH_NORMALS_FIELD, createBirthNormals, type BirthNormals } from './birthNormals';
@@ -480,6 +481,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let bumpInput: HTMLInputElement | null = null;
   /** the BIRTH OPENING slider (percent, 0 closed .. 100 the full 10 cm) */
   let birthOpenInput: HTMLInputElement | null = null, birthOpenPct = 0;
+  /** her lowest buttocks pressed in in a birth pose (a probe may turn it off to compare) */
+  let birthSeatOn = true;
   // the library outfit she last put on (her changes to it save as hers), and saved clothes waiting for their outfit to load
   let wornFrom: string | null = null;
   // ...and in his fabrics, put on as her outfit is dressed the first time
@@ -1186,6 +1189,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     birthShadeU.shade.value = birthAreaShown && !lowerCovered() ? 1 : 0;
     // her inner thighs out of the way of her birth area in a birth position (birthThighs.ts)
     out[BIRTH_THIGHS_FIELD] = isBirthPose(pose) ? 1 : 0;
+    // (only with her hips bent up: standing with her legs apart her buttocks hang as they are)
+    out[BIRTH_SEAT_FIELD] = (pose === 'squat' || pose === 'recline') && birthSeatOn ? 1 : 0;
     out[BIRTH_ROOM_FIELD] = isBirthPose(pose) && birthRoomOn ? 1 : 0;
     out[BIRTH_NORMALS_FIELD] = isBirthPose(pose) && birthNormalsOn ? 1 : 0;
     // AUTO DEPTH: her belly deepened by as much as her babies need (baby.ts, `babiesInHer`), on her own DEPTH
@@ -3299,6 +3304,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             if (parts.lips.index.length) map.set(BIRTH_LIPS_FIELD, parts.lips);
             // and her inner thighs drawn back from her crotch in a birth pose (birthThighs.ts)
             { const thighs = birthThighsField(sb.fields.basePos, sb.fields.baseNrm, babyFrame.meshToRest); if (thighs.index.length) map.set(BIRTH_THIGHS_FIELD, thighs); }
+            // and her lowest buttocks pressed in under her thighs, to curve with them (birthSeat.ts)
+            { const seat = birthSeatField(sb.fields.basePos, sb.fields.baseNrm, babyFrame.meshToRest); if (seat.index.length) map.set(BIRTH_SEAT_FIELD, seat); }
             sb.fields = { ...sb.fields, fields: map, last: '' };
             // and its split shaded along its middle (on her skin's own material)
             const rest = new Float32Array(sb.fields.basePos.length), v = new THREE.Vector3();
@@ -3559,6 +3566,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           return { ...vulva.worldAxes(), toKnees: knee.sub(hip).normalize().toArray().map((x) => +x.toFixed(3)), toHead: head.sub(hip).normalize().toArray().map((x) => +x.toFixed(3)) };
         },
         birthMask: (share: number | null) => { birthMaskOverride = share; applyLook(); return { touched: birthWeights?.touched ?? null, debug: birthWeights?.debug }; },
+        birthSeat: (on: boolean) => { birthSeatOn = on; applyLook(); return on; },
         birthTweak: (t: Partial<BirthSpec> | null) => { birthTweak = t; applyLook(); return true; },
         birthRoom: (on: boolean) => { birthRoomOn = on; birthRoomFor = ''; applyLook(); return { watched: birthRoom?.watched ?? null, largestMm: birthRoom ? +(birthRoom.largest * 1000).toFixed(1) : null, partsMm: birthRoom ? Object.fromEntries(Object.entries(birthRoom.parts).map(([k2, v2]) => [k2, +(v2 * 1000).toFixed(1)])) : null }; },
         // which of her points have come to her middle as posed (pelvis frame |x| < 6 mm) that stood well off it, and where they stood
@@ -3614,7 +3622,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
               const nn = B2.sub(A).cross(C2.sub(A)); if (nn.lengthSq() < 1e-16) continue; fn.set(t, nn.normalize().clone());
               for (let q = 0; q < 3; q++) {
                 const a0 = kk(all[t + q]), b0 = kk(all[t + (q + 1) % 3]), e2 = a0 < b0 ? `${a0},${b0}` : `${b0},${a0}`, o = edgeTri.get(e2);
-                if (o === undefined) edgeTri.set(e2, t); else { const no = fn.get(o); if (no && no.dot(fn.get(t)!) < -0.5) { folds++; foldZ[Math.max(0, Math.min(9, Math.floor((r1.z + 0.3) / 0.05)))]++; if (foldAt.length < 12) foldAt.push(r1.toArray().map((x) => +x.toFixed(3))); } }
+                if (o === undefined) edgeTri.set(e2, t); else { const no = fn.get(o); if (no && no.dot(fn.get(t)!) < -0.5) { folds++; foldZ[Math.max(0, Math.min(9, Math.floor((r1.z + 0.3) / 0.05)))]++; if (foldAt.length < 40 && r1.z < -0.05) foldAt.push(r1.toArray().map((x) => +x.toFixed(3))); } }
               }
             }
           }

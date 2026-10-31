@@ -19,6 +19,11 @@ export const BIRTH_NORMALS = Object.freeze({
   /** her posed skin there smoothed too (Joshua, 2026-10-30: "smooth under the hips and buttocks... Add more
    * smoothening"): how many passes, and how far each moves a point toward its neighbours' middle (0..1) */
   passes: 30, lambda: 0.6,
+  /** the gluteal fold's own smoothing, after it: `passes` more, each `lambda` of the way, over her lower buttocks off
+   * her middle -- behind the middle of her vulva from `behindFrom` (all by `behindFull`) to `behindTo`, below `upTo`
+   * (all by `upFull`) and above `downTo`, out from her middle from `midFrom` (all by `midFull`) to `sideTo` (all
+   * within `sideFull`); metres */
+  fold: Object.freeze({ passes: 120, lambda: 0.7, behindFrom: 0.02, behindFull: 0.05, behindTo: 0.24, upFull: 0.08, upTo: 0.15, downTo: -0.06, midFrom: 0.008, midFull: 0.03, sideFull: 0.11, sideTo: 0.17 }),
   /** folds ironed out after it (2026-10-31): two triangles sharing an edge whose facings' dot is below `foldAt` are a
    * fold; the points round it are smoothed `ironLambda` hard, four passes a round, at most `ironRounds` rounds */
   foldAt: 0.3, ironLambda: 0.8, ironRounds: 60,
@@ -99,6 +104,18 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   // each point where it stands at rest (metres, her rest frame)
   const restK = new Float64Array(K * 3);
   for (const i of used) { const k = key[i]; restK[k * 3] = rest[i * 3]; restK[k * 3 + 1] = rest[i * 3 + 1]; restK[k * 3 + 2] = rest[i * 3 + 2]; }
+  // each point's share of the GLUTEAL FOLD's own smoothing (see B.fold): behind her vulva, low on her buttocks, off
+  // her middle -- where her buttock meets her thigh
+  const zoneShare = (F: typeof B.fold) => {
+    const out = new Float32Array(K);
+    for (let k = 0; k < K; k++) {
+      const x = Math.abs(restK[k * 3]), up = restK[k * 3 + 1] - mid.y, behind = mid.z - restK[k * 3 + 2];
+      out[k] = smooth(F.behindFrom, F.behindFull, behind) * smooth(F.behindTo, F.behindTo - 0.05, behind) * smooth(F.upTo, F.upFull, up)
+        * smooth(F.downTo, F.downTo + 0.04, up) * smooth(F.sideTo, F.sideFull, x) * smooth(F.midFrom, F.midFull, x);
+    }
+    return out;
+  };
+  const foldK = zoneShare(B.fold);
   let pierced = 0, blowWorst = 0, blowCount = 0, folded = 0;
   const expected: number[] = [];
   const perMetre = 1 / new THREE.Vector3(1, 0, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(toRest)).length();
@@ -325,6 +342,26 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
           for (let c = 0; c < 3; c++) kp[k * 3 + c] += l * (sumN[k * 3 + c] / cntN[k] - kp[k * 3 + c]);
         }
       }
+      // THE GLUTEAL FOLD SMOOTHED OUT (Joshua, 2026-10-31: "remove that double butt from the front view, and make the
+      // whole hip/thigh seamless"): with her hip bent, the crease where her buttock meets her thigh stayed a deep fold,
+      // and the lower part of her buttock read as a second bottom below her thigh. Real skin there stretches flat as
+      // the hip bends; smoothed many more times, only there, the crease fills and buttock and thigh run on in one
+      const smoothZone = (share: Float32Array, passes: number, lambda: number) => {
+        for (let pass = 0; pass < passes; pass++) {
+          sumN.fill(0); cntN.fill(0);
+          for (let t = 0; t < tris.length; t += 3) for (let q = 0; q < 3; q++) {
+            const k = key[tris[t + q]];
+            if (share[k] <= 0) continue;
+            for (let r = 1; r < 3; r++) { const o = key[tris[t + ((q + r) % 3)]]; sumN[k * 3] += kp[o * 3]; sumN[k * 3 + 1] += kp[o * 3 + 1]; sumN[k * 3 + 2] += kp[o * 3 + 2]; cntN[k]++; }
+          }
+          for (let k = 0; k < K; k++) {
+            if (!cntN[k] || share[k] <= 0) continue;
+            const l = lambda * share[k];
+            for (let c = 0; c < 3; c++) kp[k * 3 + c] += l * (sumN[k * 3 + c] / cntN[k] - kp[k * 3 + c]);
+          }
+        }
+      };
+      smoothZone(foldK, B.fold.passes, B.fold.lambda);
       ironFolds();
       unPierce();
       layCrease();
