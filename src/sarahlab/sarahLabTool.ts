@@ -194,6 +194,8 @@ export const SARAH_LAB_FIELD = Object.freeze({
   birth: 'sarahlab-birth-',
   bump: 'sarahlab-bump',
   fingers: 'sarahlab-fingers',
+  /** her birth opening (vulvaMesh.ts): closed to the full 10 cm, for looking at it in the room */
+  birthOpen: 'sarahlab-birth-open',
   arms: 'sarahlab-arms',
   /** `${body}<control>`: a body control's line; its slider follows it */
   body: 'sarahlab-body-',
@@ -825,6 +827,14 @@ export function navelState(bumpPercent: number, navelPercent: number): string {
   if (outie < 0.05) return 'innie';
   if (outie <= 1.001) return `outie ${Math.round(outie * 100)}%`;
   return `fuller outie (+${Math.round((outie - 1) / NAVEL_OUTIE_EXTRA * 100)}%)`;
+}
+
+/** The BIRTH OPENING slider's line (Joshua, 2026-10-31: "add a slider... where you can see how it looks with the
+ * different sizes in the room"): how far open, and how wide that is across (the full opening is 10 cm). */
+export function birthOpenLine(percent: number): string {
+  const p = Math.round(Math.min(100, Math.max(0, percent)));
+  if (p === 0) return 'BIRTH OPENING · closed';
+  return `BIRTH OPENING ${p}% · ${(p / 10).toFixed(1)} cm across`;
 }
 
 export function bumpLine(bumpPercent: number): string {
