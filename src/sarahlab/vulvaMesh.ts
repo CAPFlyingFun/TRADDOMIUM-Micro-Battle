@@ -36,6 +36,8 @@ export interface VulvaPatch {
   /** how open (0 closed .. 1 a 10 cm circle, crowning): slit, then oval, then round, the area doming out round it */
   setOpen(open: number): void;
   readonly open: number;
+  /** read her skin weights again (they changed: birthWeights.ts) */
+  resyncWeights(): void;
   /** drawn even while her body is not (a probe's look at the area on its own) */
   solo: boolean;
   noTube?: boolean;
@@ -94,9 +96,11 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   if (uvAttr) { const uv = new Float32Array(P * 2); sampleInto(uv, floatsOf(uvAttr), 2, bake.uvSrc, bake.uvBary, P); geom.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); }
   // her bones: the three points' weights summed, the four strongest kept
   const si = g.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, sw = g.getAttribute('skinWeight') as THREE.BufferAttribute | undefined;
-  if (si && sw) {
-    const I = floatsOf(si), W = floatsOf(sw), outI = new Uint16Array(P * 4), outW = new Float32Array(P * 4);
-    const acc = new Map<number, number>();
+  /** her weights sampled where each point lies (again whenever hers change: birthWeights.ts) */
+  const sampleSkin = (outI: Uint16Array, outW: Float32Array) => {
+    if (!si || !sw) return;
+    const I = floatsOf(si), W = floatsOf(sw), acc = new Map<number, number>();
+    outI.fill(0); outW.fill(0);
     for (let p = 0; p < P; p++) {
       acc.clear();
       for (let k = 0; k < 3; k++) {
@@ -107,6 +111,10 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       const top = [...acc].sort((x, y) => y[1] - x[1]).slice(0, 4), sum = top.reduce((m, [, w]) => m + w, 0) || 1;
       top.forEach(([bone, w], j) => { outI[p * 4 + j] = bone; outW[p * 4 + j] = w / sum; });
     }
+  };
+  if (si && sw) {
+    const outI = new Uint16Array(P * 4), outW = new Float32Array(P * 4);
+    sampleSkin(outI, outW);
     geom.setAttribute('skinIndex', new THREE.BufferAttribute(outI, 4));
     geom.setAttribute('skinWeight', new THREE.BufferAttribute(outW, 4));
   }
@@ -363,6 +371,11 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   };
   const api: VulvaPatch = {
     mesh, tube, bake, sync, solo: false,
+    resyncWeights() {
+      const a = geom.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, b = geom.getAttribute('skinWeight') as THREE.BufferAttribute | undefined;
+      if (!a || !b) return;
+      sampleSkin(a.array as Uint16Array, b.array as Float32Array); a.needsUpdate = true; b.needsUpdate = true;
+    },
     worldAxes() {
       const sk = body.skeleton, m4 = new THREE.Matrix4().multiplyMatrices(body.bindMatrixInverse, new THREE.Matrix4().multiplyMatrices(sk.bones[pelvis].matrixWorld, sk.boneInverses[pelvis])).multiply(body.bindMatrix);
       const f = nO.clone().transformDirection(m4).transformDirection(mesh.matrixWorld), g = tA.clone().transformDirection(m4).transformDirection(mesh.matrixWorld);
