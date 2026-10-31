@@ -33,7 +33,7 @@ import {
 } from './fabricLibrary';
 import { ensureRest, setDetailKeep, setFabricLayer, setHang, setRegionOverlay, setUnder } from './fabricMaterial';
 import type { DetailKeep } from './bodyDetail';
-import { DEFAULT_LAYER_DETAIL, resolveDetail, type LayerDetail, type ResolvedDetail } from './detailMaterials';
+import { DEFAULT_LAYER_DETAIL, DEFAULT_VULVA_KEEP, resolveDetail, resolveVulva, type LayerDetail, type ResolvedDetail } from './detailMaterials';
 import { BRUSH_RANGE_CM, BodyPaint, PAINT_LAYER_COUNT, packLayer } from './bodyPaint';
 import { BODY_REGIONS, REGION_GROUPS, groupOf, groupRegions, type BodyMap, type RegionSide } from './bodyRegions';
 import { CleavageBridge } from './cleavageBridge';
@@ -73,10 +73,10 @@ export const FABRIC_ACTION = Object.freeze({
   clear: 'sarahlab:fabric:clear',
   remove: 'sarahlab:fabric:remove',
   /** RESET TO AUTO for one detail. */
-  detailAuto: (which: 'nipple' | 'navel') => `sarahlab:fabric:detail-auto:${which}`,
+  detailAuto: (which: 'nipple' | 'navel' | 'vulva') => `sarahlab:fabric:detail-auto:${which}`,
 });
 export const FABRIC_FIELD = Object.freeze({
-  nippleKeep: 'fabric-nipple-keep', navelKeep: 'fabric-navel-keep', detailInfo: 'fabric-detail-info',
+  nippleKeep: 'fabric-nipple-keep', navelKeep: 'fabric-navel-keep', vulvaKeep: 'fabric-vulva-keep', detailInfo: 'fabric-detail-info',
   style: 'fabric-style', stitch: 'fabric-stitch', opacity: 'fabric-opacity', brush: 'fabric-brush', status: 'fabric-status', pieces: 'fabric-pieces',
 });
 
@@ -118,6 +118,8 @@ export interface FabricHooks {
   regions(): BodyMap | null;
   /** The vertex her navel morph moves most, if she has one: where her navel is. */
   navelHint(): number | undefined;
+  /** A vertex at the middle of her vulva, if the room knows it: what AUTO's VULVA DETAIL reads the paint at. */
+  vulvaHint?(): number | undefined;
   /** Her shape needs applying again (the navel's softening under paint changed). */
   reshape(): void;
   /** The SAVE workspace's contents (the room's outfit operations), if the room has them. */
@@ -194,7 +196,14 @@ export interface FabricPanel {
   detail(): DetailOverride;
   /** How much of her shows through a modelled garment: the MANUAL values where set, else AUTO from its fabric. */
   garmentDetail(name: string): DetailKeep;
-  setDetail(which: 'nipple' | 'navel', value: number | null): void;
+  setDetail(which: 'nipple' | 'navel' | 'vulva', value: number | null): void;
+  /**
+   * How much of her vulva's lips' shape shows through what is over it now (0 none .. 1 all; Joshua, 2026-10-31: "a
+   * slider... to have the lips around the vagina more defined or not... like the nipple and navel slider through
+   * clothes with auto per fabric with manual override"): the MANUAL value where set, else AUTO from the painted piece
+   * over it, else a stretch knit's.
+   */
+  vulvaKeep(): number;
   /** Another view of the same BREAST and NAVEL DETAIL controls, for the BODY tab. */
   detailControl(): HTMLElement;
   dispose(): void;
@@ -412,7 +421,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
   // ---- DETAIL, shared with the BODY tab
   const detailViews: { draw(): void }[] = [];
   const detailFold = el('details', 'border-top:1px solid var(--sl-line,#ffffff20);padding-top:4px');
-  const detailHead = el('summary', 'cursor:pointer;font-size:11px;opacity:.8;padding:4px 0'); detailHead.textContent = 'BREAST & NAVEL DETAIL THROUGH CLOTHES';
+  const detailHead = el('summary', 'cursor:pointer;font-size:11px;opacity:.8;padding:4px 0'); detailHead.textContent = 'BREAST, NAVEL & VULVA DETAIL THROUGH CLOTHES';
 
   const status = el('div', 'font-size:11px;line-height:1.4;overflow-wrap:anywhere;opacity:.85');
   status.dataset.field = FABRIC_FIELD.status;
@@ -428,7 +437,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     const box = el('div', 'display:flex;flex-direction:column;gap:6px');
     const info = el('div', 'font-size:10px;opacity:.7;line-height:1.35');
     info.dataset.field = FABRIC_FIELD.detailInfo;
-    const one = (which: 'nipple' | 'navel', title: string, field: string) => {
+    const one = (which: 'nipple' | 'navel' | 'vulva', title: string, field: string) => {
       const s = slider(field, { min: 0, max: 1, step: 0.05 }, (v) => setDetailValue(which, v));
       const reset = button('RESET TO AUTO', FABRIC_ACTION.detailAuto(which), () => setDetailValue(which, null));
       reset.style.minHeight = '30px'; reset.style.padding = '3px 8px'; reset.style.fontSize = '10px';
@@ -436,7 +445,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
       head.append(s.label, reset);
       const wrap = el('div', 'display:flex;flex-direction:column;gap:2px'); wrap.append(head, s.input);
       return { wrap, draw() {
-        const manual = override[which];
+        const manual = override[which] ?? null;
         const auto = autoDetail(which);
         const value = manual ?? auto?.keep ?? null;
         s.label.textContent = `${title} · ${manual !== null ? 'MANUAL' : 'AUTO'} ${value === null ? '—' : `${Math.round(value * 100)}%`}`;
@@ -444,13 +453,13 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
         reset.style.display = manual !== null ? '' : 'none';
       } };
     };
-    const nip = one('nipple', 'BREAST DETAIL', FABRIC_FIELD.nippleKeep), nav = one('navel', 'NAVEL DETAIL', FABRIC_FIELD.navelKeep);
-    box.append(nip.wrap, nav.wrap, info);
+    const nip = one('nipple', 'BREAST DETAIL', FABRIC_FIELD.nippleKeep), nav = one('navel', 'NAVEL DETAIL', FABRIC_FIELD.navelKeep), vul = one('vulva', 'VULVA DETAIL', FABRIC_FIELD.vulvaKeep);
+    box.append(nip.wrap, nav.wrap, vul.wrap, info);
     detailViews.push({ draw() {
-      nip.draw(); nav.draw();
-      const parts = (['nipple', 'navel'] as const).map((w) => {
-        const a = autoDetail(w), word = w === 'nipple' ? 'Breast' : 'Navel';
-        if (override[w] !== null) return `${word}: your value, on every piece over it.`;
+      nip.draw(); nav.draw(); vul.draw();
+      const parts = (['nipple', 'navel', 'vulva'] as const).map((w) => {
+        const a = autoDetail(w), word = w === 'nipple' ? 'Breast' : w === 'navel' ? 'Navel' : 'Vulva';
+        if ((override[w] ?? null) !== null) return `${word}: your value, on every piece over it.`;
         return a ? `${word}: AUTO from the ${a.piece.toLowerCase()} (${a.material}).` : `${word}: AUTO; nothing painted over it now.`;
       });
       info.textContent = `${parts.join(' ')} Bare skin is never changed.`;
@@ -458,8 +467,11 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     for (const ev of ['pointerdown', 'pointermove', 'pointerup', 'wheel']) box.addEventListener(ev, (e) => e.stopPropagation());
     return box;
   }
-  function setDetailValue(which: 'nipple' | 'navel', value: number | null): void {
-    override = { ...override, [which]: value === null ? null : Math.max(0, Math.min(1, value)) };
+  function setDetailValue(which: 'nipple' | 'navel' | 'vulva', value: number | null): void {
+    const v = value === null ? null : Math.max(0, Math.min(1, value));
+    // (the vulva's AUTO is left out of the saved override, so an outfit saved before it had one reads the same)
+    if (which === 'vulva') { const { vulva: _old, ...rest } = override; void _old; override = v === null ? rest : { ...rest, vulva: v }; }
+    else override = { ...override, [which]: v };
     sync(); drawDetail(); touched();
   }
   const drawDetail = () => { for (const v of detailViews) v.draw(); };
@@ -474,24 +486,24 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
   /** What a layer keeps: the outfit's MANUAL values where set, else the layer's own. */
   const keepOf = (i: number): DetailKeep => { const own = resolved(i).keep; return { nipple: override.nipple ?? own.nipple, navel: override.navel ?? own.navel }; };
   /** AUTO's value for a detail: of the pieces shown over it, the one that hides most, as the shader decides. */
-  function autoDetail(which: 'nipple' | 'navel'): { keep: number; piece: string; material: string } | null {
+  function autoDetail(which: 'nipple' | 'navel' | 'vulva'): { keep: number; piece: string; material: string } | null {
     let best: { keep: number; piece: string; material: string } | null = null, most = -1;
-    // a simulated garment over her lies over both, wholly
-    const over = hooks.clothOver?.();
-    if (over) {
+    // a simulated garment over her lies over both, wholly (a top: never over her vulva)
+    const over = which === 'vulva' ? null : hooks.clothOver?.();
+    if (over && which !== 'vulva') {
       const r = garmentResolved(over.name);
       best = { keep: r.keep[which], piece: over.label, material: r.material?.name.toLowerCase() ?? 'its fabric' };
       most = 1 - r.keep[which];
     }
     const p = paint;
     if (!p) return best;
-    const at = (which === 'navel' ? [p.navelVertex] : p.nippleVertices).filter((v) => v >= 0);
+    const at = (which === 'navel' ? [p.navelVertex] : which === 'vulva' ? [hooks.vulvaHint?.() ?? -1] : p.nippleVertices).filter((v) => v >= 0);
     if (!at.length) return best;
     for (let i = 0; i < PAINT_LAYER_COUNT; i++) {
       if (!p.has(i) || !paintChoices[i].fabric || !layerShown(i)) continue;
       const c = Math.max(...at.map((v) => Math.min(1, p.coverAt(v, [i]) * 1.4)));
       if (c < 0.2) continue;
-      const r = resolved(i), keep = r.keep[which], hide = c * (1 - keep);
+      const r = resolved(i), keep = which === 'vulva' ? resolveVulva(details[i], paintChoices[i].fabric?.family ?? null, templates[i] ? COVERAGE_TEMPLATES.find((t) => t.id === templates[i]!.id)?.construction : undefined) : r.keep[which], hide = c * (1 - keep);
       if (hide > most) { most = hide; best = { keep, piece: titleOf(i), material: r.material?.name.toLowerCase() ?? (details[i].mode === 'off' ? 'detail off on it' : 'set on it') }; }
     }
     return best;
@@ -1090,6 +1102,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     detail: () => override,
     garmentDetail,
     setDetail: setDetailValue,
+    vulvaKeep: () => override.vulva ?? autoDetail('vulva')?.keep ?? DEFAULT_VULVA_KEEP,
     detailControl() { const e = detailControl(); drawDetail(); return e; },
     wearsShirt: () => !!paint && templates.some((t, i) => !!t && t.params.length !== null && paint!.has(i) && !!paintChoices[i].fabric),
     dispose() {

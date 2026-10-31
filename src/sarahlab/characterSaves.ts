@@ -69,7 +69,7 @@ export interface SavedLayer {
  * own AUTO/MANUAL state"): null is AUTO (each piece's own fabric and construction decides, `detailMaterials.ts`), a number
  * is MANUAL, 0 to 1, for every piece over that detail. One per outfit, saved with the clothes, never with the body.
  */
-export interface DetailOverride { readonly nipple: number | null; readonly navel: number | null }
+export interface DetailOverride { readonly nipple: number | null; readonly navel: number | null; /** absent: AUTO (saves from before it had one) */ readonly vulva?: number | null }
 export const AUTO_DETAIL: DetailOverride = Object.freeze({ nipple: null, navel: null });
 
 /**

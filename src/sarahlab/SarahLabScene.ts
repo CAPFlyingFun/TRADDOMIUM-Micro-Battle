@@ -89,6 +89,7 @@ import { BIRTH_THIGHS_FIELD, birthThighsField } from './birthThighs';
 import { BIRTH_WEIGHTS, createBirthWeights, type BirthWeights } from './birthWeights';
 import { BIRTH_ROOM_FIELD, createBirthRoom, type BirthRoom } from './birthRoom';
 import { BIRTH_NORMALS_FIELD, createBirthNormals, type BirthNormals } from './birthNormals';
+import { DEFAULT_VULVA_KEEP } from './detailMaterials';
 import { attachJiggle, bellyTune, breastTune, createJiggleUniforms, feltAcceleration, restingMass, stepMass, type Mass } from './softBody';
 import { applyMilk, applyWomb, applyZeroRefine, babyAnchors, babyWeightState, chestAnchors, chestFieldWeights, groinAnchors, groinFieldWeights, loadMilk, milkAnchors, milkBalanceState, milkFieldWeights, milkState, MILK_PATH, babyFieldWeights, loadWomb, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, WOMB_PATH, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
 import { NAVEL_MORPHS, type NavelPiece } from './navelPiece';
@@ -1279,6 +1280,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       }
     }
     // her rebuilt birth area drawn as her own skin under what she wears (painted leggings and all), bare where she is not
+    vulva?.setDressedLips(fabric?.vulvaKeep() ?? DEFAULT_VULVA_KEEP);
     vulva?.setDressed(vulvaDressed(view));
     layCrease();
     fabric?.sync();
@@ -2120,6 +2122,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       changed: () => outfits?.changed(),
       // the light tee lies over her nipples and navel, as cloth or as the fitted tee: it counts for AUTO's detail
       clothOver: () => (clothWorn() ? { name: 'shirtSpandexLite', label: 'cloth tee' } : fittedTee() ? { name: 'shirtSpandexLite', label: 'spandex tee' } : null),
+      // the middle of her vulva: a vertex of her own skin at its split's middle (her rebuilt area reads its paint there)
+      vulvaHint: () => { if (!vulva) return undefined; const b2 = vulva.bake; let best = -1, bd = Infinity; for (let p2 = 0; p2 < b2.count; p2++) if (b2.ring[p2] === 0) { const d2 = Math.abs(b2.flat[p2 * 2 + 1] - b2.split.mid); if (d2 < bd) { bd = d2; best = p2; } } return best >= 0 ? b2.src[best * 3] : undefined; },
       navelHint: () => {
         // her navel: the vertex her own navel morphs move most
         const body = skinned.find(m => !!m.geometry.getAttribute('_cloth_cover'));
@@ -3328,6 +3332,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       else sitAmount = pose === 'sit' ? 1 : 0;
       if (rig) rig.apply(currentTurns());
       keepBirthRoom();
+      // VULVA DETAIL through clothes, as the fabric panel has it now (nothing is done unless it changed)
+      vulva?.setDressedLips(fabric?.vulvaKeep() ?? DEFAULT_VULVA_KEEP);
       vulva?.sync();
       garmentRoom?.applyPose();
       place();

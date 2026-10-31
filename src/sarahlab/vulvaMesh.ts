@@ -45,6 +45,8 @@ export interface VulvaPatch {
   /** worn over (her clothes, modelled or painted on her): drawn with her own material exactly, her painted clothes and
    * all, its lips lying as her skin does and closed; bare, its own colours and shape */
   setDressed(on: boolean): void;
+  /** dressed: how much of its lips' shape shows through (0 her own skin's shape .. 1 all of it; VULVA DETAIL) */
+  setDressedLips(keep: number): void;
   /** the tube inside (pink) */
   readonly tube: THREE.SkinnedMesh;
   readonly bake: VulvaBake;
@@ -253,7 +255,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   const across = new THREE.Vector3(1, 0, 0).applyMatrix3(inv).normalize();
   const perMetre = new THREE.Vector3(1, 0, 0).applyMatrix3(inv).length();
   const restPos = new Float32Array(P * 3), restNrm = new Float32Array(P * 3);
-  let open = 0, openApplied = -1, wantOpen = 0, dressed = false;
+  let open = 0, openApplied = -1, wantOpen = 0, dressed = false, dressedLips = 0;
 
   // CARRIED BY HER PELVIS as it opens. Her skin there is weighted to her pelvis and both thighs, so a move laid on it in
   // her rest shape is turned by her thighs as well as her pelvis once she is posed -- every birth pose turns her thighs
@@ -382,19 +384,21 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     return h - tuck - curl;
   };
   const sculptLips = (at: Float32Array, n: Float32Array) => {
-    // dressed, her own skin's shape exactly: what is painted on her lies as it does on the rest of her
-    if (dressed) return;
+    // dressed, as much of the lips' shape as shows through what is over them (VULVA DETAIL: 0 her own skin's shape
+    // exactly, 1 all of it); what is painted on her lies over it as it does on the rest of her
+    const amp = dressed ? dressedLips : 1;
+    if (amp <= 0) return;
     const L = VULVA_OPEN;
     before.set(at);
     const away = new THREE.Vector3(), nn = new THREE.Vector3(), eps = 0.0005;
     for (let p = 0; p < P; p++) {
       const d = edgeDist[p], j = bake.column[p], q = Math.max(-1, Math.min(1, colQ[j]));
       if (d > L.width * 1.2 || tau[p] >= 1) continue;
-      const h = lipHeight(d, q, tau[p]);
+      const h = amp * lipHeight(d, q, tau[p]);
       // shaded as shaped: her normal tipped by the profile's slope, away from the edge along her skin
       // (the round-over is upright at the very edge; its shading tipped at most this far, so the edge does not turn
       // side-on to the light and flash)
-      const slope = Math.max(-L.maxTip, Math.min(L.maxTip, (lipHeight(d + eps, q, tau[p]) - lipHeight(Math.max(0, d - eps), q, tau[p])) / (d > eps ? 2 * eps : d + eps)));
+      const slope = Math.max(-L.maxTip, Math.min(L.maxTip, amp * (lipHeight(d + eps, q, tau[p]) - lipHeight(Math.max(0, d - eps), q, tau[p])) / (d > eps ? 2 * eps : d + eps)));
       const r = bake.ring[p], a = base[Math.max(0, r - 1) * M + j], c2 = base[Math.min(R, r + 1) * M + j];
       nn.fromArray(n, p * 3);
       if (a >= 0 && c2 >= 0 && a !== c2) {
@@ -694,6 +698,12 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     get open() { return wantOpen; },
     setOpen(o: number) { wantOpen = Number.isFinite(o) ? Math.max(0, Math.min(1, o)) : 0; open = dressed ? 0 : wantOpen; sync(); },
     get dressed() { return dressed; },
+    setDressedLips(keep: number) {
+      const k = Number.isFinite(keep) ? Math.max(0, Math.min(1, keep)) : 0;
+      if (Math.abs(k - dressedLips) < 1e-3) return;
+      dressedLips = k;
+      if (dressed) { openApplied = -1; sync(); }
+    },
     setDressed(on: boolean) {
       if (on === dressed) return;
       // dressed: drawn with her own material, lying as her skin does, closed (her clothes are over it)

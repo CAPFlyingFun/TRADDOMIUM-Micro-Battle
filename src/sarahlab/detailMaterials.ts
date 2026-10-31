@@ -32,23 +32,29 @@ export interface DetailMaterial {
   /** Base visibility, percent, before thickness and structure adjust it. */
   readonly breast: number;
   readonly navel: number;
+  /**
+   * How much of the shape of her vulva's lips shows through (percent, before thickness and structure adjust it) --
+   * Joshua, 2026-10-31: "pantyhose and other materials would show more and obviously other fabrics, not so much...
+   * direct body paint would naturally show everything". Starting values, to be tuned like the rest.
+   */
+  readonly vulva: number;
   readonly note: string;
 }
 
 /** His sheet's rows, in his order. */
 export const DETAIL_MATERIALS: readonly DetailMaterial[] = Object.freeze(([
-  ['fineJersey', 'Fine jersey', 0.45, 0.1, 45, 80, 'Soft tee; medium default target'],
-  ['athleticKnit', 'Athletic knit', 0.35, 0.25, 50, 85, 'Stretch knit; sports-style material'],
-  ['chunkySweater', 'Chunky sweater', 0.85, 0.2, 15, 45, 'Thicker knit; details mostly bridged'],
-  ['ribbedKnit', 'Ribbed knit', 0.55, 0.2, 35, 72, 'Ribbed material can accent surface'],
-  ['sheerNylon', 'Sheer nylon', 0.1, 0, 85, 95, 'Opacity independently adjustable'],
-  ['swimsuit', 'Swimsuit / bikini', 0.18, 0.1, 85, 95, 'Thin unpadded swimwear'],
-  ['sportsBra', 'Sports bra', 0.5, 0.55, 50, 95, 'Intermediate support / structure'],
-  ['structuredBra', 'Structured bra', 0.7, 0.95, 0, 100, 'Padding / lining; nipples hidden'],
-  ['paintMedium', 'Body paint medium', 0.45, 0.2, 45, 80, 'The earlier default'],
-  ['paintThin', 'Body paint thin', 0.2, 0, 70, 95, 'The earlier thin preset'],
-  ['paintThick', 'Body paint thick', 0.85, 0.4, 20, 50, 'The earlier thick preset'],
-] as const).map(([id, name, thickness, structure, breast, navel, note]) => Object.freeze({ id, name, thickness, structure, breast, navel, note })));
+  ['fineJersey', 'Fine jersey', 0.45, 0.1, 45, 80, 30, 'Soft tee; medium default target'],
+  ['athleticKnit', 'Athletic knit', 0.35, 0.25, 50, 85, 55, 'Stretch knit; sports-style material'],
+  ['chunkySweater', 'Chunky sweater', 0.85, 0.2, 15, 45, 5, 'Thicker knit; details mostly bridged'],
+  ['ribbedKnit', 'Ribbed knit', 0.55, 0.2, 35, 72, 25, 'Ribbed material can accent surface'],
+  ['sheerNylon', 'Sheer nylon', 0.1, 0, 85, 95, 90, 'Opacity independently adjustable'],
+  ['swimsuit', 'Swimsuit / bikini', 0.18, 0.1, 85, 95, 75, 'Thin unpadded swimwear'],
+  ['sportsBra', 'Sports bra', 0.5, 0.55, 50, 95, 40, 'Intermediate support / structure'],
+  ['structuredBra', 'Structured bra', 0.7, 0.95, 0, 100, 10, 'Padding / lining; nipples hidden'],
+  ['paintMedium', 'Body paint medium', 0.45, 0.2, 45, 80, 85, 'The earlier default'],
+  ['paintThin', 'Body paint thin', 0.2, 0, 70, 95, 95, 'The earlier thin preset'],
+  ['paintThick', 'Body paint thick', 0.85, 0.4, 20, 50, 60, 'The earlier thick preset'],
+] as const).map(([id, name, thickness, structure, breast, navel, vulva, note]) => Object.freeze({ id, name, thickness, structure, breast, navel, vulva, note })));
 
 export const detailMaterial = (id: string): DetailMaterial | undefined => DETAIL_MATERIALS.find((m) => m.id === id);
 
@@ -65,6 +71,8 @@ export const DETAIL_FORMULA = Object.freeze({
   thicknessRef: 0.45, structureRef: 0.2,
   breast: Object.freeze({ thickness: 15, structure: 25 }),
   navel: Object.freeze({ thickness: 10, structure: 12 }),
+  /** (the vulva's: thickness and structure bridge it about as they do the breast) */
+  vulva: Object.freeze({ thickness: 20, structure: 30 }),
 });
 
 /** Spreadsheet ROUND: half away from zero, after shedding float dust (0.55 - 0.2 is 0.35000000000000003). */
@@ -77,6 +85,13 @@ export function autoKeep(m: DetailMaterial): DetailKeep {
   return { nipple: percent(m.breast, m, DETAIL_FORMULA.breast) / 100, navel: percent(m.navel, m, DETAIL_FORMULA.navel) / 100 };
 }
 
+/** A material row's vulva visibility, as a fraction (0 her lips' shape hidden, 1 all of it). */
+export function autoVulva(m: DetailMaterial): number {
+  return percent(m.vulva, m, DETAIL_FORMULA.vulva) / 100;
+}
+/** The vulva's default where nothing says otherwise (a stretch knit's). */
+export const DEFAULT_VULVA_KEEP = 0.55;
+
 export type DetailMode = 'auto' | 'override' | 'off';
 export interface LayerDetail {
   readonly mode: DetailMode;
@@ -84,6 +99,8 @@ export interface LayerDetail {
   readonly material: string | null;
   /** OVERRIDE's values. */
   readonly override: DetailKeep;
+  /** OVERRIDE's vulva value (absent: the default). */
+  readonly overrideVulva?: number;
 }
 export const DEFAULT_LAYER_DETAIL: LayerDetail = Object.freeze({ mode: 'auto', material: null, override: DEFAULT_KEEP });
 
@@ -96,4 +113,12 @@ export function resolveDetail(d: LayerDetail, family: FabricFamilyId | null, con
   if (d.mode === 'override') return { keep: d.override, material: null };
   const m = detailMaterial(d.material ?? construction ?? (family ? FAMILY_MATERIAL[family] : 'paintMedium')) ?? detailMaterial('paintMedium')!;
   return { keep: autoKeep(m), material: m };
+}
+
+/** A layer's vulva visibility, as `resolveDetail` decides the breast's and navel's. */
+export function resolveVulva(d: LayerDetail, family: FabricFamilyId | null, construction: string | undefined): number {
+  if (d.mode === 'off') return 1;
+  if (d.mode === 'override') return d.overrideVulva ?? DEFAULT_VULVA_KEEP;
+  const m = detailMaterial(d.material ?? construction ?? (family ? FAMILY_MATERIAL[family] : 'paintMedium')) ?? detailMaterial('paintMedium')!;
+  return autoVulva(m);
 }
