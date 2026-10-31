@@ -40,6 +40,11 @@ export const VULVA_OPEN = Object.freeze({
 
 export interface VulvaPatch {
   readonly mesh: THREE.SkinnedMesh;
+  /** whether something is worn over it (see setDressed) */
+  readonly dressed: boolean;
+  /** worn over (her clothes, modelled or painted on her): drawn with her own material exactly, her painted clothes and
+   * all, its lips lying as her skin does and closed; bare, its own colours and shape */
+  setDressed(on: boolean): void;
   /** the tube inside (pink) */
   readonly tube: THREE.SkinnedMesh;
   readonly bake: VulvaBake;
@@ -134,6 +139,28 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     geom.setAttribute('skinIndex', new THREE.BufferAttribute(outI, 4));
     geom.setAttribute('skinWeight', new THREE.BufferAttribute(outW, 4));
   }
+  // EVERYTHING ELSE HER SKIN CARRIES, read back the same way and kept live (Joshua, 2026-10-31: the leggings looked
+  // ripped -- "we should have it automatically use the latest skin in real time"). Her default leggings are PAINTED on
+  // her skin (fabricMaterial.ts: fabricPaint, fabricRest, ...); the area carries the paint as her skin does, read
+  // through her texture's own copies of each point, and read again whenever one of them changes.
+  const OWN = new Set(['position', 'normal', 'uv', 'skinIndex', 'skinWeight', 'color', JIGGLE_ATTRIBUTE, PUSH_ATTRIBUTE]);
+  const extras: { name: string; from: THREE.BufferAttribute | THREE.InterleavedBufferAttribute; version: number }[] = [];
+  const readExtras = (): boolean => {
+    let changed = false;
+    for (const [name, a] of Object.entries(g.attributes)) {
+      if (OWN.has(name) || name.startsWith('_')) continue;
+      let e = extras.find((x) => x.name === name);
+      const version = (a as THREE.BufferAttribute).version ?? 0;
+      if (e && e.from === a && e.version === version) continue;
+      const out = new Float32Array(P * a.itemSize);
+      sampleInto(out, floatsOf(a), a.itemSize, bake.uvSrc, bake.uvBary, P);
+      geom.setAttribute(name, new THREE.BufferAttribute(out, a.itemSize));
+      if (!e) { e = { name, from: a, version }; extras.push(e); } else { e.from = a; e.version = version; }
+      changed = true;
+    }
+    return changed;
+  };
+  readExtras();
   // her springs (softBody.ts): the belly's and breasts' weights, and her baby's push, read back with her shape
   const jig = g.getAttribute(JIGGLE_ATTRIBUTE) as THREE.BufferAttribute | undefined;
   if (jig) { const j = new Float32Array(P * 3); sampleInto(j, jig.array, 3, bake.src, bake.bary, P); geom.setAttribute(JIGGLE_ATTRIBUTE, new THREE.BufferAttribute(j, 3)); }
@@ -159,12 +186,24 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   patchMat.vertexColors = true;
   const jigU = (body.userData as { jiggle?: { uniforms: Parameters<typeof patchJiggle>[1] } }).jiggle?.uniforms;
   if (jigU) patchJiggle(patchMat, jigU);
+  // DRESSED, hers exactly -- every patch her own material carries (her painted clothes, her springs, her birth shade),
+  // sharing its uniforms -- and no colour of the area's own: what is painted on her skin is painted on the area too
+  const dressedMat = bodyMat.clone();
+  dressedMat.onBeforeCompile = bodyMat.onBeforeCompile;
+  dressedMat.customProgramCacheKey = bodyMat.customProgramCacheKey;
+  dressedMat.vertexColors = false;
   const keepMat = () => {
-    const a = patchMat as unknown as Record<string, unknown>, b = bodyMat as unknown as Record<string, unknown>;
-    let changed = false;
-    for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'roughness', 'metalness', 'transparent', 'opacity', 'depthWrite', 'visible', 'side', 'wireframe']) if (a[k] !== b[k]) { a[k] = b[k]; changed = true; }
-    if (!patchMat.color.equals(bodyMat.color)) { patchMat.color.copy(bodyMat.color); changed = true; }
-    if (changed) patchMat.needsUpdate = true;
+    for (const mat of [patchMat, dressedMat]) {
+      const a = mat as unknown as Record<string, unknown>, b = bodyMat as unknown as Record<string, unknown>;
+      let changed = false;
+      for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'roughness', 'metalness', 'transparent', 'opacity', 'depthWrite', 'visible', 'side', 'wireframe']) if (a[k] !== b[k]) { a[k] = b[k]; changed = true; }
+      if (!mat.color.equals(bodyMat.color)) { mat.color.copy(bodyMat.color); changed = true; }
+      // her own material is patched again as she changes (a new garment painted on): the dressed one follows it
+      if (mat === dressedMat && (dressedMat.onBeforeCompile !== bodyMat.onBeforeCompile || dressedMat.customProgramCacheKey !== bodyMat.customProgramCacheKey)) {
+        dressedMat.onBeforeCompile = bodyMat.onBeforeCompile; dressedMat.customProgramCacheKey = bodyMat.customProgramCacheKey; changed = true;
+      }
+      if (changed) mat.needsUpdate = true;
+    }
   };
   geom.setAttribute('color', new THREE.BufferAttribute(new Float32Array(P * 3).fill(1), 3));
   const mesh = new THREE.SkinnedMesh(geom, patchMat);
@@ -214,7 +253,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   const across = new THREE.Vector3(1, 0, 0).applyMatrix3(inv).normalize();
   const perMetre = new THREE.Vector3(1, 0, 0).applyMatrix3(inv).length();
   const restPos = new Float32Array(P * 3), restNrm = new Float32Array(P * 3);
-  let open = 0, openApplied = -1;
+  let open = 0, openApplied = -1, wantOpen = 0, dressed = false;
 
   // CARRIED BY HER PELVIS as it opens. Her skin there is weighted to her pelvis and both thighs, so a move laid on it in
   // her rest shape is turned by her thighs as well as her pelvis once she is posed -- every birth pose turns her thighs
@@ -343,6 +382,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     return h - tuck - curl;
   };
   const sculptLips = (at: Float32Array, n: Float32Array) => {
+    // dressed, her own skin's shape exactly: what is painted on her lies as it does on the rest of her
+    if (dressed) return;
     const L = VULVA_OPEN;
     before.set(at);
     const away = new THREE.Vector3(), nn = new THREE.Vector3(), eps = 0.0005;
@@ -608,6 +649,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       changed = true;
     }
     keepMat();
+    if (readExtras()) changed = true;
     mesh.visible = (body.visible || api.solo) && shown;
     tube.visible = mesh.visible && !api.noTube && open > 0.005;
     if (tube.morphTargetInfluences !== body.morphTargetInfluences) tube.morphTargetInfluences = body.morphTargetInfluences;
@@ -649,8 +691,14 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       const rimSize = { restAcross: dm(jl, jr), restAlong: dm(jb, jf), posedAcross: wd(jl, jr), posedAlong: wd(jb, jf) };
       return { rimSize, uScale, sScale, pelvisBoneGiven: pelvisBone, pelvis: body.skeleton.bones[pelvis]?.name, pelvisIndex: pelvis, restPos: bad(restPos), restNrm: bad(restNrm), rim: bad(rim), pos: bad(pos), tau: bad(tau), colQ: bad(colQ), body: bad((g.getAttribute('position') as THREE.BufferAttribute).array), O: O.toArray(), tA: tA.toArray(), nO: nO.toArray(), across: across.toArray(), perMetre, open };
     },
-    get open() { return open; },
-    setOpen(o: number) { open = Number.isFinite(o) ? Math.max(0, Math.min(1, o)) : 0; sync(); },
+    get open() { return wantOpen; },
+    setOpen(o: number) { wantOpen = Number.isFinite(o) ? Math.max(0, Math.min(1, o)) : 0; open = dressed ? 0 : wantOpen; sync(); },
+    get dressed() { return dressed; },
+    setDressed(on: boolean) {
+      if (on === dressed) return;
+      // dressed: drawn with her own material, lying as her skin does, closed (her clothes are over it)
+      dressed = on; mesh.material = on ? dressedMat : patchMat; open = on ? 0 : wantOpen; openApplied = -1; sync();
+    },
     show(on: boolean) {
       shown = on;
       body.userData.allIndices = on ? keep : full;

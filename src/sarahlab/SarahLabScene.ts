@@ -360,6 +360,15 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
   /** Her DEPTH field's weight for one percent of DEPTH at her size now (the field is relative to the bump shown). */
   /** Whether something is worn over her birth area now: a modelled bottom, or a painted bottom or one-piece (never in a birth position). */
+  /**
+   * Whether something is drawn over her birth area now (Joshua, 2026-10-31: the leggings looked "like someone ripped
+   * her leggings"): a bottom worn and shown -- painted on her or modelled -- outside a birth position. Then her rebuilt
+   * area is drawn with her own material, its lips lying as her skin does (vulvaMesh.ts setDressed).
+   */
+  function vulvaDressed(view: string): boolean {
+    if (isBirthPose(pose) || view !== 'all') return false;
+    return lowerCovered() || skinned.some((m) => m.visible && m.userData.recoveredLeggings);
+  }
   function lowerCovered(): boolean {
     if (isBirthPose(pose)) return false;
     return wornGarments(outfit, garments).some((g) => LOWER_GARMENTS.includes(g)) || !!fabric?.coversLower();
@@ -1269,6 +1278,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         }
       }
     }
+    // her rebuilt birth area drawn as her own skin under what she wears (painted leggings and all), bare where she is not
+    vulva?.setDressed(vulvaDressed(view));
     layCrease();
     fabric?.sync();
     // her shape may have changed: the cleavage bridge chooses its ends again
