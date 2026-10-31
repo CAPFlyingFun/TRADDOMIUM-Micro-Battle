@@ -85,6 +85,7 @@ import { AUTO_LIES, BABIES_NAME, BABY_MODEL, babiesInHer, babyLine, babySolid, c
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { setPush, jiggleOf as jiggleOfMesh } from './softBody';
 import { createVulvaPatch, type VulvaPatch } from './vulvaMesh';
+import { BIRTH_THIGHS_FIELD, birthThighsField } from './birthThighs';
 import { attachJiggle, bellyTune, breastTune, createJiggleUniforms, feltAcceleration, restingMass, stepMass, type Mass } from './softBody';
 import { applyMilk, applyWomb, applyZeroRefine, babyAnchors, babyWeightState, chestAnchors, chestFieldWeights, groinAnchors, groinFieldWeights, loadMilk, milkAnchors, milkBalanceState, milkFieldWeights, milkState, MILK_PATH, babyFieldWeights, loadWomb, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, WOMB_PATH, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
 import { NAVEL_MORPHS, type NavelPiece } from './navelPiece';
@@ -1155,6 +1156,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     out[BIRTH_CLEFT_FIELD] = birthAreaShown ? 1 : 0;
     out[BIRTH_LIPS_FIELD] = birthAreaShown ? (lowerCovered() ? LIPS_COVERED : 1) : 0;
     birthShadeU.shade.value = birthAreaShown && !lowerCovered() ? 1 : 0;
+    // her inner thighs out of the way of her birth area in a birth position (birthThighs.ts)
+    out[BIRTH_THIGHS_FIELD] = isBirthPose(pose) ? 1 : 0;
     // AUTO DEPTH: her belly deepened by as much as her babies need (baby.ts, `babiesInHer`), on her own DEPTH
     if (babyAutoDepth) out[DEPTH_FIELD] = (out[DEPTH_FIELD] ?? 0) + bodyShapeFieldWeights({ ...body, bellyDepth: babyAutoDepth }, b, bellyCurve)[DEPTH_FIELD];
     // her upper belly smoothed, by each belly key's own weight (zeroRefine.ts)
@@ -3225,6 +3228,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             const parts = birthAreaFields(sb.fields.basePos, sb.fields.baseNrm, ix.array, babyFrame.meshToRest);
             if (parts.cleft.index.length) map.set(BIRTH_CLEFT_FIELD, parts.cleft);
             if (parts.lips.index.length) map.set(BIRTH_LIPS_FIELD, parts.lips);
+            // and her inner thighs drawn back from her crotch in a birth pose (birthThighs.ts)
+            { const thighs = birthThighsField(sb.fields.basePos, sb.fields.baseNrm, babyFrame.meshToRest); if (thighs.index.length) map.set(BIRTH_THIGHS_FIELD, thighs); }
             sb.fields = { ...sb.fields, fields: map, last: '' };
             // and its split shaded along its middle (on her skin's own material)
             const rest = new Float32Array(sb.fields.basePos.length), v = new THREE.Vector3();

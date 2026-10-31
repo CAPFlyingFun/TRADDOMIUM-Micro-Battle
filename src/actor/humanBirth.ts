@@ -46,11 +46,14 @@ export interface BirthSpec {
   readonly leanBack: number;
 }
 
-/** The three positions. GAME TUNING (the angles of each, from how women are shown giving birth in each). */
+/**
+ * The three positions. GAME TUNING (the angles of each, from how women are shown giving birth in each; the thighs opened
+ * wider on 2026-10-30, Joshua: in his references the area lies open between them).
+ */
 export const BIRTH_POSES: Readonly<Record<BirthStyle, BirthSpec>> = Object.freeze({
   apart: { spread: 18, spreadPerBump: 6, flex: 16, knee: 30, turnOut: 18, footFlat: true, spine: 6, chest: 2, neck: -4, leanBack: 0 },
-  squat: { spread: 40, spreadPerBump: 10, flex: 112, knee: 132, turnOut: 36, footFlat: true, spine: 22, chest: 8, neck: -24, leanBack: 0 },
-  recline: { spread: 34, spreadPerBump: 8, flex: 92, knee: 96, turnOut: 12, footFlat: false, spine: -2, chest: 10, neck: 26, leanBack: 40 },
+  squat: { spread: 48, spreadPerBump: 10, flex: 112, knee: 132, turnOut: 36, footFlat: true, spine: 22, chest: 8, neck: -24, leanBack: 0 },
+  recline: { spread: 46, spreadPerBump: 8, flex: 92, knee: 96, turnOut: 12, footFlat: false, spine: -2, chest: 10, neck: 26, leanBack: 40 },
 });
 
 /** How many turns `poseBirth` writes. */
