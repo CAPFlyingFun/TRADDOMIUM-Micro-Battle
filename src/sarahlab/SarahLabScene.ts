@@ -3460,6 +3460,24 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           vulva.mesh.getVertexPosition(p0, v); vulva.mesh.localToWorld(v); b.mesh.getVertexPosition(src, w); b.mesh.localToWorld(w);
           return { nan, n: pa.count, local0: [arr[p0 * 3], arr[p0 * 3 + 1], arr[p0 * 3 + 2]], bodyLocal: [b.mesh.geometry.getAttribute('position').getX(src), b.mesh.geometry.getAttribute('position').getY(src), b.mesh.geometry.getAttribute('position').getZ(src)], world0: v.toArray(), bodyWorld: w.toArray(), meshVisible: vulva.mesh.visible, layers: vulva.mesh.layers.mask, bodyLayers: b.mesh.layers.mask, matVisible: (vulva.mesh.material as THREE.Material).visible, renderOrder: [vulva.mesh.renderOrder, b.mesh.renderOrder], bodyParentIsScene: b.mesh.parent === vulva.mesh.parent, drawn: ud.drawn, calls: ctx.renderer.gl.info.render.calls, solo: vulva.solo, parentVisible: vulva.mesh.parent?.visible, dbg: vulva.debug() };
         },
+        // a wireframe look (Joshua, 2026-10-30: "how about doing a wireframe view of the body and it"): her body grey, the
+        // rebuilt area blue, the tube red, nothing solid
+        wireView: (on: boolean) => {
+          const b = bodyOf(); if (!b || !vulva) return false;
+          const keep = (b.mesh.userData.wireKeep ??= { body: b.mesh.material, patch: vulva.mesh.material, tube: vulva.tube.material }) as { body: THREE.Material; patch: THREE.Material; tube: THREE.Material };
+          const wire = (hex: number, opacity: number) => new THREE.MeshBasicMaterial({ color: hex, wireframe: true, transparent: opacity < 1, opacity });
+          if (on) { b.mesh.material = wire(0x8a8f99, 0.35); vulva.mesh.material = wire(0x1d5bff, 1); vulva.tube.material = wire(0xe0284a, 1); }
+          else { b.mesh.material = keep.body; vulva.mesh.material = keep.patch; vulva.tube.material = keep.tube; delete b.mesh.userData.wireKeep; }
+          return true;
+        },
+        vulvaAxes: () => {
+          if (!vulva || !model || !measure) return null; model.updateMatrixWorld(true);
+          const sk = findSkinnedMesh(model)!, bones = sk.skeleton.bones, j = measure.joints;
+          const hip = bones[j.hipL].getWorldPosition(new THREE.Vector3()).add(bones[j.hipR].getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5);
+          const knee = bones[j.kneeL].getWorldPosition(new THREE.Vector3()).add(bones[j.kneeR].getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5);
+          const head = bones[j.head].getWorldPosition(new THREE.Vector3());
+          return { ...vulva.worldAxes(), toKnees: knee.sub(hip).normalize().toArray().map((x) => +x.toFixed(3)), toHead: head.sub(hip).normalize().toArray().map((x) => +x.toFixed(3)) };
+        },
         vulvaOpen: (o: number) => { if (!vulva) return null; vulva.setOpen(o); return vulva.open; },
         vulva: (on: boolean, wire = false) => { if (!vulva) return null; vulva.show(on); vulva.wire(on && wire); const sk = model && findSkinnedMesh(model), m = vulva.mesh, c = new THREE.Vector3(), v = new THREE.Vector3(); let k = 0;
           model?.updateMatrixWorld(true);

@@ -25,6 +25,8 @@ export const VULVA = Object.freeze({
   /** the area: how far over her skin from the split's middle it reaches (metres, measured along her skin) -- far
    * enough for the skin a crowning head domes out (Joshua's references, 2026-10-30: the dome's base is wide) */
   reach: 0.07,
+  /** ...and how far from it seen straight on (metres) */
+  round: 0.05,
   /** where the split's middle is: round the middle the cleft runs round, at this distance from it (metres) */
   shell: 0.047,
   /** half the split's length (metres, along her skin): her groove, front to back */
@@ -115,7 +117,11 @@ export function bakeVulva(rest: ArrayLike<number>, key: ArrayLike<number>, indic
   // edges on the area) is taken in, a spike (two of its edges on the outside) is left out -- so the outline is smooth
   // at the size of her triangles, not their zig-zag
   const sel = new Uint8Array(T);
-  const inK = (k: number) => dist[k] < V.reach, nearK = (k: number) => dist[k] < 1.3 * V.reach;
+  // ...and no further from the split's middle, seen straight on, than `round` (so it does not run up the creases at her
+  // thighs, which an opening would pull along: Joshua's wireframe look, 2026-10-30)
+  const ox = my - centre.y, oz = mz - centre.z, ol = Math.hypot(ox, oz) || 1, ny = ox / ol, nz = oz / ol;
+  const across2 = (k: number) => { const dx = KP[k * 3] - mx, dy = KP[k * 3 + 1] - my, dz = KP[k * 3 + 2] - mz, h = dy * ny + dz * nz; return Math.hypot(dx, dy - h * ny, dz - h * nz); };
+  const inK = (k: number) => dist[k] < V.reach && across2(k) < V.round, nearK = (k: number) => dist[k] < 1.3 * V.reach && across2(k) < 1.3 * V.round;
   const edgeTris = new Map<string, number[]>();
   const pk = (a: number, b: number) => (key[a] < key[b] ? `${key[a]},${key[b]}` : `${key[b]},${key[a]}`);
   for (let t = 0; t < T; t++) {
