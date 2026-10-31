@@ -68,6 +68,8 @@ export interface VulvaBake {
   readonly missed: number;
   /** the split laid out flat: its middle and its two ends (flat units are close to metres over her skin) */
   readonly split: { readonly u: number; readonly mid: number; readonly back: number; readonly front: number };
+  /** her skin at a place laid out flat: three of her vertices and how much of each (into `out`, 6 numbers) */
+  sampleFlat(u: number, s: number, out: Float64Array): void;
 }
 
 /**
@@ -364,5 +366,6 @@ export function bakeVulva(rest: ArrayLike<number>, key: ArrayLike<number>, indic
     uvSrc: Uint32Array.from(uvSrc), uvBary: Float32Array.from(uvBary),
     ring: Uint16Array.from(ringOf), column: Uint16Array.from(colOf), flat: Float32Array.from(flat), lip: Int8Array.from(lipOf),
     index: Uint32Array.from(index), outline: M, missed, split: { u: u0m, mid: splitMid.s, back: sB, front: sF },
+    sampleFlat(u: number, s: number, out: Float64Array) { const at = locate(u, s, null, true); out[0] = tris[at.t]; out[1] = tris[at.t + 1]; out[2] = tris[at.t + 2]; out[3] = at.w[0]; out[4] = at.w[1]; out[5] = at.w[2]; },
   };
 }
