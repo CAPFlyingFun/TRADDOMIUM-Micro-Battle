@@ -32,6 +32,9 @@ export const BIRTH_NORMALS = Object.freeze({
   /** SQUAT's top strip (see `compute`): beside and just behind her vulva, off her middle (its lips), fading out over
    * her underside and her thighs */
   squatTop: Object.freeze({ passes: 160, lambda: 0.7, behindFrom: -0.03, behindFull: 0.0, behindTo: 0.12, upFull: 0.04, upTo: 0.09, downTo: -0.05, midFrom: 0.012, midFull: 0.03, sideFull: 0.09, sideTo: 0.14 }),
+  /** the seam under her (see `compute`): a crease whose two sides face more than ~acos(`foldAt`) apart, ironed
+   * `rounds` times at most, behind/below her vulva and off her middle (zone as `fold`'s) */
+  seam: Object.freeze({ taubin: 150, lambda: 0.6, mu: -0.63, foldAt: 0.85, rounds: 80, behindFrom: -0.03, behindFull: 0.0, behindTo: 0.22, upFull: 0.06, upTo: 0.12, downTo: -0.12, midFrom: 0.012, midFull: 0.025, sideFull: 0.14, sideTo: 0.19 }),
   under: Object.freeze({ passes: 200, rate: 0.8, even: 0.3, behindFrom: -0.02, behindFull: 0.01, behindTo: 0.22, upFull: 0.06, upTo: 0.13, downTo: -0.12, midFrom: -1, midFull: 0, sideFull: 0.12, sideTo: 0.18 }),
   fold: Object.freeze({ passes: 120, lambda: 0.7, behindFrom: 0.02, behindFull: 0.05, behindTo: 0.24, upFull: 0.08, upTo: 0.15, downTo: -0.06, midFrom: 0.008, midFull: 0.03, sideFull: 0.11, sideTo: 0.17 }),
   /** folds ironed out after it (2026-10-31): two triangles sharing an edge whose facings' dot is below `foldAt` are a
@@ -67,6 +70,11 @@ export interface BirthNormals {
   readonly blow: { worst: number; over3: number };
   /** how many folds the last compute could not iron out */
   readonly folded: number;
+  /** creases left in the seam under her after its ironing */
+  readonly seamLeft: number;
+  readonly seamFirst: number;
+  /** the seam's ironing on or off (a probe compares) */
+  setSeam(on: boolean): void;
   /** (debug) where the last compute meant each point to be drawn, posed: vertex, x, y, z */
   readonly expected: readonly number[];
 }
@@ -145,13 +153,13 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
     }
     return out;
   };
-  const foldK = zoneShare(B.fold), underK = zoneShare(B.under), pullK = zoneShare(B.underPull), topK = zoneShare(B.squatTop);
+  const seamK = zoneShare(B.seam), foldK = zoneShare(B.fold), underK = zoneShare(B.under), pullK = zoneShare(B.underPull), topK = zoneShare(B.squatTop);
   const mrest = new Float32Array(n * 3);
   /** a vertex's weight on one bone */
   const boneW = (i: number, bone: number) => { let w = 0; for (let c = 0; c < 4; c++) if (si.getComponent(i, c) === bone) w += sw.getComponent(i, c); return w; };
   /** metres per geometry unit */
   const mPer = new THREE.Vector3(1, 0, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(toRest)).length();
-  let pierced = 0, blowWorst = 0, blowCount = 0, folded = 0;
+  let pierced = 0, blowWorst = 0, blowCount = 0, folded = 0, seamLeft = 0, seamOn = false, seamFirst = 0;
   const expected: number[] = [];
   const perMetre = 1 / new THREE.Vector3(1, 0, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(toRest)).length();
   const touchG = B.touch * perMetre, gapG = B.gap * perMetre;
@@ -166,6 +174,9 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
     get pierced() { return pierced; },
     get blow() { return { worst: +blowWorst.toFixed(2), over3: blowCount }; },
     get folded() { return folded; },
+    get seamLeft() { return seamLeft; },
+    get seamFirst() { return seamFirst; },
+    setSeam(on: boolean) { seamOn = on; },
     expected,
     compute(pos, nrm, fill = 0, pull = 0) {
       const sk = mesh.skeleton;
@@ -342,10 +353,10 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
       // turned a thin strip of her skin inside out -- a crack up each groin crease and under her buttocks, wider the
       // more it smoothed). After the smoothing, wherever two of her triangles that share an edge face more than
       // `foldAt` apart, the points round them are smoothed again, harder, and only there, until none do.
-      const ironFolds = () => {
+      const ironFolds = (foldAt: number = B.foldAt, zone: Float32Array | null = null, rounds: number = B.ironRounds) => {
         const fnK = new Float64Array(tris.length), mark = new Uint8Array(K);
         let lastFolds = 0;
-        for (let round = 0; round < B.ironRounds; round++) {
+        for (let round = 0; round < rounds; round++) {
           for (let t = 0; t < tris.length; t += 3) {
             const p0 = key[tris[t]] * 3, p1 = key[tris[t + 1]] * 3, p2 = key[tris[t + 2]] * 3;
             const ux = kp[p1] - kp[p0], uy = kp[p1 + 1] - kp[p0 + 1], uz = kp[p1 + 2] - kp[p0 + 2], vx = kp[p2] - kp[p0], vy = kp[p2 + 1] - kp[p0 + 1], vz = kp[p2 + 2] - kp[p0 + 2];
@@ -357,11 +368,14 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
           for (const [, ts] of edgeTris) {
             if (ts.length !== 2) continue;
             const a0 = ts[0], b0 = ts[1];
-            if (fnK[a0] * fnK[b0] + fnK[a0 + 1] * fnK[b0 + 1] + fnK[a0 + 2] * fnK[b0 + 2] >= B.foldAt) continue;
+            if (fnK[a0] * fnK[b0] + fnK[a0 + 1] * fnK[b0 + 1] + fnK[a0 + 2] * fnK[b0 + 2] >= foldAt) continue;
+            // (within the zone only, when there is one: every corner of both triangles in it)
+            if (zone) { let inside = true; for (const t of ts) for (let q = 0; q < 3; q++) if (zone[key[tris[t + q]]] <= 0) inside = false; if (!inside) continue; }
             folds++;
             for (const t of ts) for (let q = 0; q < 3; q++) mark[key[tris[t + q]]] = 1;
           }
           lastFolds = folds;
+          if (zone && round === 0) seamFirst = folds;
           if (!folds) break;
           // the points round each fold, and their neighbours, so the ironing blends into the skin round it
           for (let grow = 0; grow < 2; grow++) {
@@ -378,12 +392,12 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
             }
             for (let k = 0; k < K; k++) {
               if (!mark[k] || !cntN[k] || ks[k] <= 0) continue;
-              const l = B.ironLambda * ks[k];
+              const l = B.ironLambda * ks[k] * (zone ? zone[k] : 1);
               for (let c = 0; c < 3; c++) kp[k * 3 + c] += l * (sumN[k * 3 + c] / cntN[k] - kp[k * 3 + c]);
             }
           }
         }
-        folded = lastFolds;
+        if (!zone) folded = lastFolds; else seamLeft = lastFolds;
       };
       pierced = 0;
       unPierce();
@@ -513,6 +527,24 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
         }
       }
       ironFolds();
+      // THE SEAM UNDER HER (Joshua, 2026-11-01: "smooth under my butt and that crease... an isolated fix just on those
+      // parts"): where her underside meets her thighs, a gentler crease than the folds above catch (30-70 degrees) ran
+      // as a hard line from beside her vulva out under each buttock. Ironed here too, only in that patch, her vulva's
+      // own lips and middle left alone.
+      if (!band && seamOn) {
+        // Taubin's smoothing (a step toward the neighbours, then a slightly larger step back): it takes out creases --
+        // the short-wavelength detail -- and leaves the curve they sit on, so the patch neither creases nor flattens
+        const step = (lam: number) => {
+          sumN.fill(0); cntN.fill(0);
+          for (let t = 0; t < tris.length; t += 3) for (let q = 0; q < 3; q++) {
+            const k = key[tris[t + q]]; if (seamK[k] <= 0) continue;
+            for (let r = 1; r < 3; r++) { const o = key[tris[t + ((q + r) % 3)]]; sumN[k * 3] += kp[o * 3]; sumN[k * 3 + 1] += kp[o * 3 + 1]; sumN[k * 3 + 2] += kp[o * 3 + 2]; cntN[k]++; }
+          }
+          for (let k = 0; k < K; k++) { if (!cntN[k] || seamK[k] <= 0 || ks[k] <= 0) continue; const l = lam * seamK[k] * ks[k]; for (let c = 0; c < 3; c++) kp[k * 3 + c] += l * (sumN[k * 3 + c] / cntN[k] - kp[k * 3 + c]); }
+        };
+        for (let it = 0; it < B.seam.taubin; it++) { step(B.seam.lambda); step(B.seam.mu); }
+        ironFolds(B.seam.foldAt, seamK, B.seam.rounds); ironFolds();
+      }
       unPierce();
       layCrease();
       for (const i of used) { const k = key[i]; posed[i * 3] = kp[k * 3]; posed[i * 3 + 1] = kp[k * 3 + 1]; posed[i * 3 + 2] = kp[k * 3 + 2]; }

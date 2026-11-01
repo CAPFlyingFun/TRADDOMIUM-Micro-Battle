@@ -53,6 +53,8 @@ export const BIRTH_WEIGHTS = Object.freeze({
   /** ...whole from her front to `backFrom` metres behind the middle of her vulva (7 cm past its back end, beyond her
    * anus), easing by `backFade` to `backShare` of it on her lower buttocks */
   backFrom: 0.1, backFade: 0.15, backShare: 0,
+  /** behind her crotch the leg opening drops this many metres for every metre back (0: straight front to back) */
+  backTilt: 0,
   /** and the cone only near the hip joint (metres): out to `coneNear` all of it, gone by `coneFar` */
   coneNear: 0.14, coneFar: 0.22,
   /**
@@ -133,7 +135,11 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
       const cone = smooth(B.inner, B.outer, ang) * smooth(B.coneFar, B.coneNear, d.length()), middle = smooth(B.middleFade, B.middle, Math.abs(v.x)) * smooth(B.middleFar, B.middleNear, v.distanceTo(crotch)) * smooth(crotch.y + B.moundTo, crotch.y + B.moundFrom, v.y);
       const pubic = B.pubic * smooth(crotch.y + B.pubicFrom, crotch.y + B.pubicTo, v.y) * smooth(B.pubicWideFade, B.pubicWide, Math.abs(v.x)) * smooth(B.thighIn, B.thighOut, ang);
       // (stored against the share the scene hands over, so that all of it goes to her pelvis)
-      const pl = planes[s], dLeg = (v.x - pl.ax) * pl.nx + (v.y - pl.ay) * pl.ny;
+      // (the leg opening as a leotard's, Joshua 2026-11-01: "the legs are still cutting into the torso... make sure we
+      // have one for the hips/thighs/legs". Straight front to back, it cut each buttock lengthwise along its underside,
+      // and the strip given to the thigh swung up into her as the hip bent. Behind her crotch it now drops `backTilt`
+      // metres for every metre back, so it runs under her buttock along the fold where it meets her thigh)
+      const pl = planes[s], dLeg = (v.x - pl.ax) * pl.nx + (v.y - pl.ay) * pl.ny - B.backTilt * Math.max(0, crotch.z - v.z);
       // (on her lower buttocks, well behind her vulva, only part of her skin goes to her pelvis: all of it there, a deep
       // hip bend left a shelf standing out of her, and none of it changed her front; shared, her buttock bends part way
       // with her thigh and is smoothed into the rest -- Joshua, 2026-10-31: "merge it with the rest")

@@ -2927,7 +2927,15 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const map = new Map(bare);
     if (birthRoom && birthRoomOn) map.set(BIRTH_ROOM_FIELD, birthRoom.compute(P));
     if (birthNormals && birthNormalsOn) map.set(BIRTH_NORMALS_FIELD, birthNormals.compute(P, N, pose === 'squat' ? birthFillSquat : pose === 'recline' ? birthFillRecline : 0, pose === 'squat' ? squatPull : 0));
-    if (birthKnees && birthKneesOn) map.set(BIRTH_KNEES_FIELD, birthKnees.compute(P, N));
+    // her knees worked out on her shape WITH her groin's smoothing on (the two bands meet down her thighs: worked out
+    // apart and added, the skin both reach was moved twice)
+    if (birthKnees && birthKneesOn) {
+      sb.fields = { ...sb.fields, fields: new Map(map), last: '' };
+      applyLook();
+      model.updateMatrixWorld(true);
+      const P2 = (g.getAttribute('position') as THREE.BufferAttribute).array as Float32Array, N2 = (g.getAttribute('normal') as THREE.BufferAttribute).array as Float32Array;
+      map.set(BIRTH_KNEES_FIELD, birthKnees.compute(P2, N2));
+    }
     sb.fields = { ...sb.fields, fields: map, last: '' };
     applyLook();
   }
@@ -3602,6 +3610,39 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         birthMask: (share: number | null) => { birthMaskOverride = share; applyLook(); return { touched: birthWeights?.touched ?? null, debug: birthWeights?.debug }; },
         // (debug) her skin as drawn, painted by which bones carry it: red her left thigh's, blue her right's, white the
         // rest; null takes it away
+        // (debug) her skin as drawn painted by how sharply it bends there: white flat, yellow 15 degrees, red 40 or more
+        bendPaint: (on: boolean) => {
+          const b = bodyOf(); if (!b || !model) return null;
+          const old = (model.userData.weightPaint as THREE.Mesh | undefined); if (old) { old.removeFromParent(); old.geometry.dispose(); (old.material as THREE.Material).dispose(); model.userData.weightPaint = undefined; }
+          b.mesh.visible = true; if (!on) return false;
+          model.updateMatrixWorld(true); b.mesh.skeleton.update();
+          const g0 = b.mesh.geometry, n = g0.getAttribute('position').count, P2 = new Float32Array(n * 3), C2 = new Float32Array(n * 3).fill(1), v = new THREE.Vector3();
+          for (let i = 0; i < n; i++) { b.mesh.getVertexPosition(i, v); v.toArray(P2, i * 3); }
+          const idx = (b.mesh.userData.allIndices as ArrayLike<number> | undefined) ?? g0.index!.array;
+          const key = new Int32Array(n), km = new Map<string, number>();
+          for (let i = 0; i < n; i++) { const k = `${Math.round(g0.getAttribute('position').getX(i) * 1e4)},${Math.round(g0.getAttribute('position').getY(i) * 1e4)},${Math.round(g0.getAttribute('position').getZ(i) * 1e4)}`; let q = km.get(k); if (q === undefined) { q = km.size; km.set(k, q); } key[i] = q; }
+          const fn: number[] = [], et = new Map<string, number>(), worst = new Float32Array(km.size);
+          const A = new THREE.Vector3(), B2 = new THREE.Vector3(), C3 = new THREE.Vector3();
+          for (let t = 0; t + 2 < idx.length; t += 3) {
+            A.fromArray(P2, idx[t] * 3); B2.fromArray(P2, idx[t + 1] * 3); C3.fromArray(P2, idx[t + 2] * 3);
+            const nn = B2.sub(A).cross(C3.sub(A)); const l = nn.length() || 1; fn.push(nn.x / l, nn.y / l, nn.z / l);
+            const f = t / 3;
+            for (let q = 0; q < 3; q++) {
+              const a0 = key[idx[t + q]], b0 = key[idx[t + (q + 1) % 3]], e = a0 < b0 ? `${a0},${b0}` : `${b0},${a0}`, o2 = et.get(e);
+              if (o2 === undefined) et.set(e, f); else {
+                const dot = fn[o2 * 3] * fn[f * 3] + fn[o2 * 3 + 1] * fn[f * 3 + 1] + fn[o2 * 3 + 2] * fn[f * 3 + 2], ang = Math.acos(Math.max(-1, Math.min(1, Math.abs(dot)))) * 180 / Math.PI;
+                worst[a0] = Math.max(worst[a0], ang); worst[b0] = Math.max(worst[b0], ang);
+              }
+            }
+          }
+          for (let i = 0; i < n; i++) { const a = worst[key[i]]; const t1 = Math.min(1, a / 15), t2 = Math.min(1, Math.max(0, (a - 15) / 25)); C2[i * 3] = 1; C2[i * 3 + 1] = 1 - 0.1 * t1 - 0.9 * t2; C2[i * 3 + 2] = 1 - t1; }
+          const g2 = new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.BufferAttribute(P2, 3)); g2.setAttribute('color', new THREE.BufferAttribute(C2, 3));
+          g2.setIndex(new THREE.BufferAttribute(Uint32Array.from(idx), 1)); g2.computeVertexNormals();
+          const m2 = new THREE.Mesh(g2, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+          m2.matrixAutoUpdate = false; m2.matrix.copy(b.mesh.matrixWorld); m2.matrixWorldNeedsUpdate = true; m2.frustumCulled = false;
+          three.add(m2); model.userData.weightPaint = m2; b.mesh.visible = false; if (vulva) vulva.mesh.visible = false;
+          return true;
+        },
         weightPaint: (on: boolean) => {
           const b = bodyOf(); if (!b || !model || !measure) return null;
           const old = (model.userData.weightPaint as THREE.Mesh | undefined); if (old) { old.removeFromParent(); old.geometry.dispose(); (old.material as THREE.Material).dispose(); model.userData.weightPaint = undefined; }
@@ -3625,6 +3666,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           model.userData.weightPaint = m2; b.mesh.visible = false; if (vulva) vulva.mesh.visible = false;
           return true;
         },
+        birthSeam: (on: boolean) => { birthNormals?.setSeam(on); birthRoomFor = ''; applyLook(); return { first: birthNormals?.seamFirst, left: birthNormals?.seamLeft }; },
         birthKnees: (on: boolean) => { birthKneesOn = on; birthRoomFor = ''; applyLook(); return birthKnees?.watched ?? null; },
         squatPull: (v: number) => { squatPull = v; birthRoomFor = ''; applyLook(); return v; },
         squatBack: (v: number) => { squatBack = v; applyLook(); birthRoomFor = ''; return v; },
@@ -3691,10 +3733,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           }
           // drawn against meant (her mesh's own space, as getVertexPosition gives it); `fresh` worked out again first
           if (fresh) { birthRoomFor = ''; keepBirthRoom(); model.updateMatrixWorld(true); b.mesh.skeleton.update(); }
-          let missWorst = 0, missOver1mm = 0;
+          let missWorst = 0, missOver1mm = 0, missAt = -1;
           { const ex = birthNormals?.expected ?? [], o2 = new THREE.Vector3();
-            for (let q = 0; q + 3 < ex.length; q += 4) { b.mesh.getVertexPosition(ex[q], o2); const d = Math.hypot(o2.x - ex[q + 1], o2.y - ex[q + 2], o2.z - ex[q + 3]); if (d > missWorst) missWorst = d; if (d > 0.0011) missOver1mm++; } }
-          return { missWorst: +missWorst.toFixed(5), missOver1mm, meant: (birthNormals?.expected.length ?? 0) / 4, folds, foldZ, foldAt, unironed: birthNormals?.folded, blow: birthNormals?.blow, worst: +worst.toFixed(3), over05, over2, at, openEdges: oe.length / 2, openAt, near, flipped };
+            for (let q = 0; q + 3 < ex.length; q += 4) { b.mesh.getVertexPosition(ex[q], o2); const d = Math.hypot(o2.x - ex[q + 1], o2.y - ex[q + 2], o2.z - ex[q + 3]); if (d > missWorst) { missWorst = d; missAt = ex[q]; } if (d > 0.0011) missOver1mm++; } }
+          const missRest = rest && missAt >= 0 ? new THREE.Vector3().fromArray(base, missAt * 3).applyMatrix4(rest).toArray().map((x) => +x.toFixed(3)) : null;
+          return { missRest, kneeWatched: birthKnees?.watched ?? null, missWorst: +missWorst.toFixed(5), missOver1mm, meant: (birthNormals?.expected.length ?? 0) / 4, folds, foldZ, foldAt, unironed: birthNormals?.folded, blow: birthNormals?.blow, worst: +worst.toFixed(3), over05, over2, at, openEdges: oe.length / 2, openAt, near, flipped };
         },
         midlineCrossers: () => {
           const b = bodyOf(); if (!b || !babyFrame || !measure || !model) return null;
