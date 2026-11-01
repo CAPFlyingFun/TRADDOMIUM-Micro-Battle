@@ -87,6 +87,7 @@ import { setPush, jiggleOf as jiggleOfMesh } from './softBody';
 import { createVulvaPatch, VULVA_OPEN, type VulvaPatch } from './vulvaMesh';
 import { BIRTH_THIGHS_FIELD, birthThighsField } from './birthThighs';
 import { BIRTH_SEAT_FIELD, birthSeatField } from './birthSeat';
+import { BIRTH_GAP_FIELD, birthGapField } from './birthGap';
 import { BIRTH_WEIGHTS, createBirthWeights, type BirthWeights } from './birthWeights';
 import { BIRTH_ROOM_FIELD, createBirthRoom, type BirthRoom } from './birthRoom';
 import { BIRTH_NORMALS_FIELD, createBirthNormals, type BirthNormals } from './birthNormals';
@@ -491,6 +492,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** in SQUAT the same skin rounded OUT instead (negative: out; Joshua, 2026-10-31: there it "pinches right in the
    * middle and maybe also is bowed inwards instead of outwards") */
   let birthSeatSquat = 0;
+  /** her thighs moved out beside her vulva in a birth pose (birthGap.ts); a probe may turn it off to compare */
+  let birthGapOn = true;
   /** the hollows under her filled in a birth pose (birthNormals.ts `fill`), by pose; a probe may set them */
   let birthFillSquat = 0, birthFillRecline = 0;
   /** in SQUAT, how much of her lower buttocks is carried by her pelvis (a probe may set it) */
@@ -1207,6 +1210,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     birthShadeU.shade.value = birthAreaShown && !lowerCovered() ? 1 : 0;
     // her inner thighs out of the way of her birth area in a birth position (birthThighs.ts)
     out[BIRTH_THIGHS_FIELD] = isBirthPose(pose) ? 1 : 0;
+    // and more room between her legs there (birthGap.ts)
+    out[BIRTH_GAP_FIELD] = isBirthPose(pose) && birthGapOn ? 1 : 0;
     // (only with her hips bent up: standing with her legs apart her buttocks hang as they are)
     out[BIRTH_SEAT_FIELD] = !birthSeatOn ? 0 : pose === 'recline' ? 1 : pose === 'squat' ? birthSeatSquat : 0;
     out[BIRTH_ROOM_FIELD] = isBirthPose(pose) && birthRoomOn ? 1 : 0;
@@ -3331,6 +3336,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             // ALL her triangles, not the cut-down set drawn under her clothes (2026-10-31: built from that set, her
             // underwear's leg openings were open edges to the smoothing, which drew them apart into cracks up her groin)
             const herTris = (bm!.userData.allIndices as ArrayLike<number> | undefined) ?? ix.array;
+            // her birth-pose weights first: their leg openings say which of her skin is leg (birthGap.ts, vulvaMesh.ts)
+            try { const jt = measure?.joints; birthWeights = jt ? createBirthWeights(bm!, babyFrame.meshToRest, jt.pelvis, jt.hipL, jt.hipR, jt.kneeL, jt.kneeR, herTris) : null; } catch (error) { console.error('[sarahlab] her birth-pose weights could not be made', error); birthWeights = null; }
             const parts = birthAreaFields(sb.fields.basePos, sb.fields.baseNrm, herTris, babyFrame.meshToRest);
             if (parts.cleft.index.length) map.set(BIRTH_CLEFT_FIELD, parts.cleft);
             if (parts.lips.index.length) map.set(BIRTH_LIPS_FIELD, parts.lips);
@@ -3338,6 +3345,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             { const thighs = birthThighsField(sb.fields.basePos, sb.fields.baseNrm, babyFrame.meshToRest); if (thighs.index.length) map.set(BIRTH_THIGHS_FIELD, thighs); }
             // and her lowest buttocks pressed in under her thighs, to curve with them (birthSeat.ts)
             { const seat = birthSeatField(sb.fields.basePos, sb.fields.baseNrm, babyFrame.meshToRest); if (seat.index.length) map.set(BIRTH_SEAT_FIELD, seat); }
+            { const bw0 = birthWeights as BirthWeights | null, gap = birthGapField(sb.fields.basePos, babyFrame.meshToRest, bw0 ? (i) => bw0.legDistance(i) : undefined); if (gap.index.length) map.set(BIRTH_GAP_FIELD, gap); }
             sb.fields = { ...sb.fields, fields: map, last: '' };
             // and its split shaded along its middle (on her skin's own material)
             const rest = new Float32Array(sb.fields.basePos.length), v = new THREE.Vector3();
@@ -3349,7 +3357,6 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             }
             // and the area rebuilt finer, from her own skin, to be able to open (vulvaMesh.ts)
             vulva?.dispose();
-            try { const jt = measure?.joints; birthWeights = jt ? createBirthWeights(bm!, babyFrame.meshToRest, jt.pelvis, jt.hipL, jt.hipR, jt.kneeL, jt.kneeR, herTris) : null; } catch (error) { console.error('[sarahlab] her birth-pose weights could not be made', error); birthWeights = null; }
             // (her legs' skin, and 1 cm in from it, kept out of the area: VULVA_OPEN.legMask)
             const bw = birthWeights as BirthWeights | null, legSkin = bw ? (i: number) => bw.legDistance(i) > -VULVA_OPEN.legMask : undefined;
             try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest, measure?.joints.pelvis, measure ? [measure.joints.hipL, measure.joints.hipR, measure.joints.kneeL, measure.joints.kneeR] : [], legSkin); vulva?.setOpen(birthOpenPct / 100); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
@@ -3678,6 +3685,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         squatPull: (v: number) => { squatPull = v; birthRoomFor = ''; applyLook(); return v; },
         squatBack: (v: number) => { squatBack = v; applyLook(); birthRoomFor = ''; return v; },
         birthFill: (squat: number, recline: number) => { birthFillSquat = squat; birthFillRecline = recline; birthRoomFor = ''; applyLook(); return true; },
+        birthGap: (on: boolean) => { birthGapOn = on; applyLook(); return on; },
         birthSeat: (on: boolean, squat?: number) => { birthSeatOn = on; if (typeof squat === 'number') birthSeatSquat = squat; applyLook(); return on; },
         birthTweak: (t: Partial<BirthSpec> | null) => { birthTweak = t; applyLook(); return true; },
         birthRoom: (on: boolean) => { birthRoomOn = on; birthRoomFor = ''; applyLook(); return { watched: birthRoom?.watched ?? null, largestMm: birthRoom ? +(birthRoom.largest * 1000).toFixed(1) : null, partsMm: birthRoom ? Object.fromEntries(Object.entries(birthRoom.parts).map(([k2, v2]) => [k2, +(v2 * 1000).toFixed(1)])) : null }; },
