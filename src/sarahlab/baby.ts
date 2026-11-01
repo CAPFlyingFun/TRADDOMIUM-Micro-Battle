@@ -364,7 +364,7 @@ export function wombFromSkin(skin: ArrayLike<number>, week: number, backShift = 
     const th = (t / (NT - 1)) * Math.PI, ph = (p / NP) * 2 * Math.PI;
     const dx = Math.sin(th) * Math.sin(ph), dy = Math.cos(th), dz = Math.sin(th) * Math.cos(ph);
     // the cap: an egg, half height to floor and fundus, a womb's width, flat to her spine behind, as deep as her skin in front
-    const hyAt = dy > 0 ? hyUp : hy * (1 + 1.5 * past * Math.max(0, dz));
+    const hyAt = dy > 0 ? hyUp : hy * (1 + (0.25 * fill + 1.5 * past) * Math.max(0, dz));
     const egg = 1 / Math.sqrt((dx / halfP) ** 2 + (dy / hyAt) ** 2 + (dz / (dz < 0 ? back : fwd)) ** 2), wall = backWall(dy, dz);
     const cap = Number.isFinite(wall) ? -soft * Math.log(Math.exp(-egg / soft) + Math.exp(-Math.max(0.005, wall) / soft)) : egg;
     const sk = skinR[t * NP + p];

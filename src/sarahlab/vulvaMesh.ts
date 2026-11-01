@@ -45,7 +45,7 @@ export const VULVA_OPEN = Object.freeze({
    * long, its own opening `cervixShut` metres across shut and the opening's full width at 100%: the dilation), and the
    * womb's bulb (`womb` long, `wombRadius` round), closed over at its top. BIOLOGICAL SHAPE, GAME TUNING
    */
-  bead: 0.004, lipWall: 0.008, wombWall: 0.003, wombMeet: 65, wallSkin: 0xd09a88, wallPink: 0xc0646e, pleats: 4, pleatDepth: 0.22, cervix: 0.025, cervixShut: 0.006, womb: 0.13, wombRadius: 0.065,
+  bead: 0.004, lipWall: 0.008, wombWall: 0.003, wombMeet: 35, wallSkin: 0xd09a88, wallPink: 0xc0646e, pleats: 4, pleatDepth: 0.22, cervix: 0.025, cervixShut: 0.006, womb: 0.13, wombRadius: 0.065,
   /** BIOLOGICAL SHAPE (Joshua's estimate, to tune): how far the area bulges out at the full opening (metres; a half sphere,
    * its last `bulgeFoot` share easing onto her skin), and how it
    * grows with the opening (power of the open share: 1 straight, more later) */
