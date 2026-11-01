@@ -19,8 +19,10 @@ export const BIRTH_GAP_FIELD = 'shape:birthGap';
 
 /** GAME TUNING. */
 export const BIRTH_GAP = Object.freeze({
-  /** how far each side moves out from her middle (metres, at most): 2.5 cm each side, 5 cm more between her thighs */
-  shift: 0.025,
+  /** how far each side moves out from her middle (metres, at most): 3.5 cm each side, 7 cm more between her thighs
+   * (Joshua, 2026-11-01, of 2.5: "try 3.5cm on each side... it is still taking a little bit of the inner thighs"). The
+   * same at every opening: it is the pose's, never the opening's */
+  shift: 0.035,
   /** how far onto her torso's side of each leg opening it eases to nothing (metres) */
   ease: 0.035,
   /** when her leg openings are not known: none within `from` of her middle (her vulva), all of it by `full` (metres) */
