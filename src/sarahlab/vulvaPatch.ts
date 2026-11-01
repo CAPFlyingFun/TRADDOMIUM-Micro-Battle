@@ -112,6 +112,8 @@ export function bakeVulva(rest: ArrayLike<number>, key: ArrayLike<number>, indic
     while (heap.length) {
       const [d, k] = pop();
       if (d > dist[k] || d > 1.4 * V.reach) continue;
+      // (not on through her legs' skin: what lies beyond it is hers, not the area's -- so it is cut off, not ringed round)
+      if (leg && leg[k] && k !== mid) continue;
       for (const [o, l] of nbr.get(k) ?? []) if (d + l < dist[o]) { dist[o] = d + l; push([d + l, o]); }
     }
   }

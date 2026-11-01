@@ -24,8 +24,9 @@ export const VULVA_OPEN = Object.freeze({
    * band of her skin is always left to give way between) */
   room: 0.75,
   /** GAME TUNING: the opening's edge kept `legClear` metres off her legs -- skin a thigh carries `legWeight` of or more,
-   * within `legSlab` metres in or out of her skin's surface there (Joshua, 2026-10-31: "1cm to the thighs") */
-  legClear: 0.01, legWeight: 0.5, legSlab: 0.05,
+   * within `legSlab` metres in or out of her skin's surface there (Joshua, 2026-10-31: "1cm to the thighs"; 2026-11-01,
+   * her inner thighs held apart under her vulva by birthGap.ts: half a centimetre) */
+  legClear: 0.005, legWeight: 0.5, legSlab: 0.05,
   /** GAME TUNING: her legs' skin is never the area's -- her leg's side of each leg opening (birthWeights.ts) and this many
    * metres in from it on her torso's side stay her own, so opening and bulging never take her inner thighs with them
    * (Joshua, 2026-11-01: "add a 1cm mask around the whole area so that way it doesn't remove the actual inside of the
@@ -376,7 +377,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       // (one leg's: skin her two thighs share is her middle, not a leg)
       let tl = 0, tr = 0;
       for (let c = 0; c < 4; c++) { const b = ix.getComponent(i, c), k = thighBones.indexOf(b); if (k < 0) continue; if (k % 2 === 0) tl += w.getComponent(i, c); else tr += w.getComponent(i, c); }
-      if (Math.max(tl, tr) >= VULVA_OPEN.legWeight) legNear.push(i);
+      // (and her skin kept out of the area as a leg's, `legSkin`: the opening keeps off all of it)
+      if (Math.max(tl, tr) >= VULVA_OPEN.legWeight || legKeys?.[key[i]]) legNear.push(i);
     }
   };
   const measureScale = () => {
@@ -535,8 +537,9 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       for (const i of legNear) {
         body.getVertexPosition(i, pv); pv.sub(Op);
         const sv = Math.abs(pv.dot(alongP)) / perMetre, nv = pv.dot(nAx) / perMetre, uv = Math.abs(pv.dot(sideP)) / perMetre;
-        // (the opening's edge stands out of her by the bulge: legs it now passes over do not hold it)
-        if (Math.abs(nv - VULVA_OPEN.bulge * Math.pow(open, VULVA_OPEN.bulgeEase)) > VULVA_OPEN.legSlab) continue;
+        // (the same legs at every opening, so the widest it may go is one fixed width in a pose -- Joshua, 2026-11-01:
+        // "keep that max width the same regardless of the opening" -- however far the bulge stands it out of her)
+        if (Math.abs(nv) > VULVA_OPEN.legSlab) continue;
         const k = (sv - cl) / cHalf;
         if (k >= 1) continue;
         const a = (uv - cl) / Math.sqrt(1 - Math.max(0, k) ** 2);
