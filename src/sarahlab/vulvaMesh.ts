@@ -51,6 +51,10 @@ export const VULVA_OPEN = Object.freeze({
   bulge: 0.05, bulgeEase: 1.3, bulgeFoot: 0.25,
   /** GAME TUNING: passes evening the opening's edge round its outline */
   edgeSmooth: 6,
+  /** GAME TUNING: how much the bear trap's corners at its hinges are rounded (0 a sharp lens, 1 an oval) */
+  hingeRound: 0.3,
+  /** GAME TUNING: how much more her skin is evened round the opening at its ends, where the jaws hinge, as it opens */
+  hingeSmooth: 1.2,
   /**
    * THE LIPS (Joshua, 2026-10-31: "the vagina should look like the lips... you also have the mouth animated that can open
    * and close"): as her mouth is made -- her own skin, shaped round and opened, the inside painted where it shows. Each
@@ -585,8 +589,19 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     const halfAcross = Math.min(D / 2, room);
     /** where along column j (metres from the split) its lip's edge now is */
     const edgeAt = (j: number) => {
-      const q = colQ[j], L = q >= 0 ? Lf : Lb, a = Math.max(1e-6, halfAcross), c = Math.max(L, D / 2) * 1.0001;
-      const rho = (k: number) => Math.hypot(nodeU[k * M + j] / a, nodeS[k * M + j] / c);
+      // A BEAR TRAP (Joshua, 2026-11-01: "think of it similar to a bear trap where open is the full 10cm in diameter and
+      // it hinges at the top and bottom"): the two lips are two jaws hinged at the ends of her split. Their edges are two
+      // arcs through the hinges -- a lens, sharp at the hinges, a slit shut and a circle at 100% -- the hinges moving
+      // apart only as far as a 10 cm circle needs (from her split's own length, `L`, to the opening's half width). The
+      // corners at the hinges are softened by `hingeRound` (a share of the way to the oval through the same points).
+      const q = colQ[j], L = q >= 0 ? Lf : Lb, a = Math.max(1e-6, halfAcross), c = Math.max(L, L + (0.05 - L) * open, a) * 1.0001;
+      const Rl = (c * c + a * a) / (2 * a), hr = VULVA_OPEN.hingeRound;
+      const halfAt = (sAbs: number) => {
+        if (sAbs >= c) return 0;
+        const lens = Math.max(0, Math.sqrt(Math.max(0, Rl * Rl - sAbs * sAbs)) - (Rl - a)), oval = a * Math.sqrt(Math.max(0, 1 - (sAbs / c) ** 2));
+        return lens + (oval - lens) * hr;
+      };
+      const rho = (k: number) => { const su = Math.abs(nodeS[k * M + j]); if (su >= c) return 2; const w = halfAt(su); return w > 1e-9 ? Math.abs(nodeU[k * M + j]) / w : 2; };
       // the outermost crossing: a column that wanders out of the oval and back in (over her lips' rounds) is opened
       // to where it leaves it for good, so the edge does not catch on a lip
       let next = rho(R);
@@ -653,7 +668,9 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
         for (let r = 0; r < R; r++) for (let j = 0; j < M; j++) {
           const k = r * M + j, a = r * M + ((j + M - 1) % M), b = r * M + ((j + 1) % M);
           if (base[k] < 0 || base[a] < 0 || base[b] < 0) continue;
-          const w = lam * moved[base[k]];
+          // (more at the hinges, top and bottom: the skin there is stretched round the jaws' ends -- Joshua, 2026-11-01:
+          // "try smoothing around the whole vagina area (mainly top and bottom) as it opens")
+          const w = Math.min(0.9, lam * moved[base[k]] * (1 + VULVA_OPEN.hingeSmooth * smooth(0.55, 0.95, Math.abs(colQ[j]))));
           for (let c = 0; c < 3; c++) nx[k * 3 + c] = at3[k * 3 + c] + w * (0.5 * (at3[a * 3 + c] + at3[b * 3 + c]) - at3[k * 3 + c]);
         }
         at3.set(nx);
@@ -731,17 +748,29 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     // rounded edge the wall runs straight in along the opening's axis `lipWall` metres, keeping the opening's outline;
     // at its foot the balloon's rolled bead stands in toward the middle, and the canal goes on from under it.
     const rb = L.bead * perMetre * smooth(0.02, 0.2, open), wallIn = L.lipWall * perMetre;
+    // (each wall runs in square to her skin at its own edge -- not along the opening's tilted axis, which on one side of
+    // the opening ran the wall out through her skin and hid it behind pink -- turning to the axis further in)
+    const wallDir = new Float32Array(M * 3), wv = new THREE.Vector3();
+    for (let j = 0; j < M; j++) {
+      const p0 = base[j] * 3;
+      wv.set(-nr[p0], -nr[p0 + 1], -nr[p0 + 2]);
+      if (wv.lengthSq() < 1e-12) wv.copy(inward); else wv.normalize().lerp(inward, 0.3).normalize();
+      wallDir[j * 3] = wv.x; wallDir[j * 3 + 1] = wv.y; wallDir[j * 3 + 2] = wv.z;
+    }
+    const startOf = new Float32Array(M * 3);
     for (let k = 0; k < KL; k++) {
       const f = k / (KL - 1);
-      for (let j = 0; j < M; j++) { pt.fromArray(rim, j * 3).addScaledVector(inward, wallIn * f); put(k, j, pt); }
+      for (let j = 0; j < M; j++) { wv.fromArray(wallDir, j * 3); pt.fromArray(rim, j * 3).addScaledVector(wv, wallIn * f); put(k, j, pt); }
     }
     for (let b = 0; b < KB - KL; b++) {
       const phi = ((b + 1) / (KB - KL)) * Math.PI;
       for (let j = 0; j < M; j++) {
         oj.fromArray(out, j * 3);
         // (a half round bulging in toward the middle: from the wall's foot, in by `bead`, back out a bead's width deeper)
-        pt.fromArray(rim, j * 3).addScaledVector(inward, wallIn + rb - rb * Math.cos(phi)).addScaledVector(oj, -rb * Math.sin(phi));
+        wv.fromArray(wallDir, j * 3);
+        pt.fromArray(rim, j * 3).addScaledVector(wv, wallIn + rb - rb * Math.cos(phi)).addScaledVector(oj, -rb * Math.sin(phi));
         put(KL + b, j, pt);
+        if (b === KB - KL - 1) pt.toArray(startOf, j * 3);
       }
     }
     ctr.addScaledVector(inward, wallIn + 2 * rb);
@@ -763,7 +792,11 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
         const r = rr * (1 + fold * Math.cos(L.pleats * ang[j]));
         cj.fromArray(circ, j * 3); oj.lerp(cj, round).normalize();
         off.copy(oj).multiplyScalar(r).applyQuaternion(turn);
-        pt.copy(ctr).add(off); put(m, j, pt);
+        pt.copy(ctr).add(off);
+        // (its first rings go on from where each bead ended, easing onto the canal's own shape)
+        if (k === 0) { const o = j * 3; startOf[o] -= pt.x; startOf[o + 1] -= pt.y; startOf[o + 2] -= pt.z; }
+        const ease = 1 - smooth(0, 0.4, f); pt.x += startOf[j * 3] * ease; pt.y += startOf[j * 3 + 1] * ease; pt.z += startOf[j * 3 + 2] * ease;
+        put(m, j, pt);
       }
     }
     // 3. THE CERVIX: a neck, its own opening dilating with hers (shut, a few millimetres; at 100%, the opening's width)
