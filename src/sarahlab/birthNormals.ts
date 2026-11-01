@@ -26,6 +26,9 @@ export const BIRTH_NORMALS = Object.freeze({
   /** the hollows under her filled (see `compute`'s `fill`): `passes` times, each `rate` of the way out of a hollow and
    * `even` of the way to its neighbours along her; over her underside behind her vulva and below her hips, her middle
    * included (zone as `fold`'s) */
+  /** her underside rounded (see `compute`'s `pull`): the zone, and how squarely down a point must face as posed (from
+   * `faceFrom`, all of it by `faceFull`) */
+  underPull: Object.freeze({ faceFrom: -0.15, faceFull: 0.35, behindFrom: 0.0, behindFull: 0.03, behindTo: 0.14, upFull: 0.07, upTo: 0.14, downTo: -0.12, midFrom: -1, midFull: 0, sideFull: 0.12, sideTo: 0.18 }),
   under: Object.freeze({ passes: 200, rate: 0.8, even: 0.3, behindFrom: -0.02, behindFull: 0.01, behindTo: 0.22, upFull: 0.06, upTo: 0.13, downTo: -0.12, midFrom: -1, midFull: 0, sideFull: 0.12, sideTo: 0.18 }),
   fold: Object.freeze({ passes: 120, lambda: 0.7, behindFrom: 0.02, behindFull: 0.05, behindTo: 0.24, upFull: 0.08, upTo: 0.15, downTo: -0.06, midFrom: 0.008, midFull: 0.03, sideFull: 0.11, sideTo: 0.17 }),
   /** folds ironed out after it (2026-10-31): two triangles sharing an edge whose facings' dot is below `foldAt` are a
@@ -51,7 +54,7 @@ export const BIRTH_NORMALS = Object.freeze({
 
 export interface BirthNormals {
   /** the field for her as posed now (her bones' world matrices current); `pos`/`nrm` her shape as drawn */
-  compute(pos: ArrayLike<number>, nrm: ArrayLike<number>, fill?: number): { index: Uint32Array; pos: Float32Array; nrm: Float32Array };
+  compute(pos: ArrayLike<number>, nrm: ArrayLike<number>, fill?: number, pull?: number): { index: Uint32Array; pos: Float32Array; nrm: Float32Array };
   readonly watched: number;
   /** vertex pairs of the band's open edges (each an edge only one of her triangles has) */
   readonly openEdges: readonly number[];
@@ -67,7 +70,7 @@ export interface BirthNormals {
 
 const smooth = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
 
-export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix4, indices: ArrayLike<number>, thighBones: readonly number[] = [], layerOf?: (i: number) => number, crease?: { hips: readonly [number, number]; knees: readonly [number, number]; pelvis: number; spine: number }): BirthNormals | null {
+export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix4, indices: ArrayLike<number>, thighBones: readonly number[] = [], layerOf?: (i: number) => number, crease?: { hips: readonly [number, number]; knees: readonly [number, number]; pelvis: number; spine: number }, pelvisBone?: number): BirthNormals | null {
   const g = mesh.geometry as THREE.BufferGeometry;
   const si = g.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, sw = g.getAttribute('skinWeight') as THREE.BufferAttribute | undefined, pa = g.getAttribute('position');
   if (!si || !sw || !pa) return null;
@@ -119,7 +122,8 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
     }
     return out;
   };
-  const foldK = zoneShare(B.fold), underK = zoneShare(B.under);
+  const foldK = zoneShare(B.fold), underK = zoneShare(B.under), pullK = zoneShare(B.underPull);
+  const mrest = new Float32Array(n * 3);
   let pierced = 0, blowWorst = 0, blowCount = 0, folded = 0;
   const expected: number[] = [];
   const perMetre = 1 / new THREE.Vector3(1, 0, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(toRest)).length();
@@ -136,7 +140,7 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
     get blow() { return { worst: +blowWorst.toFixed(2), over3: blowCount }; },
     get folded() { return folded; },
     expected,
-    compute(pos, nrm, fill = 0) {
+    compute(pos, nrm, fill = 0, pull = 0) {
       const sk = mesh.skeleton;
       for (let q = 0; q < sk.bones.length; q++) S[q].multiplyMatrices(mesh.bindMatrixInverse, tmp.multiplyMatrices(sk.bones[q].matrixWorld, sk.boneInverses[q])).multiply(mesh.bindMatrix);
       // her shape as DRAWN: her morph targets on it too (2026-10-31: her model carries the full belly and the belly
@@ -153,6 +157,7 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
             else { v.set(v.x + w * (ma.getX(i) - pos[i * 3]), v.y + w * (ma.getY(i) - pos[i * 3 + 1]), v.z + w * (ma.getZ(i) - pos[i * 3 + 2])); }
           }
         }
+        mrest[i * 3] = v.x; mrest[i * 3 + 1] = v.y; mrest[i * 3 + 2] = v.z;
         v.applyMatrix4(blend(i)); posed[i * 3] = v.x; posed[i * 3 + 1] = v.y; posed[i * 3 + 2] = v.z;
       }
       // smoothed where she is posed (by point, so a seam stays shut), each point as far as the band's share says
@@ -160,6 +165,28 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
       for (const i of used) { const k = key[i]; kp[k * 3] += posed[i * 3]; kp[k * 3 + 1] += posed[i * 3 + 1]; kp[k * 3 + 2] += posed[i * 3 + 2]; kc[k]++; ks[k] = Math.max(ks[k], share[i]); }
       for (let k = 0; k < K; k++) { kp[k * 3] /= kc[k]; kp[k * 3 + 1] /= kc[k]; kp[k * 3 + 2] /= kc[k]; }
       const before = Float64Array.from(kp), sumN = new Float64Array(K * 3), cntN = new Float64Array(K);
+      // HER UNDERSIDE ROUNDED (Joshua, 2026-10-31, SQUAT: "it pinches right in the middle and maybe also is bowed inwards
+      // instead of outwards"). Each buttock's underside goes with its thigh, which in a deep squat draws it forward into
+      // a hollow either side of her middle; carried by her pelvis instead it hangs round, as in his references, but
+      // her buttocks' backs then hang off her as a flap. So only the skin under her that FACES DOWN, as posed, is moved
+      // `pull` of the way to where her pelvis alone would carry it; what faces back stays with her thighs.
+      if (pull > 0 && pelvisBone !== undefined && S[pelvisBone]) {
+        const Pm = S[pelvisBone], U = B.underPull, down = new THREE.Vector3(0, -1, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(toRest).invert()).normalize();
+        const tgt = new Float64Array(K * 3), tc = new Float64Array(K), dn = new Float64Array(K);
+        for (const i of used) {
+          const k = key[i]; if (pullK[k] <= 0) continue;
+          v.set(mrest[i * 3], mrest[i * 3 + 1], mrest[i * 3 + 2]).applyMatrix4(Pm);
+          tgt[k * 3] += v.x; tgt[k * 3 + 1] += v.y; tgt[k * 3 + 2] += v.z; tc[k]++;
+          const nx = nrmPosed(i, 0, nrm), ny = nrmPosed(i, 1, nrm), nz = nrmPosed(i, 2, nrm), l = Math.hypot(nx, ny, nz) || 1;
+          dn[k] = Math.max(dn[k], (nx * down.x + ny * down.y + nz * down.z) / l);
+        }
+        for (let k = 0; k < K; k++) {
+          if (!tc[k]) continue;
+          const w = pull * pullK[k] * smooth(U.faceFrom, U.faceFull, dn[k]);
+          if (w <= 0) continue;
+          for (let c = 0; c < 3; c++) kp[k * 3 + c] += w * (tgt[k * 3 + c] / tc[k] - kp[k * 3 + c]);
+        }
+      }
       // which way her triangles face out, from her own normals as posed
       const kn = new Float64Array(K * 3);
       const keyNormals = (sign: number) => {

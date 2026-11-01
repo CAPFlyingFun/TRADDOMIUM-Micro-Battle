@@ -490,6 +490,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let birthFillSquat = 0, birthFillRecline = 0;
   /** in SQUAT, how much of her lower buttocks is carried by her pelvis (a probe may set it) */
   let squatBack = 0;
+  /** in SQUAT, how far her down-facing underside goes to where her pelvis would carry it (birthNormals.ts `pull`) */
+  let squatPull = 0.9;
   // the library outfit she last put on (her changes to it save as hers), and saved clothes waiting for their outfit to load
   let wornFrom: string | null = null;
   // ...and in his fabrics, put on as her outfit is dressed the first time
@@ -2916,7 +2918,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const g = b.mesh.geometry, P = (g.getAttribute('position') as THREE.BufferAttribute).array as Float32Array, N = (g.getAttribute('normal') as THREE.BufferAttribute).array as Float32Array;
     const map = new Map(bare);
     if (birthRoom && birthRoomOn) map.set(BIRTH_ROOM_FIELD, birthRoom.compute(P));
-    if (birthNormals && birthNormalsOn) map.set(BIRTH_NORMALS_FIELD, birthNormals.compute(P, N, pose === 'squat' ? birthFillSquat : pose === 'recline' ? birthFillRecline : 0));
+    if (birthNormals && birthNormalsOn) map.set(BIRTH_NORMALS_FIELD, birthNormals.compute(P, N, pose === 'squat' ? birthFillSquat : pose === 'recline' ? birthFillRecline : 0, pose === 'squat' ? squatPull : 0));
     sb.fields = { ...sb.fields, fields: map, last: '' };
     applyLook();
   }
@@ -3327,7 +3329,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             // and the area rebuilt finer, from her own skin, to be able to open (vulvaMesh.ts)
             vulva?.dispose();
             try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest, measure?.joints.pelvis); vulva?.setOpen(birthOpenPct / 100); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
-            try { birthNormals = createBirthNormals(bm!, babyFrame.meshToRest, herTris, measure ? [measure.joints.hipL, measure.joints.hipR] : [], (i) => birthWeights?.maskOf(i) ?? 0, undefined /* the crease planes dented her belly: off (2026-10-31) */); } catch (error) { console.error('[sarahlab] her birth-pose normals could not be made', error); birthNormals = null; }
+            try { birthNormals = createBirthNormals(bm!, babyFrame.meshToRest, herTris, measure ? [measure.joints.hipL, measure.joints.hipR] : [], (i) => birthWeights?.maskOf(i) ?? 0, undefined /* the crease planes dented her belly: off (2026-10-31) */, measure?.joints.pelvis); } catch (error) { console.error('[sarahlab] her birth-pose normals could not be made', error); birthNormals = null; }
             try { const jt = measure?.joints; birthRoom = jt ? createBirthRoom(bm!, babyFrame.meshToRest, herTris, jt.pelvis, jt.hipL, jt.hipR) : null; } catch (error) { console.error('[sarahlab] her birth-pose room could not be made', error); birthRoom = null; }
             try { const jt = measure?.joints; birthWeights = jt ? createBirthWeights(bm!, babyFrame.meshToRest, jt.pelvis, jt.hipL, jt.hipR, jt.kneeL, jt.kneeR, herTris) : null; } catch (error) { console.error('[sarahlab] her birth-pose weights could not be made', error); birthWeights = null; }
           }
@@ -3600,6 +3602,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           model.userData.weightPaint = m2; b.mesh.visible = false; if (vulva) vulva.mesh.visible = false;
           return true;
         },
+        squatPull: (v: number) => { squatPull = v; birthRoomFor = ''; applyLook(); return v; },
         squatBack: (v: number) => { squatBack = v; applyLook(); birthRoomFor = ''; return v; },
         birthFill: (squat: number, recline: number) => { birthFillSquat = squat; birthFillRecline = recline; birthRoomFor = ''; applyLook(); return true; },
         birthSeat: (on: boolean, squat?: number) => { birthSeatOn = on; if (typeof squat === 'number') birthSeatSquat = squat; applyLook(); return on; },
