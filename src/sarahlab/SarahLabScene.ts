@@ -3627,10 +3627,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // rebuilt area blue, the tube red, nothing solid
         wireView: (on: boolean) => {
           const b = bodyOf(); if (!b || !vulva) return false;
-          const keep = (b.mesh.userData.wireKeep ??= { body: b.mesh.material, patch: vulva.mesh.material, tube: vulva.tube.material }) as { body: THREE.Material; patch: THREE.Material; tube: THREE.Material };
+          const keep = (b.mesh.userData.wireKeep ??= { body: b.mesh.material, patch: vulva.mesh.material, tube: vulva.tube.material, sheet: vulva.sheet.material }) as { sheet: THREE.Material; body: THREE.Material; patch: THREE.Material; tube: THREE.Material };
           const wire = (hex: number, opacity: number) => new THREE.MeshBasicMaterial({ color: hex, wireframe: true, transparent: opacity < 1, opacity });
-          if (on) { b.mesh.material = wire(0x8a8f99, 0.35); vulva.mesh.material = wire(0x1d5bff, 1); vulva.tube.material = wire(0xe0284a, 1); }
-          else { b.mesh.material = keep.body; vulva.mesh.material = keep.patch; vulva.tube.material = keep.tube; delete b.mesh.userData.wireKeep; }
+          if (on) { b.mesh.material = wire(0x8a8f99, 0.35); vulva.mesh.material = wire(0x1d5bff, 1); vulva.tube.material = wire(0xe0284a, 1); vulva.sheet.material = wire(0x10b040, 1); }
+          else { b.mesh.material = keep.body; vulva.mesh.material = keep.patch; vulva.tube.material = keep.tube; vulva.sheet.material = keep.sheet; delete b.mesh.userData.wireKeep; }
           return true;
         },
         vulvaAxes: () => {

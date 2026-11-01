@@ -45,6 +45,17 @@ export const VULVA_OPEN = Object.freeze({
    * long, its own opening `cervixShut` metres across shut and the opening's full width at 100%: the dilation), and the
    * womb's bulb (`womb` long, `wombRadius` round), closed over at its top. BIOLOGICAL SHAPE, GAME TUNING
    */
+  /**
+   * THE LIPS AS A SOFT SHEET (Joshua, 2026-11-01: "making each side of vagina with a soft body, cloth simulation where it
+   * naturally closes, but as it opens, it will stretch... the outside can be painted skin and the inside the pink... make
+   * it somewhat stiff so it doesn't flap"; his reference at about 20% open: thick rounded lips folding over in a U into
+   * the opening). Each lip a sheet of her own skin from `sheetFoot` metres out along her skin from the opening's edge,
+   * rising to a rounded crest `rise` high, its nose `noseRound` of its height round, folding over and down its inner face
+   * to the edge, where the balloon goes on. It keeps its cross-section's area as it stretches round the opening (thinner
+   * and lower the wider it is, by the square root of the stretch), is evened round the opening `sheetSmooth` times so it
+   * is one soft piece, and curls its nose in over the opening by `curl` of its roundness while it is starting to open.
+   */
+  sheet: false, sheetFoot: 0.022, noseRound: 0.42, curl: 0.55, sheetSmooth: 4, sheetLift: 0.0004,
   bead: 0.004, lipWall: 0.008, wombWall: 0.003, wombMeet: 35, wallSkin: 0xd09a88, wallPink: 0xc0646e, pleats: 4, pleatDepth: 0.22, cervix: 0.025, cervixShut: 0.006, womb: 0.13, wombRadius: 0.065,
   /** BIOLOGICAL SHAPE (Joshua's estimate, to tune): how far the area bulges out at the full opening (metres; a half sphere,
    * its last `bulgeFoot` share easing onto her skin), and how it
@@ -93,6 +104,8 @@ export interface VulvaPatch {
   seeWomb(through: boolean): void;
   /** the tube inside (pink) */
   readonly tube: THREE.SkinnedMesh;
+  /** the lips' soft sheet (VULVA_OPEN.sheet) */
+  readonly sheet: THREE.SkinnedMesh;
   readonly bake: VulvaBake;
   /** read her shape (and her baby's push) back onto the area if either changed; true when it did */
   sync(): boolean;
@@ -337,7 +350,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     const ss = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
     const skinC = new THREE.Color(VULVA_OPEN.wallSkin), pinkC = new THREE.Color(VULVA_OPEN.wallPink), canalC = new THREE.Color(0xa8505a), c3 = new THREE.Color();
     for (let m = 0; m < K; m++) {
-      if (m < KL) c3.copy(skinC).lerp(pinkC, ss(0, 1, m / (KL - 1)));
+      if (m < KL) { if (VULVA_OPEN.sheet) c3.copy(pinkC); else c3.copy(skinC).lerp(pinkC, ss(0, 1, m / (KL - 1))); }
       else if (m < KB) c3.copy(pinkC);
       else { const f = (m - KB) / (K - 1 - KB); c3.copy(pinkC).lerp(canalC, ss(0, 0.15, f)).multiplyScalar(1 - 0.75 * Math.pow(Math.min(1, f * 1.6), 0.7)); }
       for (let j = 0; j < M; j++) { const o = (m * M + j) * 3; col[o] = c3.r; col[o + 1] = c3.g; col[o + 2] = c3.b; }
@@ -372,6 +385,39 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   tube.morphTargetDictionary = body.morphTargetDictionary; tube.morphTargetInfluences = body.morphTargetInfluences;
   tube.bind(body.skeleton, body.bindMatrix);
   body.parent?.add(tube);
+  // ---- THE LIPS' SHEET (VULVA_OPEN.sheet): NS points across each column, from her skin over the lip into the opening
+  const NO = 9, NN = 9, NI = 3, NS = NO + NN + NI, SV = NS * M;
+  const sheetGeom = new THREE.BufferGeometry(), sheetPos = new Float32Array(SV * 3), sheetWant = new Float32Array(SV * 3);
+  sheetGeom.setAttribute('position', new THREE.BufferAttribute(sheetPos, 3));
+  sheetGeom.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(SV * 3), 3));
+  const sheetUv = new Float32Array(SV * 2), sheetCol = new Float32Array(SV * 3).fill(1);
+  if (geom.getAttribute('uv')) sheetGeom.setAttribute('uv', new THREE.BufferAttribute(sheetUv, 2));
+  sheetGeom.setAttribute('color', new THREE.BufferAttribute(sheetCol, 3));
+  const sheetI = new Uint16Array(SV * 4), sheetW = new Float32Array(SV * 4);
+  if (skI && skW) { sheetGeom.setAttribute('skinIndex', new THREE.BufferAttribute(sheetI, 4)); sheetGeom.setAttribute('skinWeight', new THREE.BufferAttribute(sheetW, 4)); }
+  if (geom.getAttribute(JIGGLE_ATTRIBUTE)) sheetGeom.setAttribute(JIGGLE_ATTRIBUTE, new THREE.BufferAttribute(new Float32Array(SV * 3), 3));
+  if (geom.getAttribute(PUSH_ATTRIBUTE)) sheetGeom.setAttribute(PUSH_ATTRIBUTE, new THREE.BufferAttribute(new Float32Array(SV * 3), 3));
+  for (const kind of ['position', 'normal'] as const) {
+    const list = geom.morphAttributes[kind];
+    if (list?.length) sheetGeom.morphAttributes[kind] = list.map(() => new THREE.BufferAttribute(new Float32Array(SV * 3), 3));
+  }
+  sheetGeom.morphTargetsRelative = geom.morphTargetsRelative;
+  { const ti: number[] = [];
+    for (let a = 0; a + 1 < NS; a++) for (let j = 0; j < M; j++) { const j2 = (j + 1) % M, p0 = a * M + j, p1 = a * M + j2, p2 = (a + 1) * M + j, p3 = (a + 1) * M + j2; ti.push(p0, p2, p1, p1, p2, p3); }
+    sheetGeom.setIndex(ti); }
+  const sheetMat = patchMat.clone();
+  sheetMat.customProgramCacheKey = () => 'vulvaSheet';
+  sheetMat.side = THREE.DoubleSide; sheetMat.polygonOffset = true; sheetMat.polygonOffsetFactor = -1; sheetMat.polygonOffsetUnits = -1;
+  if (jigU) patchJiggle(sheetMat, jigU);
+  const sheet = new THREE.SkinnedMesh(sheetGeom, sheetMat);
+  sheet.name = 'sarahLips';
+  sheet.frustumCulled = false; sheet.castShadow = body.castShadow; sheet.receiveShadow = body.receiveShadow;
+  sheet.position.copy(body.position); sheet.quaternion.copy(body.quaternion); sheet.scale.copy(body.scale);
+  sheet.morphTargetDictionary = body.morphTargetDictionary; sheet.morphTargetInfluences = body.morphTargetInfluences;
+  sheet.bind(body.skeleton, body.bindMatrix);
+  body.parent?.add(sheet);
+  /** each sheet point: the two of the area's points it lies between (its foot, the opening's edge) and how far (0 foot .. 1 edge) */
+  const sheetFrom = new Int32Array(SV), sheetTo = new Int32Array(SV), sheetF = new Float32Array(SV);
 
   const smooth = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
   const O = new THREE.Vector3(), tA = new THREE.Vector3(), nO = new THREE.Vector3(), vv = new THREE.Vector3();
@@ -482,7 +528,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   const sculptLips = (at: Float32Array, n: Float32Array) => {
     // dressed, as much of the lips' shape as shows through what is over them (VULVA DETAIL: 0 her own skin's shape
     // exactly, 1 all of it); what is painted on her lies over it as it does on the rest of her
-    const amp = dressed ? dressedLips : 1;
+    const amp = dressed ? dressedLips : (VULVA_OPEN.sheet ? 0 : 1);
     lipMax = 0; lipCount = 0;
     if (amp <= 0) return;
     const L = VULVA_OPEN;
@@ -508,6 +554,94 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       n[p * 3] = nn.x; n[p * 3 + 1] = nn.y; n[p * 3 + 2] = nn.z;
     }
   };
+  /** the lips' sheet laid over the area as it lies now (`at`, `an`: the area's points and normals, laid out) */
+  function laySheet(at: Float32Array, an: Float32Array, cm: Float32Array): void {
+    const L = VULVA_OPEN, A = new THREE.Vector3(), B = new THREE.Vector3(), nA = new THREE.Vector3(), t = new THREE.Vector3(), n = new THREE.Vector3(), q = new THREE.Vector3();
+    // each column: its foot (the first ring at least `sheetFoot` out along her skin from the edge, at rest), its edge
+    const footK = new Int32Array(M), Hs = new Float32Array(M), Ws = new Float32Array(M), stretch = new Float32Array(M);
+    // (the foot itself lies exactly `sheetFoot` out, between the two rings either side of it: picked ring by ring it
+    // zig-zagged from column to column and drew spikes out over her skin)
+    const footD = new Float32Array(M), footAt = new Float32Array(M * 3), footN = new Float32Array(M * 3), footFr = new Float32Array(M);
+    for (let j = 0; j < M; j++) {
+      // (never further than half its column: a short column, at the ends of her split or cut short by her thighs' mask,
+      // ran the foot out to the area's edge and drew a long spike over her skin)
+      const fd = Math.min(L.sheetFoot, 0.5 * cm[R * M + j]); footD[j] = fd;
+      let k = 1; while (k < R && cm[k * M + j] < fd) k++; footK[j] = k;
+      const m0 = cm[(k - 1) * M + j], m1 = cm[k * M + j], fr = m1 > m0 ? Math.max(0, Math.min(1, (fd - m0) / (m1 - m0))) : 1;
+      footFr[j] = fr;
+      const p0 = base[(k - 1) * M + j] * 3, p1 = base[k * M + j] * 3;
+      for (let c = 0; c < 3; c++) { footAt[j * 3 + c] = at[p0 + c] + (at[p1 + c] - at[p0 + c]) * fr; footN[j * 3 + c] = an[p0 + c] + (an[p1 + c] - an[p0 + c]) * fr; }
+    }
+    // how far the edge is stretched round the opening at each column (its spacing now against its spacing shut)
+    const pt = (arr: Float32Array, i: number, o: THREE.Vector3) => o.fromArray(arr, i * 3);
+    for (let j = 0; j < M; j++) {
+      const a = base[(j + M - 1) % M], c = base[(j + 1) % M];
+      const now = pt(at, a, A).distanceTo(pt(at, c, B)), shut = pt(restPos, a, A).distanceTo(pt(restPos, c, B));
+      stretch[j] = shut > 1e-9 ? Math.max(1, now / shut) : 1;
+    }
+    { const t2 = new Float32Array(M); for (let pass = 0; pass < 6; pass++) { for (let j = 0; j < M; j++) t2[j] = 0.25 * stretch[(j + M - 1) % M] + 0.5 * stretch[j] + 0.25 * stretch[(j + 1) % M]; stretch.set(t2); } }
+    // each column's lip: its height from its cross-section's area kept as it widens and stretches, tapering to the hinges
+    for (let j = 0; j < M; j++) {
+      const qj = Math.max(-1, Math.min(1, colQ[j])), taper = Math.pow(Math.max(0, 1 - qj * qj), 0.35);
+      const W0 = footD[j], W = A.fromArray(footAt, j * 3).distanceTo(pt(at, base[j], B)) / perMetre;
+      Ws[j] = W;
+      Hs[j] = Math.max(0.3, Math.min(1.15, (W0 / Math.max(1e-4, W)) / Math.sqrt(stretch[j]))) * L.rise * taper * (footD[j] / L.sheetFoot);
+    }
+    { const t2 = new Float32Array(M); for (let pass = 0; pass < L.sheetSmooth; pass++) { for (let j = 0; j < M; j++) t2[j] = 0.25 * Hs[(j + M - 1) % M] + 0.5 * Hs[j] + 0.25 * Hs[(j + 1) % M]; Hs.set(t2); } }
+    const curlNow = L.curl * smooth(0.03, 0.18, open) * (1 - smooth(0.3, 0.8, open)), lift = L.sheetLift * perMetre;
+    for (let j = 0; j < M; j++) {
+      const fa = base[footK[j] * M + j], ea = base[j];
+      A.fromArray(footAt, j * 3); pt(at, ea, B);
+      n.fromArray(footN, j * 3).normalize().add(nA.fromArray(an, ea * 3)).normalize();
+      t.copy(A).sub(B); t.addScaledVector(n, -t.dot(n));
+      const W = Math.max(1e-6, t.length()); t.divideScalar(W);
+      const H = Hs[j] * perMetre, r = Math.min(H * L.noseRound, W * 0.45), ov = r * curlNow;
+      const xc = Math.max(0, Math.min(W - r, r - ov)), yc = H - r;
+      // (the outer face's top meets the nose: from the foot to the crest, a smooth rise, level at both ends)
+      const crestX = xc;
+      for (let a = 0; a < NS; a++) {
+        let x: number, y: number, f: number;
+        if (a < NO) { const u = a / (NO - 1); x = W + (crestX - W) * u; y = H * (1 - Math.cos(Math.PI * u)) / 2 * (1 - (1 - (yc + r) / Math.max(1e-9, H))); f = 0.6 * u; }
+        else if (a < NO + NN) { const th = Math.PI / 2 + ((a - NO + 1) / NN) * Math.PI; x = xc + r * Math.cos(th); y = yc + r * Math.sin(th); f = 0.6 + 0.3 * ((a - NO + 1) / NN); }
+        else { const u = (a - NO - NN + 1) / NI, x0 = xc, y0 = yc - r; x = x0 * (1 - u); y = y0 * (1 - u); f = 0.9 + 0.1 * u; }
+        const i = a * M + j;
+        q.copy(B).addScaledVector(t, x).addScaledVector(n, y + (a < NS - 1 ? lift : 0));
+        q.toArray(sheetWant, i * 3);
+        sheetFrom[i] = fa; sheetTo[i] = ea; sheetF[i] = 1 - x / W;
+        // colour: her skin outside, turning to the inside's on the nose and inside it
+        const inside = smooth(0.62, 0.85, f);
+        for (let c = 0; c < 3; c++) sheetCol[i * 3 + c] = 1 + (L.innerTint[c] - 1) * inside + (L.edgeTint[c] - L.innerTint[c]) * smooth(0.8, 1, f) * 0.6;
+      }
+    }
+    // one soft piece: each ring of the sheet evened round the opening (not its ends, which lie on her skin and the edge)
+    { const tmp = new Float32Array(M * 3);
+      for (let a = 1; a < NS - 1; a++) for (let pass = 0; pass < L.sheetSmooth; pass++) {
+        for (let j = 0; j < M; j++) { const i0 = (a * M + (j + M - 1) % M) * 3, i1 = (a * M + j) * 3, i2 = (a * M + (j + 1) % M) * 3; for (let c = 0; c < 3; c++) tmp[j * 3 + c] = 0.25 * sheetWant[i0 + c] + 0.5 * sheetWant[i1 + c] + 0.25 * sheetWant[i2 + c]; }
+        for (let j = 0; j < M; j++) for (let c = 0; c < 3; c++) sheetWant[(a * M + j) * 3 + c] = tmp[j * 3 + c];
+      } }
+    // its texture, skinning and shapes: her skin's, between its foot and the edge
+    const auv = geom.getAttribute('uv') as THREE.BufferAttribute | undefined;
+    const wAcc2 = new Map<number, number>();
+    for (let i = 0; i < SV; i++) {
+      const a = sheetFrom[i], b = sheetTo[i], f = Math.max(0, Math.min(1, sheetF[i]));
+      // (her texture as it is at the lip's foot, the whole way over: her texture's pieces meet near her middle, and read
+      // across from foot to edge the lip was striped with them)
+      if (auv) for (let c = 0; c < 2; c++) sheetUv[i * 2 + c] = auv.getComponent(a, c);
+      if (patchI && patchW) {
+        wAcc2.clear();
+        for (let c = 0; c < 4; c++) { const wa = patchW[a * 4 + c] * (1 - f), wb = patchW[b * 4 + c] * f; if (wa > 0) wAcc2.set(patchI[a * 4 + c], (wAcc2.get(patchI[a * 4 + c]) ?? 0) + wa); if (wb > 0) wAcc2.set(patchI[b * 4 + c], (wAcc2.get(patchI[b * 4 + c]) ?? 0) + wb); }
+        const top = [...wAcc2].sort((x, y) => y[1] - x[1]).slice(0, 4), sum = top.reduce((m2, [, w]) => m2 + w, 0) || 1;
+        for (let c = 0; c < 4; c++) { sheetI[i * 4 + c] = top[c]?.[0] ?? 0; sheetW[i * 4 + c] = top[c] ? top[c][1] / sum : 0; }
+      }
+    }
+    for (const kind of ['position', 'normal'] as const) {
+      const src = geom.morphAttributes[kind], dst = sheetGeom.morphAttributes[kind];
+      if (!src || !dst) continue;
+      for (let m = 0; m < src.length; m++) { const sa = src[m], da = dst[m].array as Float32Array; for (let i = 0; i < SV; i++) { const f = Math.max(0, Math.min(1, sheetF[i])); for (let c = 0; c < 3; c++) da[i * 3 + c] = sa.getComponent(sheetFrom[i], c) * (1 - f) + sa.getComponent(sheetTo[i], c) * f; } dst[m].needsUpdate = true; }
+    }
+    sheetLaid = true;
+  }
+  let sheetLaid = false;
   /** lay the opening on the rest shape just read (restPos) */
   function layOpen(): void {
     const pos = want;
@@ -722,6 +856,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       }
     }
     bulgeNow = open > 0 ? VULVA_OPEN.bulge * Math.pow(open, VULVA_OPEN.bulgeEase) : 0;
+    if (VULVA_OPEN.sheet && !dressed) laySheet(pos, nrm, cm);
     // the canal hangs from the lips' edge as shaped (rolled in), so the two meet
     for (let j = 0; j < M; j++) for (let c = 0; c < 3; c++) rim[j * 3 + c] = pos[base[j] * 3 + c];
     // THE BALLOON: one skin from the opening's rim to the top of her womb (see VULVA_OPEN.bead)
@@ -902,6 +1037,11 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       }
       tI.needsUpdate = true; tW.needsUpdate = true;
     }
+    if (sheetLaid) {
+      sheetPos.set(sheetWant);
+      for (const name of ['position', 'uv', 'color', 'skinIndex', 'skinWeight']) { const a = sheetGeom.getAttribute(name) as THREE.BufferAttribute | undefined; if (a) a.needsUpdate = true; }
+      sheetGeom.computeVertexNormals();
+    }
     (tubeGeom.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     tubeGeom.computeVertexNormals();
   }
@@ -979,12 +1119,15 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     mesh.visible = (body.visible || api.solo) && shown;
     // (the balloon is inside her, closed: it stays whole however shut she is)
     tube.visible = mesh.visible && !api.noTube;
+    sheet.visible = mesh.visible && VULVA_OPEN.sheet && !dressed && sheetLaid;
+    if (sheet.morphTargetInfluences !== body.morphTargetInfluences) sheet.morphTargetInfluences = body.morphTargetInfluences;
+    if (sheetMat.map !== patchMat.map || sheetMat.normalMap !== patchMat.normalMap || !sheetMat.color.equals(patchMat.color)) { sheetMat.map = patchMat.map; sheetMat.normalMap = patchMat.normalMap; sheetMat.roughnessMap = patchMat.roughnessMap; sheetMat.color.copy(patchMat.color); sheetMat.needsUpdate = true; }
     if (tube.morphTargetInfluences !== body.morphTargetInfluences) tube.morphTargetInfluences = body.morphTargetInfluences;
     if (wireMesh) wireMesh.visible = mesh.visible;
     return changed;
   };
   const api: VulvaPatch = {
-    mesh, tube, bake, sync, solo: false,
+    mesh, tube, sheet, bake, sync, solo: false,
     resyncWeights() {
       const a = geom.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, b = geom.getAttribute('skinWeight') as THREE.BufferAttribute | undefined;
       if (!a || !b) return;
@@ -1061,7 +1204,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       } else if (!on && wireMesh) { wireMesh.removeFromParent(); (wireMesh.material as THREE.Material).dispose(); wireMesh = null; }
       sync();
     },
-    dispose() { mesh.removeFromParent(); wireMesh?.removeFromParent(); tube.removeFromParent(); geom.dispose(); tubeGeom.dispose(); tubeMat.dispose(); wombMat.dispose(); },
+    dispose() { mesh.removeFromParent(); wireMesh?.removeFromParent(); tube.removeFromParent(); sheet.removeFromParent(); geom.dispose(); tubeGeom.dispose(); tubeMat.dispose(); wombMat.dispose(); sheetGeom.dispose(); sheetMat.dispose(); },
   };
   sync();
   return api;
