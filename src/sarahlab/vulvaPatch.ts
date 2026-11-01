@@ -76,7 +76,7 @@ export interface VulvaBake {
  * Cut and rebuild. `rest`: her points in her rest frame (metres, 3 each); `key`: a key per vertex that is the same for
  * every vertex at one point (her seams); `indices`: her triangles.
  */
-export function bakeVulva(rest: ArrayLike<number>, key: ArrayLike<number>, indices: ArrayLike<number>, centre: { y: number; z: number }): VulvaBake {
+export function bakeVulva(rest: ArrayLike<number>, key: ArrayLike<number>, indices: ArrayLike<number>, centre: { y: number; z: number }, leg?: ArrayLike<number>): VulvaBake {
   const V = VULVA, n = Math.floor(rest.length / 3);
   // her points (a seam's vertices welded into one), where each is, and the split's middle: the point on her middle
   // nearest where the cleft's middle meets her skin
@@ -123,7 +123,8 @@ export function bakeVulva(rest: ArrayLike<number>, key: ArrayLike<number>, indic
   // thighs, which an opening would pull along: Joshua's wireframe look, 2026-10-30)
   const ox = my - centre.y, oz = mz - centre.z, ol = Math.hypot(ox, oz) || 1, ny = ox / ol, nz = oz / ol;
   const across2 = (k: number) => { const dx = KP[k * 3] - mx, dy = KP[k * 3 + 1] - my, dz = KP[k * 3 + 2] - mz, h = dy * ny + dz * nz; return Math.hypot(dx, dy - h * ny, dz - h * nz); };
-  const inK = (k: number) => dist[k] < V.reach && across2(k) < V.round, nearK = (k: number) => dist[k] < 1.3 * V.reach && across2(k) < 1.3 * V.round;
+  // (and none of her legs' skin, when it is named: `leg` by point, 1 a leg's)
+  const inK = (k: number) => dist[k] < V.reach && across2(k) < V.round && !(leg && leg[k]), nearK = (k: number) => dist[k] < 1.3 * V.reach && across2(k) < 1.3 * V.round;
   const edgeTris = new Map<string, number[]>();
   const pk = (a: number, b: number) => (key[a] < key[b] ? `${key[a]},${key[b]}` : `${key[b]},${key[a]}`);
   for (let t = 0; t < T; t++) {

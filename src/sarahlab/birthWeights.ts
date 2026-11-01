@@ -95,6 +95,9 @@ export interface BirthWeights {
   readonly touched: number;
   /** how much of a point the mask hands to her pelvis (0..1, the larger side) */
   maskOf(i: number): number;
+  /** how far a point of her rest shape lies on its leg's side of its leg opening (metres; less than 0 her torso's side,
+   * -Infinity outside the reskin) */
+  legDistance(i: number): number;
   readonly debug: Record<string, unknown>;
 }
 
@@ -138,7 +141,7 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   // the mask, per side, for points weighted to that thigh at all
   const mask = new Float32Array(n * 2), maskBack = new Float32Array(n * 2), v = new THREE.Vector3(), d = new THREE.Vector3();
   // ---- the reskin: each point's side and how much of it is leg (0 torso .. 1 leg), in the region it reaches
-  const legOf = new Float32Array(n), sideOf = new Int8Array(n), inReskin = new Uint8Array(n);
+  const legOf = new Float32Array(n), sideOf = new Int8Array(n), inReskin = new Uint8Array(n), legDist = new Float32Array(n).fill(-Infinity);
   if (B.reskin) {
     const openings = [0, 1].map((side) => {
       const sx = Math.sign(hip[side].x) || (side === 0 ? 1 : -1);
@@ -158,7 +161,7 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
       const side = v.x * openings[0].sx >= 0 ? 0 : 1, o = openings[side];
       const dist = new THREE.Vector3().subVectors(v, o.A).dot(o.nrm);
       const band = B.bandFront + (B.bandBack - B.bandFront) * smooth(crotch.z, crotch.z - 0.1, v.z);
-      legOf[i] = smooth(-band, band, dist); sideOf[i] = side; inReskin[i] = 1;
+      legOf[i] = smooth(-band, band, dist); sideOf[i] = side; inReskin[i] = 1; legDist[i] = dist;
     }
     // evened over her skin (by place: a seam's copies are one point), so the handover follows her surface
     if (indices && B.diffuse > 0) {
@@ -240,6 +243,7 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   return {
     touched,
     debug: { hip: hip.map((h) => h.toArray().map((x) => +x.toFixed(3))), knee: knee.map((h) => h.toArray().map((x) => +x.toFixed(3))), crotch: crotch.toArray().map((x) => +x.toFixed(3)), planes },
+    legDistance: (i: number) => legDist[i],
     maskOf: (i: number) => B.reskin ? (inReskin[i] ? 1 - legOf[i] : 0) : Math.max(mask[i * 2] + maskBack[i * 2] * Math.max(0, backNow), mask[i * 2 + 1] + maskBack[i * 2 + 1] * Math.max(0, backNow)),
     apply(share: number, back: number = B.backShare): boolean {
       share = Math.max(0, Math.min(1, share)); back = Math.max(0, Math.min(1, back));

@@ -26,9 +26,18 @@ export const VULVA_OPEN = Object.freeze({
   /** GAME TUNING: the opening's edge kept `legClear` metres off her legs -- skin a thigh carries `legWeight` of or more,
    * within `legSlab` metres in or out of her skin's surface there (Joshua, 2026-10-31: "1cm to the thighs") */
   legClear: 0.01, legWeight: 0.5, legSlab: 0.05,
+  /** GAME TUNING: her legs' skin is never the area's -- her leg's side of each leg opening (birthWeights.ts) and this many
+   * metres in from it on her torso's side stay her own, so opening and bulging never take her inner thighs with them
+   * (Joshua, 2026-11-01: "add a 1cm mask around the whole area so that way it doesn't remove the actual inside of the
+   * thighs") */
+  legMask: 0.01,
   /** BIOLOGICAL SHAPE: the canal's length (metres) and how far its deep end leans forward of straight up her body
    * (degrees) -- the curve of Carus */
   canal: 0.09, canalLean: 15,
+  /** BIOLOGICAL SHAPE (Joshua's estimate, to tune): how far the area bulges out at the full opening (metres; a half sphere,
+   * its last `bulgeFoot` share easing onto her skin), and how it
+   * grows with the opening (power of the open share: 1 straight, more later) */
+  bulge: 0.05, bulgeEase: 1.3, bulgeFoot: 0.25,
   /** GAME TUNING: passes evening the opening's edge round its outline */
   edgeSmooth: 6,
   /**
@@ -98,7 +107,7 @@ function floatsOf(attr: THREE.BufferAttribute | THREE.InterleavedBufferAttribute
  * Cut the area out of `body` and lay the rebuilt one on her. `basePos`: her rest shape as approved (geometry units, before
  * any field); `meshToRest`: her geometry to her rest frame (metres). Null when the area could not be found.
  */
-export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array, meshToRest: THREE.Matrix4, pelvisBone?: number, thighBones: readonly number[] = []): VulvaPatch | null {
+export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array, meshToRest: THREE.Matrix4, pelvisBone?: number, thighBones: readonly number[] = [], legSkin?: (i: number) => boolean): VulvaPatch | null {
   const g = body.geometry as THREE.BufferGeometry, index = g.index;
   if (!index) return null;
   const n = basePos.length / 3, rest = new Float32Array(basePos.length), v = new THREE.Vector3();
@@ -114,7 +123,12 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     key[i] = id;
   }
   const all = (body.userData.allIndices as ArrayLike<number> | undefined) ?? index.array;
-  const bake = bakeVulva(rest, key, all, centre);
+  // HER LEGS ARE NOT THE AREA'S (Joshua, 2026-11-01: "the pubic and vagina area is separate and shouldn't be cutting into
+  // the thighs and making holes in it"; "add a 1cm mask around the whole area"): a point of her skin `legSkin` names (her
+  // leg's side of its leg opening, and 1 cm in from it) stays hers and is never taken into the area
+  let legKeys: Uint8Array | undefined;
+  if (legSkin) { legKeys = new Uint8Array(keyOf.size); for (let i = 0; i < n; i++) if (legSkin(i)) legKeys[key[i]] = 1; }
+  const bake = bakeVulva(rest, key, all, centre, legKeys);
   if (bake.count === 0 || bake.index.length === 0) return null;
   const P = bake.count;
 
@@ -346,7 +360,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   /** each column's length over her rest skin from the split, ring by ring (metres), measured once */
   let colMetres: Float32Array | null = null;
   /** the opening's width held back by her legs (metres across), or null when it is not */
-  let heldTo: number | null = null, blocker: number[] = [];
+  let heldTo: number | null = null, blocker: number[] = [], bulgeNow = 0;
   /** her skin near the area that her thighs carry now (vertices), worked out again when her weights change */
   let legNear: number[] = [], legNearVersion = -1;
   const findLegNear = () => {
@@ -521,7 +535,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       for (const i of legNear) {
         body.getVertexPosition(i, pv); pv.sub(Op);
         const sv = Math.abs(pv.dot(alongP)) / perMetre, nv = pv.dot(nAx) / perMetre, uv = Math.abs(pv.dot(sideP)) / perMetre;
-        if (Math.abs(nv) > VULVA_OPEN.legSlab) continue;
+        // (the opening's edge stands out of her by the bulge: legs it now passes over do not hold it)
+        if (Math.abs(nv - VULVA_OPEN.bulge * Math.pow(open, VULVA_OPEN.bulgeEase)) > VULVA_OPEN.legSlab) continue;
         const k = (sv - cl) / cHalf;
         if (k >= 1) continue;
         const a = (uv - cl) / Math.sqrt(1 - Math.max(0, k) ** 2);
@@ -617,6 +632,27 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     }
     // the lips: shaped on her as they lie now, round beside the split and tucked in where they meet
     sculptLips(pos, nrm);
+    // THE OUTLET BULGES OUT AS IT OPENS (Joshua, 2026-11-01, of his crowning references: "as it opens, it also is
+    // extended out... at the full 10cm open it is pushed out an additional 5cm"). The head pushes the soft tissue ahead
+    // of it: midwives' "perineal bulging", the perineum stretching from about 3.7 to 6.1 cm (MDedge's report of the
+    // UNM study). Every point of the area moves out the way the opening faces, most at the opening's edge and none at
+    // the area's own edge, by `bulge` metres at the full opening.
+    if (open > 0 && VULVA_OPEN.bulge > 0) {
+      const H = VULVA_OPEN.bulge * Math.pow(open, VULVA_OPEN.bulgeEase), out = nO;
+      for (let p = 0; p < P; p++) {
+        if (tau[p] >= 1) continue;
+        const j = bake.column[p], total = cm[R * M + j] || 1, m = cm[bake.ring[p] * M + j], e = edges[j];
+        // A HALF SPHERE (Joshua, 2026-11-01: "the bulge should be shaped like a half sphere"): where the point now lies,
+        // as a share of the way from the split to the area's edge (s), it stands on a sphere round the opening's middle
+        // -- the opening its top, cut off where the head shows -- scaled so the opening's edge stands `bulge` out; the
+        // last `bulgeFoot` of the way eases it onto her skin, so its foot is not a step
+        const s = Math.max(0, Math.min(1, (e + m * (1 - e / total)) / total)), s0 = Math.min(0.95, e / total);
+        const sphere = Math.sqrt(Math.max(0, 1 - s * s)) / Math.sqrt(1 - s0 * s0), foot = smooth(1, 1 - VULVA_OPEN.bulgeFoot, s);
+        const h = H * Math.min(1, sphere) * foot * perMetre;
+        pos[p * 3] += out.x * h; pos[p * 3 + 1] += out.y * h; pos[p * 3 + 2] += out.z * h;
+      }
+    }
+    bulgeNow = open > 0 ? VULVA_OPEN.bulge * Math.pow(open, VULVA_OPEN.bulgeEase) : 0;
     // the canal hangs from the lips' edge as shaped (rolled in), so the two meet
     for (let j = 0; j < M; j++) for (let c = 0; c < 3; c++) rim[j * 3 + c] = pos[base[j] * 3 + c];
     // the tube: its rings narrower inward at rest, as wide as the opening once it is open
@@ -755,7 +791,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       const dm = (a: number, c: number) => +(Math.hypot(rim[a * 3] - rim[c * 3], rim[a * 3 + 1] - rim[c * 3 + 1], rim[a * 3 + 2] - rim[c * 3 + 2]) / perMetre).toFixed(4);
       const wp = (j: number) => { const o = new THREE.Vector3(); mesh.getVertexPosition(base[j], o); return mesh.localToWorld(o); };
       const wd = (a: number, c: number) => +wp(a).distanceTo(wp(c)).toFixed(4);
-      const rimSize = { restAcross: dm(jl, jr), restAlong: dm(jb, jf), posedAcross: wd(jl, jr), posedAlong: wd(jb, jf), heldTo, legNear: legNear.length, blocker };
+      const rimSize = { restAcross: dm(jl, jr), restAlong: dm(jb, jf), posedAcross: wd(jl, jr), posedAlong: wd(jb, jf), heldTo, legNear: legNear.length, blocker, bulge: bulgeNow };
       return { rimSize, uScale, sScale, pelvisBoneGiven: pelvisBone, pelvis: body.skeleton.bones[pelvis]?.name, pelvisIndex: pelvis, restPos: bad(restPos), restNrm: bad(restNrm), rim: bad(rim), pos: bad(pos), tau: bad(tau), colQ: bad(colQ), body: bad((g.getAttribute('position') as THREE.BufferAttribute).array), O: O.toArray(), tA: tA.toArray(), nO: nO.toArray(), across: across.toArray(), perMetre, open };
     },
     get open() { return wantOpen; },
