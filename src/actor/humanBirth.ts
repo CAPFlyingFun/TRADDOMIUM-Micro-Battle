@@ -62,7 +62,7 @@ export const BIRTH_POSES: Readonly<Record<BirthStyle, BirthSpec>> = Object.freez
   apart: { spread: 18, spreadPerBump: 6, flex: 16, knee: 30, turnOut: 18, footFlat: true, spine: 6, chest: 2, neck: -4, leanBack: 0 },
   // (a deep squat as Joshua's references show it, 2026-10-31: low, knees wide and above her hips, shins down to her
   // feet under them, her back upright)
-  squat: { spread: 50, spreadPerBump: 6, flex: 118, knee: 150, turnOut: 30, footFlat: true, spine: 4, chest: 2, neck: -6, leanBack: 0, swing: true },
+  squat: { spread: 50, spreadPerBump: 6, flex: 118, knee: 140, turnOut: 30, footFlat: true, spine: 4, chest: 2, neck: -6, leanBack: 0, swing: true },
   recline: { spread: 80, spreadPerBump: 4, flex: 50, knee: 96, turnOut: 12, footFlat: false, spine: -2, chest: 10, neck: 26, leanBack: 40 },
 });
 

@@ -90,6 +90,11 @@ import { BIRTH_SEAT_FIELD, birthSeatField } from './birthSeat';
 import { BIRTH_WEIGHTS, createBirthWeights, type BirthWeights } from './birthWeights';
 import { BIRTH_ROOM_FIELD, createBirthRoom, type BirthRoom } from './birthRoom';
 import { BIRTH_NORMALS_FIELD, createBirthNormals, type BirthNormals } from './birthNormals';
+/** HER KNEES SMOOTHED AS POSED in a birth pose (Joshua, 2026-10-31: "the upper and lower legs at the knee... should remain
+ * separated, but appear merged"): her groin's smoothing (birthNormals.ts) run round each knee */
+const BIRTH_KNEES_FIELD = 'shape:birthKnees';
+/** GAME TUNING: all of it within `near` of a knee, none past `far` (metres); `passes` of `lambda` each */
+const KNEE_SMOOTH = Object.freeze({ near: 0.06, far: 0.12, passes: 60, lambda: 0.6, restore: 0 });
 import { DEFAULT_VULVA_KEEP } from './detailMaterials';
 import { attachJiggle, bellyTune, breastTune, createJiggleUniforms, feltAcceleration, restingMass, stepMass, type Mass } from './softBody';
 import { applyMilk, applyWomb, applyZeroRefine, babyAnchors, babyWeightState, chestAnchors, chestFieldWeights, groinAnchors, groinFieldWeights, loadMilk, milkAnchors, milkBalanceState, milkFieldWeights, milkState, MILK_PATH, babyFieldWeights, loadWomb, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, WOMB_PATH, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
@@ -492,6 +497,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let squatBack = 0;
   /** in SQUAT, how far her down-facing underside goes to where her pelvis would carry it (birthNormals.ts `pull`) */
   let squatPull = 0.9;
+  /** her knees smoothed as posed in a birth pose (BIRTH_KNEES_FIELD; a probe may turn it off) */
+  let birthKnees: BirthNormals | null = null, birthKneesOn = true, kneeRestore: number = KNEE_SMOOTH.restore;
   // the library outfit she last put on (her changes to it save as hers), and saved clothes waiting for their outfit to load
   let wornFrom: string | null = null;
   // ...and in his fabrics, put on as her outfit is dressed the first time
@@ -1202,6 +1209,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     out[BIRTH_SEAT_FIELD] = !birthSeatOn ? 0 : pose === 'recline' ? 1 : pose === 'squat' ? birthSeatSquat : 0;
     out[BIRTH_ROOM_FIELD] = isBirthPose(pose) && birthRoomOn ? 1 : 0;
     out[BIRTH_NORMALS_FIELD] = isBirthPose(pose) && birthNormalsOn ? 1 : 0;
+    out[BIRTH_KNEES_FIELD] = isBirthPose(pose) && birthKneesOn ? 1 : 0;
     // AUTO DEPTH: her belly deepened by as much as her babies need (baby.ts, `babiesInHer`), on her own DEPTH
     if (babyAutoDepth) out[DEPTH_FIELD] = (out[DEPTH_FIELD] ?? 0) + bodyShapeFieldWeights({ ...body, bellyDepth: babyAutoDepth }, b, bellyCurve)[DEPTH_FIELD];
     // her upper belly smoothed, by each belly key's own weight (zeroRefine.ts)
@@ -2904,14 +2912,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function keepBirthRoom(): void {
     const b = bodyOf(), sb = b ? shaped.find((x) => x.mesh === b.mesh) : undefined;
     if (!b || !sb || !model) return;
-    if (!isBirthPose(pose) || (!birthRoomOn && !birthNormalsOn)) { birthRoomFor = ''; return; }
-    const shapeKey = sb.fields.last.split('|').filter((k) => !k.startsWith(BIRTH_ROOM_FIELD) && !k.startsWith(BIRTH_NORMALS_FIELD)).join('|');
-    const sig = `${pose}|${JSON.stringify(birthTweak)}|${Math.round(bump)}|${birthRoomOn}|${birthNormalsOn}|${birthMaskOverride}|${shapeKey}`;
+    if (!isBirthPose(pose) || (!birthRoomOn && !birthNormalsOn && !birthKneesOn)) { birthRoomFor = ''; return; }
+    const shapeKey = sb.fields.last.split('|').filter((k) => !k.startsWith(BIRTH_ROOM_FIELD) && !k.startsWith(BIRTH_NORMALS_FIELD) && !k.startsWith(BIRTH_KNEES_FIELD)).join('|');
+    const sig = `${pose}|${JSON.stringify(birthTweak)}|${Math.round(bump)}|${birthRoomOn}|${birthNormalsOn}|${birthKneesOn}|${birthMaskOverride}|${shapeKey}`;
     if (sig === birthRoomFor) return;
     birthRoomFor = sig;
     // her shape without either of these first: each is worked out on her as she would be without it
     const bare = new Map(sb.fields.fields);
-    bare.delete(BIRTH_ROOM_FIELD); bare.delete(BIRTH_NORMALS_FIELD);
+    bare.delete(BIRTH_ROOM_FIELD); bare.delete(BIRTH_NORMALS_FIELD); bare.delete(BIRTH_KNEES_FIELD);
     sb.fields = { ...sb.fields, fields: bare, last: '' };
     applyLook();
     model.updateMatrixWorld(true);
@@ -2919,6 +2927,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const map = new Map(bare);
     if (birthRoom && birthRoomOn) map.set(BIRTH_ROOM_FIELD, birthRoom.compute(P));
     if (birthNormals && birthNormalsOn) map.set(BIRTH_NORMALS_FIELD, birthNormals.compute(P, N, pose === 'squat' ? birthFillSquat : pose === 'recline' ? birthFillRecline : 0, pose === 'squat' ? squatPull : 0));
+    if (birthKnees && birthKneesOn) map.set(BIRTH_KNEES_FIELD, birthKnees.compute(P, N));
     sb.fields = { ...sb.fields, fields: map, last: '' };
     applyLook();
   }
@@ -3330,6 +3339,20 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             vulva?.dispose();
             try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest, measure?.joints.pelvis, measure ? [measure.joints.hipL, measure.joints.hipR, measure.joints.kneeL, measure.joints.kneeR] : []); vulva?.setOpen(birthOpenPct / 100); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
             try { birthNormals = createBirthNormals(bm!, babyFrame.meshToRest, herTris, measure ? [measure.joints.hipL, measure.joints.hipR] : [], (i) => birthWeights?.maskOf(i) ?? 0, undefined /* the crease planes dented her belly: off (2026-10-31) */, measure?.joints.pelvis); } catch (error) { console.error('[sarahlab] her birth-pose normals could not be made', error); birthNormals = null; }
+            // each knee: where her thigh's skin hands over to her shin's (both carry it), in her rest frame
+            try {
+              const jt = measure?.joints, ga = bm!.geometry, si2 = ga.getAttribute('skinIndex'), sw2 = ga.getAttribute('skinWeight'), centres: THREE.Vector3[] = [], pairs: [number, number][] = [];
+              if (jt) for (const [hip, knee] of [[jt.hipL, jt.kneeL], [jt.hipR, jt.kneeR]] as const) {
+                const c2 = new THREE.Vector3(), v2 = new THREE.Vector3(); let wsum = 0;
+                for (let i = 0; i < si2.count; i++) {
+                  let wh = 0, wk = 0; for (let k = 0; k < 4; k++) { const b2 = si2.getComponent(i, k), w2 = sw2.getComponent(i, k); if (b2 === hip) wh += w2; if (b2 === knee) wk += w2; }
+                  const w = Math.min(wh, wk); if (w < 0.2) continue;
+                  v2.fromArray(sb.fields.basePos, i * 3).applyMatrix4(babyFrame.meshToRest); c2.addScaledVector(v2, w); wsum += w;
+                }
+                if (wsum > 0) { centres.push(c2.divideScalar(wsum)); pairs.push([hip, knee]); }
+              }
+              birthKnees = centres.length ? createBirthNormals(bm!, babyFrame.meshToRest, herTris, [], undefined, undefined, undefined, { centres, near: KNEE_SMOOTH.near, far: KNEE_SMOOTH.far, passes: KNEE_SMOOTH.passes, lambda: KNEE_SMOOTH.lambda, bones: pairs, restore: kneeRestore }) : null;
+            } catch (error) { console.error('[sarahlab] her knees could not be smoothed', error); birthKnees = null; }
             try { const jt = measure?.joints; birthRoom = jt ? createBirthRoom(bm!, babyFrame.meshToRest, herTris, jt.pelvis, jt.hipL, jt.hipR) : null; } catch (error) { console.error('[sarahlab] her birth-pose room could not be made', error); birthRoom = null; }
             try { const jt = measure?.joints; birthWeights = jt ? createBirthWeights(bm!, babyFrame.meshToRest, jt.pelvis, jt.hipL, jt.hipR, jt.kneeL, jt.kneeR, herTris) : null; } catch (error) { console.error('[sarahlab] her birth-pose weights could not be made', error); birthWeights = null; }
           }
@@ -3602,6 +3625,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           model.userData.weightPaint = m2; b.mesh.visible = false; if (vulva) vulva.mesh.visible = false;
           return true;
         },
+        birthKnees: (on: boolean) => { birthKneesOn = on; birthRoomFor = ''; applyLook(); return birthKnees?.watched ?? null; },
         squatPull: (v: number) => { squatPull = v; birthRoomFor = ''; applyLook(); return v; },
         squatBack: (v: number) => { squatBack = v; applyLook(); birthRoomFor = ''; return v; },
         birthFill: (squat: number, recline: number) => { birthFillSquat = squat; birthFillRecline = recline; birthRoomFor = ''; applyLook(); return true; },
@@ -3723,6 +3747,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           if (sk && measure) { const bones = sk.skeleton.bones, j = measure.joints, h = bones[j.hipL].getWorldPosition(new THREE.Vector3()).add(bones[j.hipR].getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5); hip = c.clone().sub(h).divideScalar(M).toArray().map((x) => +x.toFixed(4)); if (nrm.dot(c.clone().sub(h)) < 0) nrm.negate(); }
           return { points: vulva.bake.count, triangles: vulva.bake.index.length / 3, outline: vulva.bake.outline, missed: vulva.bake.missed, splitFromHips: hip, splitWorld: c.clone().divideScalar(M).toArray().map((x) => +x.toFixed(4)), fields: (() => { const b = bodyOf(), sh = b ? shaped.find((x) => x.mesh === b.mesh) : undefined; return sh ? { cleft: sh.fields.fields.has(BIRTH_CLEFT_FIELD), lips: sh.fields.fields.has(BIRTH_LIPS_FIELD), applied: sh.fields.last.split('|').filter((x) => /birth/i.test(x)) } : null; })(), faceYaw: +Math.atan2(nrm.x, nrm.z).toFixed(3), facePitch: +Math.asin(Math.max(-1, Math.min(1, nrm.y))).toFixed(3) }; },
         // the view aimed at a point off the middle of her hips (metres, world: across, up, forward), from a yaw, pitch and distance (cm)
+        // the view aimed at her left knee joint (yaw, pitch, distance in cm), for a close look at the bend
+        aimKnee: (yaw: number, pitch: number, distance: number) => {
+          const sk = model && findSkinnedMesh(model);
+          if (!sk || !measure) return null;
+          const k = sk.skeleton.bones[measure.joints.kneeL].getWorldPosition(new THREE.Vector3());
+          orbit.yaw = yaw; orbit.pitch = pitch; orbit.distance = distance; orbit.target.copy(k); turning = false;
+          return orbit.target.toArray().map((x) => +(x / M).toFixed(3));
+        },
         aim: (yaw: number, pitch: number, distance: number, dx = 0, dy = 0, dz = 0) => {
           const sk = model && findSkinnedMesh(model);
           if (!sk || !measure) return null;

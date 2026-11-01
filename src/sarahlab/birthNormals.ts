@@ -73,7 +73,21 @@ export interface BirthNormals {
 
 const smooth = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
 
-export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix4, indices: ArrayLike<number>, thighBones: readonly number[] = [], layerOf?: (i: number) => number, crease?: { hips: readonly [number, number]; knees: readonly [number, number]; pelvis: number; spine: number }, pelvisBone?: number): BirthNormals | null {
+/**
+ * Another place to smooth her posed skin than her groin (Joshua, 2026-10-31: her knees, "they should remain separated,
+ * but appear merged"): round each centre (her rest frame, metres), all of it within `near`, none past `far`.
+ */
+export interface BirthBand {
+  readonly centres: readonly THREE.Vector3[]; readonly near: number; readonly far: number; readonly passes?: number; readonly lambda?: number;
+  /**
+   * each centre's two bones (the one above it, the one below) to keep her thickness round: every point there kept at
+   * least as far from its own bone's line as it is at rest (`restore` of the way, 0..1), so a deep bend does not
+   * collapse it (Joshua, 2026-10-31: her knees)
+   */
+  readonly bones?: readonly (readonly [number, number])[]; readonly restore?: number;
+}
+
+export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix4, indices: ArrayLike<number>, thighBones: readonly number[] = [], layerOf?: (i: number) => number, crease?: { hips: readonly [number, number]; knees: readonly [number, number]; pelvis: number; spine: number }, pelvisBone?: number, band?: BirthBand): BirthNormals | null {
   const g = mesh.geometry as THREE.BufferGeometry;
   const si = g.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, sw = g.getAttribute('skinWeight') as THREE.BufferAttribute | undefined, pa = g.getAttribute('position');
   if (!si || !sw || !pa) return null;
@@ -85,7 +99,13 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   const mid = new THREE.Vector3(0, c.y - 0.047 * Math.cos(m), c.z + 0.047 * Math.sin(m));
   // the band, and how much of the fix each of its points takes
   const share = new Float32Array(n), inBand = new Uint8Array(n);
-  for (let i = 0; i < n; i++) {
+  if (band) for (let i = 0; i < n; i++) {
+    // (another band: round each of its centres, all of it within `near`, none past `far`)
+    v.fromArray(rest, i * 3);
+    let s = 0; for (const ctr of band.centres) s = Math.max(s, smooth(band.far, band.near, v.distanceTo(ctr)));
+    if (s > 0) { share[i] = s; inBand[i] = 1; }
+  }
+  else for (let i = 0; i < n; i++) {
     v.fromArray(rest, i * 3);
     if (v.y > mid.y + B.above + 0.06) continue;
     const s = smooth(B.far, B.near, v.distanceTo(mid)) * smooth(mid.y + B.above + 0.06, mid.y + B.above, v.y);
@@ -127,6 +147,10 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   };
   const foldK = zoneShare(B.fold), underK = zoneShare(B.under), pullK = zoneShare(B.underPull), topK = zoneShare(B.squatTop);
   const mrest = new Float32Array(n * 3);
+  /** a vertex's weight on one bone */
+  const boneW = (i: number, bone: number) => { let w = 0; for (let c = 0; c < 4; c++) if (si.getComponent(i, c) === bone) w += sw.getComponent(i, c); return w; };
+  /** metres per geometry unit */
+  const mPer = new THREE.Vector3(1, 0, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(toRest)).length();
   let pierced = 0, blowWorst = 0, blowCount = 0, folded = 0;
   const expected: number[] = [];
   const perMetre = 1 / new THREE.Vector3(1, 0, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(toRest)).length();
@@ -364,7 +388,7 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
       pierced = 0;
       unPierce();
       layCrease();
-      for (let pass = 0; pass < B.passes; pass++) {
+      for (let pass = 0; pass < (band?.passes ?? B.passes); pass++) {
         sumN.fill(0); cntN.fill(0);
         for (let t = 0; t < tris.length; t += 3) for (let q = 0; q < 3; q++) {
           const k = key[tris[t + q]];
@@ -372,7 +396,7 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
         }
         for (let k = 0; k < K; k++) {
           if (!cntN[k] || ks[k] <= 0) continue;
-          const l = B.lambda * ks[k];
+          const l = (band?.lambda ?? B.lambda) * ks[k];
           for (let c = 0; c < 3; c++) kp[k * 3 + c] += l * (sumN[k * 3 + c] / cntN[k] - kp[k * 3 + c]);
         }
       }
@@ -395,10 +419,10 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
           }
         }
       };
-      smoothZone(foldK, B.fold.passes, B.fold.lambda);
+      if (!band) smoothZone(foldK, B.fold.passes, B.fold.lambda);
       // (in SQUAT, the strip where her underside's curve meets the skin beside her vulva smoothed into both -- Joshua,
       // 2026-10-31: "smooth the closest section on top... fade into the underneath and vulva")
-      if (pull > 0) smoothZone(topK, B.squatTop.passes, B.squatTop.lambda);
+      if (pull > 0 && !band) smoothZone(topK, B.squatTop.passes, B.squatTop.lambda);
       // THE HOLLOWS UNDER HER FILLED (Joshua, 2026-10-31, of SQUAT from in front and below: "it pinches right in the
       // middle and maybe also is bowed inwards instead of outwards"). Her middle stays with her pelvis and each buttock's
       // underside goes up with its thigh, which pulls the skin between into two hollows; smoothing only flattens them
@@ -441,6 +465,51 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
             if (out > 0) { kp[k * 3] += f * (out * nx + U.even * (lx - out * nx)); kp[k * 3 + 1] += f * (out * ny + U.even * (ly - out * ny)); kp[k * 3 + 2] += f * (out * nz + U.even * (lz - out * nz)); }
             else { kp[k * 3] += f * U.even * (lx - out * nx); kp[k * 3 + 1] += f * U.even * (ly - out * ny); kp[k * 3 + 2] += f * U.even * (lz - out * nz); }
           }
+        }
+      }
+      // HER THICKNESS KEPT ROUND A BENT JOINT (band.bones): skinned as a blend of two bones' turns her skin there falls
+      // in toward the joint as it bends (the kneecap goes flat); each point is set back out to its rest distance from
+      // its own bone's line, the one that carries more of it
+      if (band?.bones && band.restore && band.restore > 0) {
+        const toG = new THREE.Matrix4().copy(toRest).invert(), linG = new THREE.Matrix3().setFromMatrix4(toG);
+        band.centres.forEach((ctr, ci) => {
+          const [up, lo] = band.bones![ci]; if (!S[up] || !S[lo]) return;
+          const cg = ctr.clone().applyMatrix4(toG);
+          // each bone's way from the joint at rest: the middle of the skin it alone carries near the joint
+          const mUp = new THREE.Vector3(), mLo = new THREE.Vector3(); let nUp = 0, nLo = 0;
+          for (const i of used) {
+            const wu = boneW(i, up), wl = boneW(i, lo); v.set(mrest[i * 3], mrest[i * 3 + 1], mrest[i * 3 + 2]);
+            if (v.distanceTo(cg) > band.far * 2 / mPer) continue;
+            if (wu > 0.9) { mUp.add(v); nUp++; } else if (wl > 0.9) { mLo.add(v); nLo++; }
+          }
+          if (!nUp || !nLo) return;
+          const dUp = mUp.divideScalar(nUp).sub(cg).normalize(), dLo = mLo.divideScalar(nLo).sub(cg).normalize();
+          const jp = cg.clone().applyMatrix4(S[up]), pUp = dUp.clone().applyMatrix3(new THREE.Matrix3().setFromMatrix4(S[up])).normalize(), pLo = dLo.clone().applyMatrix3(new THREE.Matrix3().setFromMatrix4(S[lo])).normalize();
+          void linG;
+          const radius = (p: THREE.Vector3, o: THREE.Vector3, d: THREE.Vector3, out?: THREE.Vector3) => { const t = Math.max(0, a.subVectors(p, o).dot(d)); b.copy(o).addScaledVector(d, t); if (out) out.copy(b); return p.distanceTo(b); };
+          const foot = new THREE.Vector3(), pk = new THREE.Vector3();
+          // (only the outside of the bend -- the kneecap's side -- falls in; inside it, the two sides fold together)
+          const outside = pUp.clone().add(pLo).negate().normalize();
+          const done = new Uint8Array(K);
+          for (const i of used) {
+            const k = key[i]; if (done[k] || ks[k] <= 0) continue; done[k] = 1;
+            const wu = boneW(i, up), wl = boneW(i, lo); if (wu + wl < 0.5) continue;
+            v.set(mrest[i * 3], mrest[i * 3 + 1], mrest[i * 3 + 2]); if (v.distanceTo(cg) > band.far / mPer) continue;
+            const own = wu >= wl, r0 = radius(v, cg, own ? dUp : dLo);
+            pk.set(kp[k * 3], kp[k * 3 + 1], kp[k * 3 + 2]);
+            const r1 = radius(pk, jp, own ? pUp : pLo, foot);
+            if (r1 >= r0 || r1 < 1e-9) continue;
+            const side = a.subVectors(pk, jp).normalize().dot(outside);
+            if (side <= 0) continue;
+            const f = band.restore! * ks[k] * smooth(0, 0.5, side) * (r0 - r1) / r1;
+            kp[k * 3] += (pk.x - foot.x) * f; kp[k * 3 + 1] += (pk.y - foot.y) * f; kp[k * 3 + 2] += (pk.z - foot.z) * f;
+          }
+        });
+        // (and smoothed a little after, so the set-back points lie together)
+        for (let pass = 0; pass < 6; pass++) {
+          sumN.fill(0); cntN.fill(0);
+          for (let t = 0; t < tris.length; t += 3) for (let q = 0; q < 3; q++) { const k = key[tris[t + q]]; for (let r = 1; r < 3; r++) { const o = key[tris[t + ((q + r) % 3)]]; sumN[k * 3] += kp[o * 3]; sumN[k * 3 + 1] += kp[o * 3 + 1]; sumN[k * 3 + 2] += kp[o * 3 + 2]; cntN[k]++; } }
+          for (let k = 0; k < K; k++) { if (!cntN[k] || ks[k] <= 0) continue; const l = 0.5 * ks[k]; for (let c = 0; c < 3; c++) kp[k * 3 + c] += l * (sumN[k * 3 + c] / cntN[k] - kp[k * 3 + c]); }
         }
       }
       ironFolds();
