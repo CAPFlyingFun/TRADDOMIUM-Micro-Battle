@@ -67,6 +67,22 @@ export const BIRTH_WEIGHTS = Object.freeze({
   blurNear: 0.12, blurFar: 0.2, blurPasses: 0, blurRate: 0.5,
   /** and only below her navel (metres above the hip joints): her chest and arms are no thigh's */
   above: 0.2,
+  /**
+   * HER HIPS RESKINNED (Joshua, 2026-11-01, marking her regions on his reference: legs, and her pubic area, vulva,
+   * between her legs and her buttock cheeks; "the bones are probably correct, but the skin doesn't match"). Meshy gave
+   * nearly all of each buttock to its thigh and ran the thigh's weight up beside her vulva with a hard edge; lifting one
+   * leg swung the whole buttock with it. Instead of masking that, her weights there are set again: torso (her pelvis)
+   * on one side of each leg opening, leg (its thigh) on the other, handed over across a soft band. Each opening is the
+   * plane through three points (from the middle of her vulva, metres; x out to her side): beside her crotch
+   * `openCrotch`, the top of the groin crease in front `openFront`, and the fold under her buttock behind `openBack`;
+   * the band is `bandFront` either side in front widening to `bandBack` behind; then `diffuse` passes even it over
+   * her skin. Her standing shape is untouched (weights only move skin as she bends).
+   */
+  reskin: true,
+  openCrotch: [0.065, 0, 0] as const, openFront: [0.13, 0.11, 0.04] as const, openBack: [0.09, -0.03, -0.12] as const,
+  bandFront: 0.05, bandBack: 0.1, diffuse: 150,
+  /** how far above the middle of her vulva the reskin reaches (metres): her waist, past the tops of her buttocks */
+  reskinUp: 0.3,
 });
 
 const smooth = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -121,6 +137,46 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   for (let i = 0; i < n; i++) for (let c = 0; c < 4; c++) { ownI[i * 4 + c] = si.getComponent(i, c); ownW[i * 4 + c] = sw.getComponent(i, c); }
   // the mask, per side, for points weighted to that thigh at all
   const mask = new Float32Array(n * 2), maskBack = new Float32Array(n * 2), v = new THREE.Vector3(), d = new THREE.Vector3();
+  // ---- the reskin: each point's side and how much of it is leg (0 torso .. 1 leg), in the region it reaches
+  const legOf = new Float32Array(n), sideOf = new Int8Array(n), inReskin = new Uint8Array(n);
+  if (B.reskin) {
+    const openings = [0, 1].map((side) => {
+      const sx = Math.sign(hip[side].x) || (side === 0 ? 1 : -1);
+      const pt = (o: readonly number[]) => new THREE.Vector3(crotch.x + sx * o[0], crotch.y + o[1], crotch.z + o[2]);
+      const A = pt(B.openCrotch), Bf = pt(B.openFront), C = pt(B.openBack);
+      const nrm = new THREE.Vector3().subVectors(Bf, A).cross(new THREE.Vector3().subVectors(C, A)).normalize();
+      if (new THREE.Vector3().subVectors(knee[side], A).dot(nrm) < 0) nrm.negate();
+      return { sx, A, nrm };
+    });
+    const kneeY = Math.max(knee[0].y, knee[1].y);
+    for (let i = 0; i < n; i++) {
+      v.fromArray(restAll, i * 3);
+      if (v.y > crotch.y + B.reskinUp || v.y < kneeY + 0.08) continue;
+      // only skin her pelvis or a thigh carries
+      let pw = 0; for (let c = 0; c < 4; c++) { const b = ownI[i * 4 + c]; if (b === pelvis || b === thighs[0] || b === thighs[1]) pw += ownW[i * 4 + c]; }
+      if (pw < 0.05) continue;
+      const side = v.x * openings[0].sx >= 0 ? 0 : 1, o = openings[side];
+      const dist = new THREE.Vector3().subVectors(v, o.A).dot(o.nrm);
+      const band = B.bandFront + (B.bandBack - B.bandFront) * smooth(crotch.z, crotch.z - 0.1, v.z);
+      legOf[i] = smooth(-band, band, dist); sideOf[i] = side; inReskin[i] = 1;
+    }
+    // evened over her skin (by place: a seam's copies are one point), so the handover follows her surface
+    if (indices && B.diffuse > 0) {
+      const km = new Map<string, number>(), kOf = new Int32Array(n).fill(-1);
+      for (let i = 0; i < n; i++) if (inReskin[i]) { const k = `${Math.round(pa.getX(i) * 1e4)},${Math.round(pa.getY(i) * 1e4)},${Math.round(pa.getZ(i) * 1e4)}`; let q = km.get(k); if (q === undefined) { q = km.size; km.set(k, q); } kOf[i] = q; }
+      const KR = km.size, val = new Float32Array(KR), cnt = new Float32Array(KR), fixed = new Uint8Array(KR);
+      for (let i = 0; i < n; i++) if (kOf[i] >= 0) { val[kOf[i]] += legOf[i]; cnt[kOf[i]]++; }
+      for (let k = 0; k < KR; k++) { val[k] /= cnt[k] || 1; if (val[k] <= 0.001 || val[k] >= 0.999) fixed[k] = 1; }
+      const nb: number[][] = Array.from({ length: KR }, () => []);
+      for (let t = 0; t + 2 < indices.length; t += 3) for (let q = 0; q < 3; q++) { const a = kOf[indices[t + q]], b = kOf[indices[t + (q + 1) % 3]]; if (a >= 0 && b >= 0 && a !== b) { nb[a].push(b); nb[b].push(a); } }
+      const next = new Float32Array(KR);
+      for (let pass = 0; pass < B.diffuse; pass++) {
+        for (let k = 0; k < KR; k++) { if (fixed[k] || !nb[k].length) { next[k] = val[k]; continue; } let m = 0; for (const o of nb[k]) m += val[o]; next[k] = 0.5 * val[k] + 0.5 * (m / nb[k].length); }
+        val.set(next);
+      }
+      for (let i = 0; i < n; i++) if (kOf[i] >= 0) legOf[i] = val[kOf[i]];
+    }
+  }
   let touched = 0;
   for (let i = 0; i < n; i++) {
     v.set(pa.getX(i), pa.getY(i), pa.getZ(i)).applyMatrix4(toRest);
@@ -184,13 +240,29 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   return {
     touched,
     debug: { hip: hip.map((h) => h.toArray().map((x) => +x.toFixed(3))), knee: knee.map((h) => h.toArray().map((x) => +x.toFixed(3))), crotch: crotch.toArray().map((x) => +x.toFixed(3)), planes },
-    maskOf: (i: number) => Math.max(mask[i * 2] + maskBack[i * 2] * Math.max(0, backNow), mask[i * 2 + 1] + maskBack[i * 2 + 1] * Math.max(0, backNow)),
+    maskOf: (i: number) => B.reskin ? (inReskin[i] ? 1 - legOf[i] : 0) : Math.max(mask[i * 2] + maskBack[i * 2] * Math.max(0, backNow), mask[i * 2 + 1] + maskBack[i * 2 + 1] * Math.max(0, backNow)),
     apply(share: number, back: number = B.backShare): boolean {
       share = Math.max(0, Math.min(1, share)); back = Math.max(0, Math.min(1, back));
       if (share === shareNow && back === backNow) return false;
       shareNow = share; backNow = back;
       const w = [0, 0, 0, 0], ix = [0, 0, 0, 0];
       for (let i = 0; i < n; i++) {
+        if (B.reskin) {
+          if (!inReskin[i]) continue;
+          // her pelvis's and thighs' share of the point, split again: leg to this side's thigh, the rest to her pelvis;
+          // any other bone's weight kept; blended from her own by `share`
+          const acc = new Map<number, number>();
+          let pw = 0;
+          for (let c = 0; c < 4; c++) { const b = ownI[i * 4 + c], wv = ownW[i * 4 + c]; if (wv <= 0) continue; if (b === pelvis || b === thighs[0] || b === thighs[1]) pw += wv; else acc.set(b, (acc.get(b) ?? 0) + wv); }
+          const target = new Map(acc), th = thighs[sideOf[i]];
+          target.set(th, (target.get(th) ?? 0) + pw * legOf[i]); target.set(pelvis, (target.get(pelvis) ?? 0) + pw * (1 - legOf[i]));
+          const mix = new Map<number, number>();
+          for (let c = 0; c < 4; c++) { const b = ownI[i * 4 + c], wv = ownW[i * 4 + c]; if (wv > 0) mix.set(b, (mix.get(b) ?? 0) + wv * (1 - share)); }
+          for (const [b, wv] of target) mix.set(b, (mix.get(b) ?? 0) + wv * share);
+          const top = [...mix].filter(([, wv]) => wv > 1e-5).sort((a, b) => b[1] - a[1]).slice(0, 4), sum = top.reduce((m, [, wv]) => m + wv, 0) || 1;
+          for (let c = 0; c < 4; c++) { const e = top[c]; I[i * 4 + c] = e ? e[0] : 0; const wv = e ? e[1] / sum : 0; W[i * 4 + c] = normalized && scale > 1 ? Math.round(wv * scale) : wv; }
+          continue;
+        }
         const mL = mask[i * 2] + maskBack[i * 2] * back, mR = mask[i * 2 + 1] + maskBack[i * 2 + 1] * back;
         if (mL <= 0 && mR <= 0) { if (keyOf[i] >= 0) for (let c = 0; c < 4; c++) { I[i * 4 + c] = ownI[i * 4 + c]; W[i * 4 + c] = normalized && scale > 1 ? Math.round(ownW[i * 4 + c] * scale) : ownW[i * 4 + c]; } continue; }
         let moved = 0, pel = -1, low = 0;

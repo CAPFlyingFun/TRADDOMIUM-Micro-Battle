@@ -52,6 +52,8 @@ export interface BirthSpec {
    * side while it hangs and then brought forward (absent: false)
    */
   readonly swing?: boolean;
+  /** (a test) only her left leg posed, her right hanging as standing (Joshua, 2026-11-01: "try lifting one leg vs both") */
+  readonly oneLeg?: boolean;
 }
 
 /**
@@ -126,7 +128,8 @@ export function poseBirth(measure: HumanMeasure, bind: readonly BindJoint[], pos
     write(out[i + 2], ankle, s.footFlat ? qMul(qConj(qMul(hipQ, kneeQ)), ry(side * s.turnOut * DEG)) : rx(-10 * DEG));
   };
   leg(4, j.hipL, j.kneeL, j.ankleL, L);
-  leg(7, j.hipR, j.kneeR, j.ankleR, -L);
+  if (s.oneLeg) { write(out[7], j.hipR, rx(0)); write(out[8], j.kneeR, rx(0)); write(out[9], j.ankleR, rx(0)); }
+  else leg(7, j.hipR, j.kneeR, j.ankleR, -L);
   if (out.length !== BIRTH_TURNS) out.length = BIRTH_TURNS;
   return out;
 }
