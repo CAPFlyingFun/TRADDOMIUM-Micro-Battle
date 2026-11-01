@@ -497,6 +497,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let squatBack = 0;
   /** in SQUAT, how far her down-facing underside goes to where her pelvis would carry it (birthNormals.ts `pull`) */
   let squatPull = 0.9;
+  /** the hip's half-turn chosen by pose (a probe that sets it takes over) */
+  let halfByPose = true;
   /** her knees smoothed as posed in a birth pose (BIRTH_KNEES_FIELD; a probe may turn it off) */
   let birthKnees: BirthNormals | null = null, birthKneesOn = true, kneeRestore: number = KNEE_SMOOTH.restore;
   // the library outfit she last put on (her changes to it save as hers), and saved clothes waiting for their outfit to load
@@ -2926,6 +2928,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const g = b.mesh.geometry, P = (g.getAttribute('position') as THREE.BufferAttribute).array as Float32Array, N = (g.getAttribute('normal') as THREE.BufferAttribute).array as Float32Array;
     const map = new Map(bare);
     if (birthRoom && birthRoomOn) map.set(BIRTH_ROOM_FIELD, birthRoom.compute(P));
+    // (the hip's half-turn helps RECLINE; in SQUAT's deeper bend it cracked her: off there)
+    if (birthNormals && halfByPose) birthNormals.setHalf(pose !== 'squat');
     if (birthNormals && birthNormalsOn) map.set(BIRTH_NORMALS_FIELD, birthNormals.compute(P, N, pose === 'squat' ? birthFillSquat : pose === 'recline' ? birthFillRecline : 0, pose === 'squat' ? squatPull : 0));
     // her knees worked out on her shape WITH her groin's smoothing on (the two bands meet down her thighs: worked out
     // apart and added, the skin both reach was moved twice)
@@ -3346,7 +3350,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             // and the area rebuilt finer, from her own skin, to be able to open (vulvaMesh.ts)
             vulva?.dispose();
             try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest, measure?.joints.pelvis, measure ? [measure.joints.hipL, measure.joints.hipR, measure.joints.kneeL, measure.joints.kneeR] : []); vulva?.setOpen(birthOpenPct / 100); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
-            try { birthNormals = createBirthNormals(bm!, babyFrame.meshToRest, herTris, measure ? [measure.joints.hipL, measure.joints.hipR] : [], (i) => birthWeights?.maskOf(i) ?? 0, undefined /* the crease planes dented her belly: off (2026-10-31) */, measure?.joints.pelvis); } catch (error) { console.error('[sarahlab] her birth-pose normals could not be made', error); birthNormals = null; }
+            try { birthNormals = createBirthNormals(bm!, babyFrame.meshToRest, herTris, measure ? [measure.joints.hipL, measure.joints.hipR] : [], (i) => birthWeights?.maskOf(i) ?? 0, undefined /* the crease planes dented her belly: off (2026-10-31) */, measure?.joints.pelvis, undefined, measure ? [measure.joints.hipL, measure.joints.hipR] : []); } catch (error) { console.error('[sarahlab] her birth-pose normals could not be made', error); birthNormals = null; }
             // each knee: where her thigh's skin hands over to her shin's (both carry it), in her rest frame
             try {
               const jt = measure?.joints, ga = bm!.geometry, si2 = ga.getAttribute('skinIndex'), sw2 = ga.getAttribute('skinWeight'), centres: THREE.Vector3[] = [], pairs: [number, number][] = [];
@@ -3666,6 +3670,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           model.userData.weightPaint = m2; b.mesh.visible = false; if (vulva) vulva.mesh.visible = false;
           return true;
         },
+        birthHalf: (on: boolean) => { halfByPose = false; birthNormals?.setHalf(on); birthRoomFor = ''; applyLook(); return birthNormals?.halfBend ?? null; },
         birthSeam: (on: boolean) => { birthNormals?.setSeam(on); birthRoomFor = ''; applyLook(); return { first: birthNormals?.seamFirst, left: birthNormals?.seamLeft }; },
         birthKnees: (on: boolean) => { birthKneesOn = on; birthRoomFor = ''; applyLook(); return birthKnees?.watched ?? null; },
         squatPull: (v: number) => { squatPull = v; birthRoomFor = ''; applyLook(); return v; },

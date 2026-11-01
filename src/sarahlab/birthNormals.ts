@@ -19,6 +19,8 @@ export const BIRTH_NORMALS = Object.freeze({
   /** her posed skin there smoothed too (Joshua, 2026-10-30: "smooth under the hips and buttocks... Add more
    * smoothening"): how many passes, and how far each moves a point toward its neighbours' middle (0..1) */
   passes: 30, lambda: 0.6,
+  /** the hip's half-turn (see `compute`): on, faded in from `from` to `full` degrees of the hip's bend, `share` of it */
+  half: Object.freeze({ on: true, from: 45, full: 80, share: 1 }),
   /** the gluteal fold's own smoothing, after it: `passes` more, each `lambda` of the way, over her lower buttocks off
    * her middle -- behind the middle of her vulva from `behindFrom` (all by `behindFull`) to `behindTo`, below `upTo`
    * (all by `upFull`) and above `downTo`, out from her middle from `midFrom` (all by `midFull`) to `sideTo` (all
@@ -73,6 +75,10 @@ export interface BirthNormals {
   /** creases left in the seam under her after its ironing */
   readonly seamLeft: number;
   readonly seamFirst: number;
+  /** (debug) each hip's bend, degrees, at the last compute */
+  readonly halfBend: number[];
+  /** the hip's half-turn on or off (a probe compares) */
+  setHalf(on: boolean): void;
   /** the seam's ironing on or off (a probe compares) */
   setSeam(on: boolean): void;
   /** (debug) where the last compute meant each point to be drawn, posed: vertex, x, y, z */
@@ -95,7 +101,7 @@ export interface BirthBand {
   readonly bones?: readonly (readonly [number, number])[]; readonly restore?: number;
 }
 
-export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix4, indices: ArrayLike<number>, thighBones: readonly number[] = [], layerOf?: (i: number) => number, crease?: { hips: readonly [number, number]; knees: readonly [number, number]; pelvis: number; spine: number }, pelvisBone?: number, band?: BirthBand): BirthNormals | null {
+export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix4, indices: ArrayLike<number>, thighBones: readonly number[] = [], layerOf?: (i: number) => number, crease?: { hips: readonly [number, number]; knees: readonly [number, number]; pelvis: number; spine: number }, pelvisBone?: number, band?: BirthBand, hipBones: readonly number[] = []): BirthNormals | null {
   const g = mesh.geometry as THREE.BufferGeometry;
   const si = g.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, sw = g.getAttribute('skinWeight') as THREE.BufferAttribute | undefined, pa = g.getAttribute('position');
   if (!si || !sw || !pa) return null;
@@ -159,6 +165,8 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   const boneW = (i: number, bone: number) => { let w = 0; for (let c = 0; c < 4; c++) if (si.getComponent(i, c) === bone) w += sw.getComponent(i, c); return w; };
   /** metres per geometry unit */
   const mPer = new THREE.Vector3(1, 0, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(toRest)).length();
+  const halfBend: number[] = [];
+  let halfOn = true;
   let pierced = 0, blowWorst = 0, blowCount = 0, folded = 0, seamLeft = 0, seamOn = false, seamFirst = 0;
   const expected: number[] = [];
   const perMetre = 1 / new THREE.Vector3(1, 0, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(toRest)).length();
@@ -176,6 +184,8 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
     get folded() { return folded; },
     get seamLeft() { return seamLeft; },
     get seamFirst() { return seamFirst; },
+    halfBend,
+    setHalf(on: boolean) { halfOn = on; },
     setSeam(on: boolean) { seamOn = on; },
     expected,
     compute(pos, nrm, fill = 0, pull = 0) {
@@ -203,6 +213,45 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
       for (const i of used) { const k = key[i]; kp[k * 3] += posed[i * 3]; kp[k * 3 + 1] += posed[i * 3 + 1]; kp[k * 3 + 2] += posed[i * 3 + 2]; kc[k]++; ks[k] = Math.max(ks[k], share[i]); }
       for (let k = 0; k < K; k++) { kp[k * 3] /= kc[k]; kp[k * 3 + 1] /= kc[k]; kp[k * 3 + 2] /= kc[k]; }
       const before = Float64Array.from(kp), sumN = new Float64Array(K * 3), cntN = new Float64Array(K);
+      // THE HIP'S HALF-TURN (Joshua, 2026-11-01: "the legs are still cutting into the torso"; his idea, a new skin faded
+      // over the area as she squats). Skin her pelvis and a thigh share is skinned by averaging the two bones' moves,
+      // and the average of two turns is a shorter reach than either: at a deeply bent hip that skin falls in toward the
+      // joint and her thigh's skin passes through her bottom. Turned instead by the turn HALFWAY between the two (as a
+      // game rig's helper joint does) about her hip joint, it keeps its reach and wraps round the hip. Faded in with
+      // the hip's bend (from `half.from` to `half.full` degrees), so a gentle bend is as it was.
+      halfBend.length = 0;
+      if (pelvisBone !== undefined && hipBones.length && B.half.on && halfOn) {
+        const Sp = S[pelvisBone], qp = new THREE.Quaternion(), sp = new THREE.Vector3(), tp = new THREE.Vector3(), qt = new THREE.Quaternion(), st = new THREE.Vector3(), tt = new THREE.Vector3();
+        Sp.decompose(tp, qp, sp);
+        for (const hb of hipBones) {
+          const St = S[hb]; if (!St) continue;
+          St.decompose(tt, qt, st);
+          // her hip joint in her geometry, and where each bone carries it
+          const jg = new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().multiplyMatrices(mesh.bindMatrixInverse, new THREE.Matrix4().copy(mesh.skeleton.boneInverses[hb]).invert()));
+          const jp = jg.clone().applyMatrix4(Sp), jt = jg.clone().applyMatrix4(St), jm = jp.clone().lerp(jt, 0.5);
+          const bend = (2 * Math.acos(Math.min(1, Math.abs(qp.dot(qt)))) * 180) / Math.PI, fade = smooth(B.half.from, B.half.full, bend);
+          halfBend.push(+bend.toFixed(1));
+          if (fade <= 0) continue;
+          const qh = new THREE.Quaternion(), sh = new THREE.Vector3(), done = new Uint8Array(K), w2 = new THREE.Vector3();
+          for (const i of used) {
+            const k = key[i]; if (done[k]) continue;
+            let wp = 0, wt = 0; for (let c = 0; c < 4; c++) { const b0 = si.getComponent(i, c), w0 = sw.getComponent(i, c); if (b0 === pelvisBone) wp += w0; else if (b0 === hb) wt += w0; }
+            if (wp <= 0 || wt <= 0 || wp + wt < 0.25) continue;
+            done[k] = 1;
+            const f = wt / (wp + wt);
+            qh.slerpQuaternions(qp, qt, f); sh.lerpVectors(sp, st, f);
+            // the shared part turned the half-turn about the joint, the rest of her weights as they were
+            v.set(mrest[i * 3], mrest[i * 3 + 1], mrest[i * 3 + 2]).sub(jg).multiply(sh).applyQuaternion(qh).add(w2.copy(jp).lerp(jt, f));
+            const pair = wp + wt;
+            const lbsPair = new THREE.Vector3(mrest[i * 3], mrest[i * 3 + 1], mrest[i * 3 + 2]).applyMatrix4(Sp).multiplyScalar(wp / pair)
+              .add(new THREE.Vector3(mrest[i * 3], mrest[i * 3 + 1], mrest[i * 3 + 2]).applyMatrix4(St).multiplyScalar(wt / pair));
+            // (eased in by how much of the point the pair carries: no edge where it starts)
+            const amt = fade * B.half.share * pair * smooth(0.25, 0.6, pair);
+            kp[k * 3] += amt * (v.x - lbsPair.x); kp[k * 3 + 1] += amt * (v.y - lbsPair.y); kp[k * 3 + 2] += amt * (v.z - lbsPair.z);
+          }
+          void jm;
+        }
+      }
       // HER UNDERSIDE ROUNDED (Joshua, 2026-10-31, SQUAT: "it pinches right in the middle and maybe also is bowed inwards
       // instead of outwards"). Each buttock's underside goes with its thigh, which in a deep squat draws it forward into
       // a hollow either side of her middle; carried by her pelvis instead it hangs round, as in his references, but
