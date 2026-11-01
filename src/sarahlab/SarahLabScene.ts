@@ -81,7 +81,7 @@ import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields,
 import { dropIdleMorphs } from '../view/morphPrune';
 import { BIRTH_CLEFT_FIELD, BIRTH_LIPS_FIELD, birthAreaCentre, birthAreaFields, LIPS_COVERED, patchBirthShade } from './birthArea';
 import { BIRTH_POSES, poseBirth, type BirthSpec } from '../actor/humanBirth';
-import { AUTO_LIES, BABIES_NAME, BABY_MODEL, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
+import { AUTO_LIES, BABIES_NAME, BABY_MODEL, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, wombFromSkin, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { setPush, jiggleOf as jiggleOfMesh } from './softBody';
 import { createVulvaPatch, VULVA_OPEN, type VulvaPatch } from './vulvaMesh';
@@ -1313,6 +1313,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // her rebuilt birth area drawn as her own skin under what she wears (painted leggings and all), bare where she is not
     vulva?.setDressedLips(fabric?.vulvaKeep() ?? DEFAULT_VULVA_KEEP);
     vulva?.setDressed(vulvaDressed(view));
+    layBalloonWomb();
     layCrease();
     fabric?.sync();
     // her shape may have changed: the cleavage bridge chooses its ends again
@@ -2860,6 +2861,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     }
     if (babyHolder) babyHolder.visible = on;
     ghost(on && !!babyHolder);
+    vulva?.seeWomb(on && !!babyHolder);
     placeBaby();
   }
   function dropBabyHolder(): void {
@@ -2877,6 +2879,22 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * Her belly's skin as drawn now (her shape fields and morphs, not her pose), in her rest metres: the front of her belly
    * and its sides, where her womb is. The candidates are found once on her rest shape, generously.
    */
+  /**
+   * The balloon's top is her womb (vulvaMesh.ts setWomb): as her baby's is laid round the sac while there is one
+   * (`babyWomb`), else as her belly holds one at her week (baby.ts wombFromSkin) -- worked out again when her size moves.
+   */
+  let balloonWombKey = '';
+  function layBalloonWomb(): void {
+    if (!vulva || !babyFrame) return;
+    const sk = bodyOf()?.mesh.skeleton, bone = sk ? sk.bones.indexOf(babyFrame.bone) : -1;
+    if (babyWomb) { balloonWombKey = 'baby'; vulva.setWomb(babyWomb, bone); return; }
+    const key = `${bump.toFixed(3)}|${babyCount}|${body.babyWeight.toFixed(2)}`;
+    if (key === balloonWombKey) return;
+    const skin = bellySkin();
+    if (!skin) return;
+    balloonWombKey = key;
+    try { vulva.setWomb(wombFromSkin(skin, weekForBump(bump, babyCount)), bone); } catch (error) { console.error('[sarahlab] her womb for the balloon could not be laid', error); vulva.setWomb(null); }
+  }
   function bellySkin(): Float32Array | null {
     const b = bodyOf(), f = babyFrame;
     if (!b || !f) return null;
@@ -3044,6 +3062,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       babyFloats.length = fits.length; babyMoves.length = Math.min(babyMoves.length, fits.length);
       if (babySac && babyWall) {
         layShell(babyWall, babyWomb, WOMB_WALL_M);
+        // (the balloon's top is this same wall: drawn once, as the balloon)
+        babyWall.visible = !vulva; layBalloonWomb();
         // one baby: its sac lines her womb; several: each its own, round it
         layShell(babySac, babyWomb, 0); babySac.visible = fits.length === 1;
         while (babyOwnSacs.length < fits.length && fits.length > 1) { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 32), (babySac.material as THREE.Material).clone()); m.renderOrder = 1; m.userData.unit = babySac.userData.unit; babyHolder?.add(m); babyOwnSacs.push(m); }
@@ -3360,7 +3380,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             // (her legs' skin, and 1 cm in from it, kept out of the area: VULVA_OPEN.legMask; and the tops of her inner
             // thighs under her vulva, though her torso carries them: birthGap.ts)
             const bw = birthWeights as BirthWeights | null, under = birthGapUnderMask(sb.fields.basePos, sb.fields.baseNrm!, babyFrame.meshToRest), legSkin = bw ? (i: number) => under[i] === 1 || bw.legDistance(i) > -VULVA_OPEN.legMask : undefined;
-            try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest, measure?.joints.pelvis, measure ? [measure.joints.hipL, measure.joints.hipR, measure.joints.kneeL, measure.joints.kneeR] : [], legSkin); vulva?.setOpen(birthOpenPct / 100); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
+            try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest, measure?.joints.pelvis, measure ? [measure.joints.hipL, measure.joints.hipR, measure.joints.kneeL, measure.joints.kneeR] : [], legSkin); vulva?.setOpen(birthOpenPct / 100); balloonWombKey = ''; layBalloonWomb(); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
             try { birthNormals = createBirthNormals(bm!, babyFrame.meshToRest, herTris, measure ? [measure.joints.hipL, measure.joints.hipR] : [], (i) => birthWeights?.maskOf(i) ?? 0, undefined /* the crease planes dented her belly: off (2026-10-31) */, measure?.joints.pelvis, undefined, measure ? [measure.joints.hipL, measure.joints.hipR] : []); } catch (error) { console.error('[sarahlab] her birth-pose normals could not be made', error); birthNormals = null; }
             // each knee: where her thigh's skin hands over to her shin's (both carry it), in her rest frame
             try {

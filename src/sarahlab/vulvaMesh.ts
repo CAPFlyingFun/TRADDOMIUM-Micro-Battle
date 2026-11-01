@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { bakeVulva, type VulvaBake } from './vulvaPatch';
 import { JIGGLE_ATTRIBUTE, PUSH_ATTRIBUTE, patchJiggle } from './softBody';
 import { birthAreaCentre } from './birthArea';
+import { sacRadius, WOMB_WALL_M, type WombShape } from './baby';
 
 /**
  * GAME TUNING for the opening (Joshua's references, 2026-10-30: at crowning the whole area round the opening domes out
@@ -81,6 +82,15 @@ export interface VulvaPatch {
   setDressed(on: boolean): void;
   /** dressed: how much of its lips' shape shows through (0 her own skin's shape .. 1 all of it; VULVA DETAIL) */
   setDressedLips(keep: number): void;
+  /**
+   * HER WOMB, THE BALLOON'S TOP (Joshua, 2026-11-01: "the solid balloon skin that holds everything else in it"; "focus on
+   * the tube to the cervix and womb first"): her womb as baby.ts lays it round the sac (rest metres) and the bone that
+   * carries it. The canal curves from the opening to the womb's lowest point, the cervix closes and opens there, and the
+   * balloon's top is the womb's own wall. Null: a bulb of its own.
+   */
+  setWomb(womb: WombShape | null, bone?: number): void;
+  /** the womb's part of the balloon seen through (as her womb's wall is while her baby is shown) or solid */
+  seeWomb(through: boolean): void;
   /** the tube inside (pink) */
   readonly tube: THREE.SkinnedMesh;
   readonly bake: VulvaBake;
@@ -349,9 +359,13 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     const ti: number[] = [];
     for (let m = 0; m + 1 < K; m++) for (let j = 0; j < M; j++) { const j2 = (j + 1) % M, a = m * M + j, b = m * M + j2, c = (m + 1) * M + j, d = (m + 1) * M + j2; ti.push(a, c, b, b, c, d); }
     tubeGeom.setIndex(ti);
+    // (two parts: the canal and cervix, and the womb -- which is seen through while her baby is shown)
+    const split = (KB + KC + KX - 1) * M * 6;
+    tubeGeom.addGroup(0, split, 0); tubeGeom.addGroup(split, ti.length - split, 1);
   }
   const tubeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.82, metalness: 0, side: THREE.DoubleSide, vertexColors: true, envMapIntensity: 0.35 });
-  const tube = new THREE.SkinnedMesh(tubeGeom, tubeMat);
+  const wombMat = tubeMat.clone();
+  const tube = new THREE.SkinnedMesh(tubeGeom, [tubeMat, wombMat]);
   tube.name = 'sarahVagina';
   tube.frustumCulled = false; tube.castShadow = false; tube.receiveShadow = body.receiveShadow;
   tube.position.copy(body.position); tube.quaternion.copy(body.quaternion); tube.scale.copy(body.scale);
@@ -801,6 +815,66 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     }
     // 3. THE CERVIX: a neck, its own opening dilating with hers (shut, a few millimetres; at 100%, the opening's width)
     const rCx = Math.max(L.cervixShut * perMetre / 2, 0.05 * perMetre * open);
+    if (womb) {
+      // 3 and 4 WITH HER WOMB: the canal and the cervix along one curve from where the canal starts to the womb's lowest
+      // point (leaving the opening along its axis, arriving along the womb's), and the womb's own wall above it, rings
+      // round its long axis from the cervix to its top. Rest metres for the womb, her geometry's units for the rest.
+      const toRestM = meshToRest, toGeomM = new THREE.Matrix4().copy(meshToRest).invert(), m3 = new THREE.Matrix3().setFromMatrix4(meshToRest);
+      // (its lowest point is toward her opening: straight down her body, turned halfway toward where the opening is -- not
+      // her womb's long axis, which in a small womb runs front to back and put the cervix behind her)
+      const toRim = C0.clone().applyMatrix4(meshToRest).sub(womb.centre).normalize();
+      const down = new THREE.Vector3(0, -1, 0).add(toRim).normalize(), A = down.clone().negate(), wr = (d: THREE.Vector3) => sacRadius(womb!, d.x, d.y, d.z) + WOMB_WALL_M;
+      const rCxM = rCx / perMetre, rBottom = wr(down), th0 = Math.asin(Math.min(0.85, rCxM / Math.max(1e-4, rBottom)));
+      const ring0Centre = womb.centre.clone().addScaledVector(down, rBottom * Math.cos(th0)).applyMatrix4(toGeomM);
+      const AG = A.clone().applyMatrix3(inv).normalize();
+      // (the curve: canal and cervix share it -- the canal's rings over its first part, the cervix's over the rest)
+      const S0 = ctr.clone(), P3 = ring0Centre, Lc = S0.distanceTo(P3);
+      const P1 = S0.clone().addScaledVector(inward, Lc * 0.4), P2 = P3.clone().addScaledVector(AG, -Lc * 0.4);
+      const bez = (t: number, o: THREE.Vector3) => { const u = 1 - t; return o.set(0, 0, 0).addScaledVector(S0, u * u * u).addScaledVector(P1, 3 * u * u * t).addScaledVector(P2, 3 * u * t * t).addScaledVector(P3, t * t * t); };
+      const tan = (t: number, o: THREE.Vector3) => { const u = 1 - t; return o.set(0, 0, 0).addScaledVector(P1.clone().sub(S0), 3 * u * u).addScaledVector(P2.clone().sub(P1), 6 * u * t).addScaledVector(P3.clone().sub(P2), 3 * t * t).normalize(); };
+      const N = KC + KX, cpt = new THREE.Vector3(), ctg = new THREE.Vector3();
+      // (where the canal starts its rings are laid by section 2 above; here they are laid again on the curve)
+      const canalCx = Math.min(0.85, Math.max(0.5, 1 - L.cervix * perMetre / Math.max(1e-6, Lc)));
+      for (let i2 = 0; i2 < N; i2++) {
+        const m = KB + i2, t = i2 < KC ? (i2 / (KC - 1)) * canalCx : canalCx + ((i2 - KC + 1) / KX) * (1 - canalCx) * 0.999;
+        bez(t, cpt); tan(i2 === 0 ? 0 : t, ctg); turn.setFromUnitVectors(inward, ctg);
+        if (i2 < KC) {
+          // (the canal keeps its own widths and folds from section 2, re-centred on the curve)
+          const f = i2 / (KC - 1), narrow = 1 - 0.55 * smooth(0, 0.35, f), scale = narrow + (1 - narrow) * smooth(0, 1, open);
+          const round = smooth(0.05, 0.35, f), fold = L.pleatDepth * smooth(0.15, 0.8, f) * (1 - 0.7 * smooth(0, 1, open));
+          for (let j = 0; j < M; j++) {
+            oj.fromArray(out, j * 3);
+            const rr = Math.max(0, rimR[j] * scale) * (1 - round) + rEnd * round, r = rr * (1 + fold * Math.cos(L.pleats * ang[j]));
+            cj.fromArray(circ, j * 3); oj.lerp(cj, round).normalize();
+            off.copy(oj).multiplyScalar(r).applyQuaternion(turn); pt.copy(cpt).add(off);
+            const ease = 1 - smooth(0, 0.4, f), o = (m * M + j) * 3;
+            // (eased on from the bead's end: section 2 laid ring 0 there, so its place less this one's is the offset)
+            if (i2 === 0) { startOf[j * 3] = tubeWant[o] - pt.x; startOf[j * 3 + 1] = tubeWant[o + 1] - pt.y; startOf[j * 3 + 2] = tubeWant[o + 2] - pt.z; }
+            pt.x += startOf[j * 3] * ease; pt.y += startOf[j * 3 + 1] * ease; pt.z += startOf[j * 3 + 2] * ease;
+            put(m, j, pt);
+          }
+        } else {
+          const f = (i2 - KC + 1) / KX, r = rEnd + (rCx - rEnd) * smooth(0, 0.6, f);
+          for (let j = 0; j < M; j++) { oj.fromArray(circ, j * 3); off.copy(oj).multiplyScalar(r).applyQuaternion(turn); pt.copy(cpt).add(off); put(m, j, pt); }
+        }
+      }
+      // 4. HER WOMB'S WALL: rings round its axis from the cervix (at the angle where the womb is as wide as the cervix's
+      // opening) to its top; each ring's start lined up with the cervix's last ring so the skin does not twist
+      const U = new THREE.Vector3().fromArray(circ, 0).applyQuaternion(turn).applyMatrix3(m3);
+      U.addScaledVector(A, -U.dot(A)).normalize();
+      const V = new THREE.Vector3().crossVectors(A, U).normalize();
+      { const q4 = new THREE.Vector3().fromArray(circ, Math.floor(M / 4) * 3).applyQuaternion(turn).applyMatrix3(m3); if (q4.dot(V) < 0) V.negate(); }
+      const dirW = new THREE.Vector3(), pW = new THREE.Vector3();
+      for (let k = 0; k < KW; k++) {
+        const m = KB + KC + KX + k, th = th0 + (Math.PI - th0) * (k / (KW - 1)), ct = Math.cos(th), st = Math.sin(th);
+        for (let j = 0; j < M; j++) {
+          const ph = (2 * Math.PI * j) / M;
+          dirW.copy(down).multiplyScalar(ct).addScaledVector(U, st * Math.cos(ph)).addScaledVector(V, st * Math.sin(ph)).normalize();
+          pW.copy(womb.centre).addScaledVector(dirW, wr(dirW)).applyMatrix4(toGeomM); put(m, j, pW);
+        }
+      }
+      void toRestM;
+    } else {
     const cxStep = (L.cervix * perMetre) / KX;
     for (let k = 0; k < KX; k++) {
       const m = KB + KC + k, f = (k + 1) / KX;
@@ -818,6 +892,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       const swell = f < 0.35 ? Math.sin((f / 0.35) * Math.PI / 2) : Math.sqrt(Math.max(0, 1 - ((f - 0.35) / 0.65) ** 2));
       const r = f < 0.35 ? rCx + (rW - rCx) * swell : rW * swell;
       for (let j = 0; j < M; j++) { oj.fromArray(circ, j * 3); off.copy(oj).multiplyScalar(r).applyQuaternion(turn); pt.copy(ctr).add(off); put(m, j, pt); }
+    }
     }
     openApplied = open;
   }
@@ -842,6 +917,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
           b2[o + pel] += deep;
           const sum = b2[o] + b2[o + 1] + b2[o + 2] + b2[o + 3] || 1;
           for (let c = 0; c < 4; c++) b2[o + c] /= sum;
+          // (her womb's wall carried as her womb is, by the bone that carries her baby)
+          if (womb && wombBone >= 0 && m >= KB + KC + KX) { a2[o] = wombBone; b2[o] = 1; for (let c = 1; c < 4; c++) { a2[o + c] = 0; b2[o + c] = 0; } }
         }
       }
       tI.needsUpdate = true; tW.needsUpdate = true;
@@ -853,6 +930,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
 
 
   let posVersion = -1, pushVersion = -1, shown = true, poseSig = NaN;
+  /** her womb (setWomb) and the bone that carries it */
+  let womb: WombShape | null = null, wombBone = -1;
   let wireMesh: THREE.SkinnedMesh | null = null;
   const sync = (): boolean => {
     let changed = false;
@@ -932,11 +1011,22 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       const wp = (j: number) => { const o = new THREE.Vector3(); mesh.getVertexPosition(base[j], o); return mesh.localToWorld(o); };
       const wd = (a: number, c: number) => +wp(a).distanceTo(wp(c)).toFixed(4);
       const rimSize = { restAcross: dm(jl, jr), restAlong: dm(jb, jf), posedAcross: wd(jl, jr), posedAlong: wd(jb, jf), heldTo, legNear: legNear.length, blocker, bulge: bulgeNow, lipMaxMm: +(lipMax * 1000).toFixed(1), lipCount, uScale, edgeDistMaxMm: +(Math.max(...Array.from(edgeDist).filter((x) => x < 1)) * 1000).toFixed(1) };
-      return { rimSize, uScale, sScale, pelvisBoneGiven: pelvisBone, pelvis: body.skeleton.bones[pelvis]?.name, pelvisIndex: pelvis, restPos: bad(restPos), restNrm: bad(restNrm), rim: bad(rim), pos: bad(pos), tau: bad(tau), colQ: bad(colQ), body: bad((g.getAttribute('position') as THREE.BufferAttribute).array), O: O.toArray(), tA: tA.toArray(), nO: nO.toArray(), across: across.toArray(), perMetre, open };
+      const rimRest = new THREE.Vector3(); for (let j = 0; j < M; j++) rimRest.x += rim[j * 3] / M, rimRest.y += rim[j * 3 + 1] / M, rimRest.z += rim[j * 3 + 2] / M;
+      rimRest.applyMatrix4(meshToRest);
+      const lastW = new THREE.Vector3().fromArray(tubeWant, ((K - 1) * M) * 3).applyMatrix4(meshToRest), cx0 = new THREE.Vector3().fromArray(tubeWant, ((KB + KC + KX) * M) * 3).applyMatrix4(meshToRest);
+      const wombDbg = { centre: womb?.centre.toArray().map((x) => +x.toFixed(3)), axis: womb?.axis.toArray().map((x) => +x.toFixed(3)), rimRest: rimRest.toArray().map((x) => +x.toFixed(3)), wombRing0: cx0.toArray().map((x) => +x.toFixed(3)), top: lastW.toArray().map((x) => +x.toFixed(3)), bone: wombBone };
+      return { wombDbg, rimSize, uScale, sScale, pelvisBoneGiven: pelvisBone, pelvis: body.skeleton.bones[pelvis]?.name, pelvisIndex: pelvis, restPos: bad(restPos), restNrm: bad(restNrm), rim: bad(rim), pos: bad(pos), tau: bad(tau), colQ: bad(colQ), body: bad((g.getAttribute('position') as THREE.BufferAttribute).array), O: O.toArray(), tA: tA.toArray(), nO: nO.toArray(), across: across.toArray(), perMetre, open };
     },
     get open() { return wantOpen; },
     setOpen(o: number) { wantOpen = Number.isFinite(o) ? Math.max(0, Math.min(1, o)) : 0; open = dressed ? 0 : wantOpen; sync(); },
     get dressed() { return dressed; },
+    setWomb(w: WombShape | null, bone = -1) {
+      if (w === womb && bone === wombBone) return;
+      womb = w; wombBone = bone; openApplied = -1; posVersion = -1; sync();
+    },
+    seeWomb(through: boolean) {
+      wombMat.transparent = through; wombMat.opacity = through ? 0.14 : 1; wombMat.depthWrite = !through; wombMat.needsUpdate = true;
+    },
     get heldTo() { return heldTo; },
     setDressedLips(keep: number) {
       const k = Number.isFinite(keep) ? Math.max(0, Math.min(1, keep)) : 0;
@@ -966,7 +1056,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       } else if (!on && wireMesh) { wireMesh.removeFromParent(); (wireMesh.material as THREE.Material).dispose(); wireMesh = null; }
       sync();
     },
-    dispose() { mesh.removeFromParent(); wireMesh?.removeFromParent(); tube.removeFromParent(); geom.dispose(); tubeGeom.dispose(); tubeMat.dispose(); },
+    dispose() { mesh.removeFromParent(); wireMesh?.removeFromParent(); tube.removeFromParent(); geom.dispose(); tubeGeom.dispose(); tubeMat.dispose(); wombMat.dispose(); },
   };
   sync();
   return api;
