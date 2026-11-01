@@ -959,7 +959,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     { const f2 = fields[SARAH_LAB_FIELD.birthOpen];
       // (the probes set the opening too: the slider follows whatever she is)
       if (vulva) birthOpenPct = Math.round(vulva.open * 100);
-      if (f2) f2.textContent = birthOpenLine(birthOpenPct);
+      if (f2) f2.textContent = birthOpenLine(birthOpenPct, vulva?.heldTo ?? null);
       if (birthOpenInput && Number(birthOpenInput.value) !== birthOpenPct) birthOpenInput.value = String(birthOpenPct); }
     if (bumpInput && Number(bumpInput.value) !== bump) bumpInput.value = String(bump);
     for (const spec of BODY_RANDOM_SPECS) {
@@ -3328,7 +3328,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             }
             // and the area rebuilt finer, from her own skin, to be able to open (vulvaMesh.ts)
             vulva?.dispose();
-            try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest, measure?.joints.pelvis); vulva?.setOpen(birthOpenPct / 100); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
+            try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest, measure?.joints.pelvis, measure ? [measure.joints.hipL, measure.joints.hipR, measure.joints.kneeL, measure.joints.kneeR] : []); vulva?.setOpen(birthOpenPct / 100); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
             try { birthNormals = createBirthNormals(bm!, babyFrame.meshToRest, herTris, measure ? [measure.joints.hipL, measure.joints.hipR] : [], (i) => birthWeights?.maskOf(i) ?? 0, undefined /* the crease planes dented her belly: off (2026-10-31) */, measure?.joints.pelvis); } catch (error) { console.error('[sarahlab] her birth-pose normals could not be made', error); birthNormals = null; }
             try { const jt = measure?.joints; birthRoom = jt ? createBirthRoom(bm!, babyFrame.meshToRest, herTris, jt.pelvis, jt.hipL, jt.hipR) : null; } catch (error) { console.error('[sarahlab] her birth-pose room could not be made', error); birthRoom = null; }
             try { const jt = measure?.joints; birthWeights = jt ? createBirthWeights(bm!, babyFrame.meshToRest, jt.pelvis, jt.hipL, jt.hipR, jt.kneeL, jt.kneeR, herTris) : null; } catch (error) { console.error('[sarahlab] her birth-pose weights could not be made', error); birthWeights = null; }

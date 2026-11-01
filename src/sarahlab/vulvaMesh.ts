@@ -23,6 +23,12 @@ export const VULVA_OPEN = Object.freeze({
   /** GAME TUNING: how far out along her skin the opening's edge may walk, of the way to the area's own edge (so a
    * band of her skin is always left to give way between) */
   room: 0.75,
+  /** GAME TUNING: the opening's edge kept `legClear` metres off her legs -- skin a thigh carries `legWeight` of or more,
+   * within `legSlab` metres in or out of her skin's surface there (Joshua, 2026-10-31: "1cm to the thighs") */
+  legClear: 0.01, legWeight: 0.5, legSlab: 0.05,
+  /** BIOLOGICAL SHAPE: the canal's length (metres) and how far its deep end leans forward of straight up her body
+   * (degrees) -- the curve of Carus */
+  canal: 0.09, canalLean: 15,
   /** GAME TUNING: passes evening the opening's edge round its outline */
   edgeSmooth: 6,
   /**
@@ -42,6 +48,8 @@ export interface VulvaPatch {
   readonly mesh: THREE.SkinnedMesh;
   /** whether something is worn over it (see setDressed) */
   readonly dressed: boolean;
+  /** how wide the opening is held to by her legs (metres across), or null when they do not hold it */
+  readonly heldTo: number | null;
   /** worn over (her clothes, modelled or painted on her): drawn with her own material exactly, her painted clothes and
    * all, its lips lying as her skin does and closed; bare, its own colours and shape */
   setDressed(on: boolean): void;
@@ -90,7 +98,7 @@ function floatsOf(attr: THREE.BufferAttribute | THREE.InterleavedBufferAttribute
  * Cut the area out of `body` and lay the rebuilt one on her. `basePos`: her rest shape as approved (geometry units, before
  * any field); `meshToRest`: her geometry to her rest frame (metres). Null when the area could not be found.
  */
-export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array, meshToRest: THREE.Matrix4, pelvisBone?: number): VulvaPatch | null {
+export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array, meshToRest: THREE.Matrix4, pelvisBone?: number, thighBones: readonly number[] = []): VulvaPatch | null {
   const g = body.geometry as THREE.BufferGeometry, index = g.index;
   if (!index) return null;
   const n = basePos.length / 3, rest = new Float32Array(basePos.length), v = new THREE.Vector3();
@@ -337,6 +345,26 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   let uScale = 1, sScale = 1, scaled = false, painted = false;
   /** each column's length over her rest skin from the split, ring by ring (metres), measured once */
   let colMetres: Float32Array | null = null;
+  /** the opening's width held back by her legs (metres across), or null when it is not */
+  let heldTo: number | null = null, blocker: number[] = [];
+  /** her skin near the area that her thighs carry now (vertices), worked out again when her weights change */
+  let legNear: number[] = [], legNearVersion = -1;
+  const findLegNear = () => {
+    const w = g.getAttribute('skinWeight') as THREE.BufferAttribute | undefined, ix = g.getAttribute('skinIndex') as THREE.BufferAttribute | undefined;
+    if (!w || !ix || !thighBones.length || w.version === legNearVersion) return;
+    legNearVersion = w.version; legNear = [];
+    const cy = (restPos[base[0] * 3 + 1]), mid = new THREE.Vector3();
+    void cy;
+    { let jm0 = 0; for (let j = 0; j < M; j++) if (Math.abs(colQ[j]) < Math.abs(colQ[jm0])) jm0 = j; mid.fromArray(rest, bake.src[base[jm0] * 3] * 3); }
+    for (let i = 0; i < rest.length / 3; i++) {
+      const dx = rest[i * 3] - mid.x, dy = rest[i * 3 + 1] - mid.y, dz = rest[i * 3 + 2] - mid.z;
+      if (dx * dx + dy * dy + dz * dz > 0.18 * 0.18) continue;
+      // (one leg's: skin her two thighs share is her middle, not a leg)
+      let tl = 0, tr = 0;
+      for (let c = 0; c < 4; c++) { const b = ix.getComponent(i, c), k = thighBones.indexOf(b); if (k < 0) continue; if (k % 2 === 0) tl += w.getComponent(i, c); else tr += w.getComponent(i, c); }
+      if (Math.max(tl, tr) >= VULVA_OPEN.legWeight) legNear.push(i);
+    }
+  };
   const measureScale = () => {
     if (scaled) return;
     scaled = true;
@@ -450,6 +478,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     }
     const cm = colMetres;
     const pv = new THREE.Vector3();
+    findLegNear();
     // THE OPENING'S SIZE IS HER POSED SIZE (Joshua: a 10 cm circle). Each ring-and-column read off her skin as she
     // is posed now (her own bones and weights), and the opening's oval laid in her skin's plane there: across her
     // split and along it, seen square on. A column's lip edge goes out to where the column crosses that oval.
@@ -479,9 +508,31 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       nodeU[k] = tmp.dot(sideP) / perMetre; nodeS[k] = tmp.dot(alongP) / perMetre;
     }
     const Lf = Math.abs(nodeS[jf]), Lb = Math.abs(nodeS[jb]);
+    // HELD 1 CM OFF HER LEGS (Joshua, 2026-10-31: the opening "cuts into the legs... add a limit so it automatically
+    // stops if it gets 1cm to the thighs/hips/inside legs until the legs spread more apart"). Her skin that her thighs
+    // carry, as she is posed now, beside the opening: the nearest on each side across it sets how wide it may go.
+    let room = Infinity;
+    if (legNear.length && D > 0) {
+      const nAx = new THREE.Vector3().crossVectors(sideP, alongP).normalize(), reach = Math.max(Lf, Lb) + 0.01 * perMetre;
+      // each leg point as seen square on to the opening: the oval (half `a` across, half `c` along) must pass it by
+      // legClear, so a <= (|u| - clear) / sqrt(1 - ((|s| - clear) / c)^2); points past its ends along do not hold it
+      const cl = VULVA_OPEN.legClear, cHalf = Math.max(Math.max(Lf, Lb) / perMetre, D / 2);
+      void reach;
+      for (const i of legNear) {
+        body.getVertexPosition(i, pv); pv.sub(Op);
+        const sv = Math.abs(pv.dot(alongP)) / perMetre, nv = pv.dot(nAx) / perMetre, uv = Math.abs(pv.dot(sideP)) / perMetre;
+        if (Math.abs(nv) > VULVA_OPEN.legSlab) continue;
+        const k = (sv - cl) / cHalf;
+        if (k >= 1) continue;
+        const a = (uv - cl) / Math.sqrt(1 - Math.max(0, k) ** 2);
+        if (a < room) { room = Math.max(0, a); blocker = [+(uv * 100).toFixed(1), +(sv * 100).toFixed(1), +(nv * 100).toFixed(1), i]; }
+      }
+    }
+    heldTo = Number.isFinite(room) && room < D / 2 ? room * 2 : null;
+    const halfAcross = Math.min(D / 2, room);
     /** where along column j (metres from the split) its lip's edge now is */
     const edgeAt = (j: number) => {
-      const q = colQ[j], L = q >= 0 ? Lf : Lb, a = Math.max(1e-6, D / 2), c = Math.max(L, D / 2) * 1.0001;
+      const q = colQ[j], L = q >= 0 ? Lf : Lb, a = Math.max(1e-6, halfAcross), c = Math.max(L, D / 2) * 1.0001;
       const rho = (k: number) => Math.hypot(nodeU[k * M + j] / a, nodeS[k * M + j] / c);
       // the outermost crossing: a column that wanders out of the oval and back in (over her lips' rounds) is opened
       // to where it leaves it for good, so the edge does not catch on a lip
@@ -571,15 +622,27 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     // the tube: its rings narrower inward at rest, as wide as the opening once it is open
     const C0 = vv.set(0, 0, 0);
     for (let j = 0; j < M; j++) C0.x += rim[j * 3] / M, C0.y += rim[j * 3 + 1] / M, C0.z += rim[j * 3 + 2] / M;
-    const length = 0.09 * perMetre;
+    const length = VULVA_OPEN.canal * perMetre;
+    // THE CANAL CURVES UP TO HER WOMB (Joshua, 2026-10-31: "the birth tube is cutting to the backside... it needs to be
+    // primarily straight down with a slight bend at the front"; the curve of Carus): it leaves the opening along its
+    // axis (in, and back a little), then turns to run up her body leaning a little forward, toward her cervix. Each
+    // ring is the opening's outline carried along that curve, turned with it.
+    const inward = nO.clone().negate(), upG = new THREE.Vector3(0, 1, 0).applyMatrix3(inv).normalize(), fwdG = new THREE.Vector3(0, 0, 1).applyMatrix3(inv).normalize();
+    const lean = (VULVA_OPEN.canalLean * Math.PI) / 180, deep = upG.clone().multiplyScalar(Math.cos(lean)).addScaledVector(fwdG, Math.sin(lean)).normalize();
+    const ctr = C0.clone(), dir = new THREE.Vector3(), turn = new THREE.Quaternion(), off = new THREE.Vector3(), centre = new THREE.Vector3();
     for (let m = 0; m < K; m++) {
-      // (its far end rounded shut: the canal ends, it does not run on out of her)
       const f = m / (K - 1), narrow = 1 - 0.55 * smooth(0, 0.35, f), endT = Math.max(0, (f - 0.7) / 0.3);
+      // (its far end rounded shut: the canal ends at her cervix, it does not run on out of her)
       const scale = (narrow + (1 - narrow) * smooth(0, 1, open)) * Math.sqrt(Math.max(0, 1 - endT * endT));
       const gap = m === 0 ? 0 : 0.0006 * perMetre;
+      if (m > 0) { dir.copy(inward).lerp(deep, smooth(0.1, 0.75, f)).normalize(); ctr.addScaledVector(dir, length / (K - 1)); }
+      else dir.copy(inward);
+      turn.setFromUnitVectors(inward, dir);
+      centre.copy(ctr);
       for (let j = 0; j < M; j++) {
         const o = (m * M + j) * 3;
-        for (let c = 0; c < 3; c++) tubeWant[o + c] = C0.getComponent(c) - nO.getComponent(c) * length * f + (rim[j * 3 + c] - C0.getComponent(c)) * scale + across.getComponent(c) * colSide[j] * gap;
+        off.set(rim[j * 3] - C0.x, rim[j * 3 + 1] - C0.y, rim[j * 3 + 2] - C0.z).multiplyScalar(scale).applyQuaternion(turn);
+        for (let c = 0; c < 3; c++) tubeWant[o + c] = centre.getComponent(c) + off.getComponent(c) + across.getComponent(c) * colSide[j] * gap;
       }
     }
     openApplied = open;
@@ -692,12 +755,13 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       const dm = (a: number, c: number) => +(Math.hypot(rim[a * 3] - rim[c * 3], rim[a * 3 + 1] - rim[c * 3 + 1], rim[a * 3 + 2] - rim[c * 3 + 2]) / perMetre).toFixed(4);
       const wp = (j: number) => { const o = new THREE.Vector3(); mesh.getVertexPosition(base[j], o); return mesh.localToWorld(o); };
       const wd = (a: number, c: number) => +wp(a).distanceTo(wp(c)).toFixed(4);
-      const rimSize = { restAcross: dm(jl, jr), restAlong: dm(jb, jf), posedAcross: wd(jl, jr), posedAlong: wd(jb, jf) };
+      const rimSize = { restAcross: dm(jl, jr), restAlong: dm(jb, jf), posedAcross: wd(jl, jr), posedAlong: wd(jb, jf), heldTo, legNear: legNear.length, blocker };
       return { rimSize, uScale, sScale, pelvisBoneGiven: pelvisBone, pelvis: body.skeleton.bones[pelvis]?.name, pelvisIndex: pelvis, restPos: bad(restPos), restNrm: bad(restNrm), rim: bad(rim), pos: bad(pos), tau: bad(tau), colQ: bad(colQ), body: bad((g.getAttribute('position') as THREE.BufferAttribute).array), O: O.toArray(), tA: tA.toArray(), nO: nO.toArray(), across: across.toArray(), perMetre, open };
     },
     get open() { return wantOpen; },
     setOpen(o: number) { wantOpen = Number.isFinite(o) ? Math.max(0, Math.min(1, o)) : 0; open = dressed ? 0 : wantOpen; sync(); },
     get dressed() { return dressed; },
+    get heldTo() { return heldTo; },
     setDressedLips(keep: number) {
       const k = Number.isFinite(keep) ? Math.max(0, Math.min(1, keep)) : 0;
       if (Math.abs(k - dressedLips) < 1e-3) return;

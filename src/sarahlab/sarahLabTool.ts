@@ -831,9 +831,11 @@ export function navelState(bumpPercent: number, navelPercent: number): string {
 
 /** The BIRTH OPENING slider's line (Joshua, 2026-10-31: "add a slider... where you can see how it looks with the
  * different sizes in the room"): how far open, and how wide that is across (the full opening is 10 cm). */
-export function birthOpenLine(percent: number): string {
+export function birthOpenLine(percent: number, heldTo: number | null = null): string {
   const p = Math.round(Math.min(100, Math.max(0, percent)));
   if (p === 0) return 'BIRTH OPENING · closed';
+  // (held back by her legs: what it is, and why -- spread her legs and it goes on)
+  if (heldTo !== null) return `BIRTH OPENING ${p}% · held to ${(heldTo * 100).toFixed(1)} cm by her legs`;
   return `BIRTH OPENING ${p}% · ${(p / 10).toFixed(1)} cm across`;
 }
 
