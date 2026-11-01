@@ -44,7 +44,7 @@ export const VULVA_OPEN = Object.freeze({
    * long, its own opening `cervixShut` metres across shut and the opening's full width at 100%: the dilation), and the
    * womb's bulb (`womb` long, `wombRadius` round), closed over at its top. BIOLOGICAL SHAPE, GAME TUNING
    */
-  bead: 0.004, lipWall: 0.008, pleats: 4, pleatDepth: 0.22, cervix: 0.03, cervixShut: 0.006, womb: 0.13, wombRadius: 0.065,
+  bead: 0.004, lipWall: 0.008, wallSkin: 0xd09a88, wallPink: 0xc0646e, pleats: 4, pleatDepth: 0.22, cervix: 0.03, cervixShut: 0.006, womb: 0.13, wombRadius: 0.065,
   /** BIOLOGICAL SHAPE (Joshua's estimate, to tune): how far the area bulges out at the full opening (metres; a half sphere,
    * its last `bulgeFoot` share easing onto her skin), and how it
    * grows with the opening (power of the open share: 1 straight, more later) */
@@ -60,7 +60,7 @@ export const VULVA_OPEN = Object.freeze({
    * darkest right at the edge. Its crest stands `crest` metres back from the edge; opening, the edge curls `roll` metres
    * on down into the opening, so the lip's inner face shows (see `lipHeight`)
    */
-  rise: 0.015, crest: 0.006, width: 0.028, tuck: 0.0008, flatten: 0.6, inner: 0.005, roll: 0, maxTip: 1.2, edgeRound: 0.35,
+  rise: 0.015, crest: 0.006, width: 0.028, tuck: 0.0008, flatten: 0.3, inner: 0.005, roll: 0, maxTip: 1.2, edgeRound: 0.35,
   /** shut, how much of the inside's colour shows at the line where the lips meet (0..1; all of it once open 15%) */
   shutInside: 0.3,
   innerTint: [1.0, 0.6, 0.64] as const, edgeTint: [0.78, 0.42, 0.48] as const,
@@ -318,7 +318,16 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   // darker the deeper in (no light reaches far down a canal): ring by ring from the mouth
   { const col = new Float32Array(TV * 3);
     // (the bead its own lighter pink, as the lips' inner edge; then darker down the canal, darkest past her cervix)
-    for (let m = 0; m < K; m++) { const f = m < KB ? 0 : (m - KB) / (K - 1 - KB), k2 = m < KB ? 1 : 1 - 0.75 * Math.pow(Math.min(1, f * 1.6), 0.7); for (let j = 0; j < M; j++) col.fill(k2, (m * M + j) * 3, (m * M + j) * 3 + 3); }
+    // (her lips' inner walls start as her skin at their rounded edge and turn pink going in, as in Joshua's reference; the
+    // balloon's bead a soft pink; then the canal's own colour, darker down it, darkest past her cervix)
+    const ss = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+    const skinC = new THREE.Color(VULVA_OPEN.wallSkin), pinkC = new THREE.Color(VULVA_OPEN.wallPink), canalC = new THREE.Color(0xa8505a), c3 = new THREE.Color();
+    for (let m = 0; m < K; m++) {
+      if (m < KL) c3.copy(skinC).lerp(pinkC, ss(0, 1, m / (KL - 1)));
+      else if (m < KB) c3.copy(pinkC);
+      else { const f = (m - KB) / (K - 1 - KB); c3.copy(pinkC).lerp(canalC, ss(0, 0.15, f)).multiplyScalar(1 - 0.75 * Math.pow(Math.min(1, f * 1.6), 0.7)); }
+      for (let j = 0; j < M; j++) { const o = (m * M + j) * 3; col[o] = c3.r; col[o + 1] = c3.g; col[o + 2] = c3.b; }
+    }
     tubeGeom.setAttribute('color', new THREE.BufferAttribute(col, 3)); }
   {
     const pi = geom.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, pw = geom.getAttribute('skinWeight') as THREE.BufferAttribute | undefined;
@@ -337,7 +346,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     for (let m = 0; m + 1 < K; m++) for (let j = 0; j < M; j++) { const j2 = (j + 1) % M, a = m * M + j, b = m * M + j2, c = (m + 1) * M + j, d = (m + 1) * M + j2; ti.push(a, c, b, b, c, d); }
     tubeGeom.setIndex(ti);
   }
-  const tubeMat = new THREE.MeshStandardMaterial({ color: 0xa8505a, roughness: 0.82, metalness: 0, side: THREE.DoubleSide, vertexColors: true, envMapIntensity: 0.35 });
+  const tubeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.82, metalness: 0, side: THREE.DoubleSide, vertexColors: true, envMapIntensity: 0.35 });
   const tube = new THREE.SkinnedMesh(tubeGeom, tubeMat);
   tube.name = 'sarahVagina';
   tube.frustumCulled = false; tube.castShadow = false; tube.receiveShadow = body.receiveShadow;
@@ -745,7 +754,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       if (k > 0) { dir.copy(inward).lerp(deep, smooth(0.1, 0.75, f)).normalize(); ctr.addScaledVector(dir, length / (KC - 1)); }
       else dir.copy(inward);
       turn.setFromUnitVectors(inward, dir);
-      const round = smooth(0.6, 1, f), fold = L.pleatDepth * smooth(0.15, 0.8, f) * (1 - 0.7 * smooth(0, 1, open));
+      // (round within its first third: a stretched canal is a tube, not the opening's outline carried in as flat walls)
+      const round = smooth(0.05, 0.35, f), fold = L.pleatDepth * smooth(0.15, 0.8, f) * (1 - 0.7 * smooth(0, 1, open));
       for (let j = 0; j < M; j++) {
         oj.fromArray(out, j * 3);
         // (the outline, less the bead, toward a circle of the canal's end width)
@@ -789,7 +799,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     if (tI && tW && patchI && patchW) {
       const a2 = tI.array as Uint16Array, b2 = tW.array as Float32Array;
       for (let m = 0; m < K; m++) {
-        const deep = smooth(0, 0.5, m / (K - 1));
+        // (her lips' walls and the bead as the lips' edge is carried; the canal on in by her pelvis alone, within a few rings)
+        const deep = m < KB ? 0 : smooth(0, 0.12, (m - KB) / (K - 1 - KB));
         for (let j = 0; j < M; j++) {
           const o = (m * M + j) * 4, v = base[j] * 4;
           let pel = -1;
