@@ -71,7 +71,8 @@ const smooth = (a: number, b: number, v: number) => { const t = Math.min(1, Math
 
 export interface BirthWeights {
   /** hand `share` (0 none .. 1 all) of each thigh's weight in the mask to her pelvis; true when anything changed */
-  apply(share: number): boolean;
+  /** `back`: how much of her lower buttocks goes to her pelvis too (0..1; the pose's: absent, `backShare`) */
+  apply(share: number, back?: number): boolean;
   /** how many of her points the mask touches at all */
   readonly touched: number;
   /** how much of a point the mask hands to her pelvis (0..1, the larger side) */
@@ -117,7 +118,7 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   const ownI = new Uint16Array(n * 4), ownW = new Float32Array(n * 4);
   for (let i = 0; i < n; i++) for (let c = 0; c < 4; c++) { ownI[i * 4 + c] = si.getComponent(i, c); ownW[i * 4 + c] = sw.getComponent(i, c); }
   // the mask, per side, for points weighted to that thigh at all
-  const mask = new Float32Array(n * 2), v = new THREE.Vector3(), d = new THREE.Vector3();
+  const mask = new Float32Array(n * 2), maskBack = new Float32Array(n * 2), v = new THREE.Vector3(), d = new THREE.Vector3();
   let touched = 0;
   for (let i = 0; i < n; i++) {
     v.set(pa.getX(i), pa.getY(i), pa.getZ(i)).applyMatrix4(toRest);
@@ -136,10 +137,11 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
       // (on her lower buttocks, well behind her vulva, only part of her skin goes to her pelvis: all of it there, a deep
       // hip bend left a shelf standing out of her, and none of it changed her front; shared, her buttock bends part way
       // with her thigh and is smoothed into the rest -- Joshua, 2026-10-31: "merge it with the rest")
-      const leotard = smooth(B.band, -B.band, dLeg) * (B.backShare + (1 - B.backShare) * smooth(crotch.z - B.backFade, crotch.z - B.backFrom, v.z));
-      const m = Math.max(B.useCone ? cone : 0, B.useMiddle ? middle : 0, B.usePubic ? pubic : 0, leotard);
-      mask[i * 2 + s] = m;
-      if (m > 0) any = true;
+      // (and how much of her lower buttocks goes too is the pose's: `apply`'s `back`)
+      const inBand = smooth(B.band, -B.band, dLeg), front = smooth(crotch.z - B.backFade, crotch.z - B.backFrom, v.z);
+      const m = Math.max(B.useCone ? cone : 0, B.useMiddle ? middle : 0, B.usePubic ? pubic : 0, inBand * front);
+      mask[i * 2 + s] = m; maskBack[i * 2 + s] = Math.max(0, inBand - m);
+      if (m > 0 || maskBack[i * 2 + s] > 0) any = true;
     }
     if (any) touched++;
   }
@@ -170,20 +172,20 @@ export function createBirthWeights(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
     nbStart.push(nbList.length);
   }
   const NB = bones.size, boneOf = [...bones.keys()];
-  let shareNow = 0;
+  let shareNow = 0, backNow = -1;
   const I = si.array as ArrayLike<number> & { [k: number]: number }, W = sw.array as ArrayLike<number> & { [k: number]: number };
   const normalized = sw.normalized, scale = normalized ? (W instanceof Uint8Array ? 255 : W instanceof Uint16Array ? 65535 : 1) : 1;
   return {
     touched,
     debug: { hip: hip.map((h) => h.toArray().map((x) => +x.toFixed(3))), knee: knee.map((h) => h.toArray().map((x) => +x.toFixed(3))), crotch: crotch.toArray().map((x) => +x.toFixed(3)), planes },
-    maskOf: (i: number) => Math.max(mask[i * 2], mask[i * 2 + 1]),
-    apply(share: number): boolean {
-      share = Math.max(0, Math.min(1, share));
-      if (share === shareNow) return false;
-      shareNow = share;
+    maskOf: (i: number) => Math.max(mask[i * 2] + maskBack[i * 2] * Math.max(0, backNow), mask[i * 2 + 1] + maskBack[i * 2 + 1] * Math.max(0, backNow)),
+    apply(share: number, back: number = B.backShare): boolean {
+      share = Math.max(0, Math.min(1, share)); back = Math.max(0, Math.min(1, back));
+      if (share === shareNow && back === backNow) return false;
+      shareNow = share; backNow = back;
       const w = [0, 0, 0, 0], ix = [0, 0, 0, 0];
       for (let i = 0; i < n; i++) {
-        const mL = mask[i * 2], mR = mask[i * 2 + 1];
+        const mL = mask[i * 2] + maskBack[i * 2] * back, mR = mask[i * 2 + 1] + maskBack[i * 2 + 1] * back;
         if (mL <= 0 && mR <= 0) { if (keyOf[i] >= 0) for (let c = 0; c < 4; c++) { I[i * 4 + c] = ownI[i * 4 + c]; W[i * 4 + c] = normalized && scale > 1 ? Math.round(ownW[i * 4 + c] * scale) : ownW[i * 4 + c]; } continue; }
         let moved = 0, pel = -1, low = 0;
         for (let c = 0; c < 4; c++) {

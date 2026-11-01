@@ -23,6 +23,10 @@ export const BIRTH_NORMALS = Object.freeze({
    * her middle -- behind the middle of her vulva from `behindFrom` (all by `behindFull`) to `behindTo`, below `upTo`
    * (all by `upFull`) and above `downTo`, out from her middle from `midFrom` (all by `midFull`) to `sideTo` (all
    * within `sideFull`); metres */
+  /** the hollows under her filled (see `compute`'s `fill`): `passes` times, each `rate` of the way out of a hollow and
+   * `even` of the way to its neighbours along her; over her underside behind her vulva and below her hips, her middle
+   * included (zone as `fold`'s) */
+  under: Object.freeze({ passes: 200, rate: 0.8, even: 0.3, behindFrom: -0.02, behindFull: 0.01, behindTo: 0.22, upFull: 0.06, upTo: 0.13, downTo: -0.12, midFrom: -1, midFull: 0, sideFull: 0.12, sideTo: 0.18 }),
   fold: Object.freeze({ passes: 120, lambda: 0.7, behindFrom: 0.02, behindFull: 0.05, behindTo: 0.24, upFull: 0.08, upTo: 0.15, downTo: -0.06, midFrom: 0.008, midFull: 0.03, sideFull: 0.11, sideTo: 0.17 }),
   /** folds ironed out after it (2026-10-31): two triangles sharing an edge whose facings' dot is below `foldAt` are a
    * fold; the points round it are smoothed `ironLambda` hard, four passes a round, at most `ironRounds` rounds */
@@ -47,7 +51,7 @@ export const BIRTH_NORMALS = Object.freeze({
 
 export interface BirthNormals {
   /** the field for her as posed now (her bones' world matrices current); `pos`/`nrm` her shape as drawn */
-  compute(pos: ArrayLike<number>, nrm: ArrayLike<number>): { index: Uint32Array; pos: Float32Array; nrm: Float32Array };
+  compute(pos: ArrayLike<number>, nrm: ArrayLike<number>, fill?: number): { index: Uint32Array; pos: Float32Array; nrm: Float32Array };
   readonly watched: number;
   /** vertex pairs of the band's open edges (each an edge only one of her triangles has) */
   readonly openEdges: readonly number[];
@@ -106,7 +110,7 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
   for (const i of used) { const k = key[i]; restK[k * 3] = rest[i * 3]; restK[k * 3 + 1] = rest[i * 3 + 1]; restK[k * 3 + 2] = rest[i * 3 + 2]; }
   // each point's share of the GLUTEAL FOLD's own smoothing (see B.fold): behind her vulva, low on her buttocks, off
   // her middle -- where her buttock meets her thigh
-  const zoneShare = (F: typeof B.fold) => {
+  const zoneShare = (F: { readonly behindFrom: number; readonly behindFull: number; readonly behindTo: number; readonly upFull: number; readonly upTo: number; readonly downTo: number; readonly midFrom: number; readonly midFull: number; readonly sideFull: number; readonly sideTo: number }) => {
     const out = new Float32Array(K);
     for (let k = 0; k < K; k++) {
       const x = Math.abs(restK[k * 3]), up = restK[k * 3 + 1] - mid.y, behind = mid.z - restK[k * 3 + 2];
@@ -115,7 +119,7 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
     }
     return out;
   };
-  const foldK = zoneShare(B.fold);
+  const foldK = zoneShare(B.fold), underK = zoneShare(B.under);
   let pierced = 0, blowWorst = 0, blowCount = 0, folded = 0;
   const expected: number[] = [];
   const perMetre = 1 / new THREE.Vector3(1, 0, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(toRest)).length();
@@ -132,7 +136,7 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
     get blow() { return { worst: +blowWorst.toFixed(2), over3: blowCount }; },
     get folded() { return folded; },
     expected,
-    compute(pos, nrm) {
+    compute(pos, nrm, fill = 0) {
       const sk = mesh.skeleton;
       for (let q = 0; q < sk.bones.length; q++) S[q].multiplyMatrices(mesh.bindMatrixInverse, tmp.multiplyMatrices(sk.bones[q].matrixWorld, sk.boneInverses[q])).multiply(mesh.bindMatrix);
       // her shape as DRAWN: her morph targets on it too (2026-10-31: her model carries the full belly and the belly
@@ -362,6 +366,50 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
         }
       };
       smoothZone(foldK, B.fold.passes, B.fold.lambda);
+      // THE HOLLOWS UNDER HER FILLED (Joshua, 2026-10-31, of SQUAT from in front and below: "it pinches right in the
+      // middle and maybe also is bowed inwards instead of outwards"). Her middle stays with her pelvis and each buttock's
+      // underside goes up with its thigh, which pulls the skin between into two hollows; smoothing only flattens them
+      // into a ledge. Here every point that lies in a hollow -- its neighbours' middle further OUT of her than it is --
+      // is moved out to it, and the points that bulge are left alone: like a balloon blown up into the space, the
+      // hollows fill and the underside rounds into one U. Only `fill` of it (the caller's, by pose), only under her.
+      if (fill > 0) {
+        const vn = new Float64Array(K * 3);
+        // which way her triangles face out (as the end of this does it)
+        const outSign = () => {
+          vn.fill(0);
+          for (let t = 0; t < tris.length; t += 3) {
+            const p0 = key[tris[t]] * 3, p1 = key[tris[t + 1]] * 3, p2 = key[tris[t + 2]] * 3;
+            const ux = kp[p1] - kp[p0], uy = kp[p1 + 1] - kp[p0 + 1], uz = kp[p1 + 2] - kp[p0 + 2], vx = kp[p2] - kp[p0], vy = kp[p2 + 1] - kp[p0 + 1], vz = kp[p2 + 2] - kp[p0 + 2];
+            const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+            for (const q of [p0, p1, p2]) { vn[q] += nx; vn[q + 1] += ny; vn[q + 2] += nz; }
+          }
+        };
+        outSign();
+        let agree0 = 0;
+        for (const i of watched) { const o = key[i] * 3; agree0 += Math.sign(vn[o] * nrmPosed(i, 0, nrm) + vn[o + 1] * nrmPosed(i, 1, nrm) + vn[o + 2] * nrmPosed(i, 2, nrm)); }
+        const w0 = agree0 >= 0 ? 1 : -1, U = B.under;
+        for (let pass = 0; pass < U.passes; pass++) {
+          if (pass > 0) outSign();
+          sumN.fill(0); cntN.fill(0);
+          for (let t = 0; t < tris.length; t += 3) for (let q = 0; q < 3; q++) {
+            const k = key[tris[t + q]];
+            if (underK[k] <= 0) continue;
+            for (let r = 1; r < 3; r++) { const o = key[tris[t + ((q + r) % 3)]]; sumN[k * 3] += kp[o * 3]; sumN[k * 3 + 1] += kp[o * 3 + 1]; sumN[k * 3 + 2] += kp[o * 3 + 2]; cntN[k]++; }
+          }
+          for (let k = 0; k < K; k++) {
+            if (!cntN[k] || underK[k] <= 0) continue;
+            let nx = vn[k * 3] * w0, ny = vn[k * 3 + 1] * w0, nz = vn[k * 3 + 2] * w0; const l = Math.hypot(nx, ny, nz);
+            if (l < 1e-20) continue;
+            nx /= l; ny /= l; nz /= l;
+            const lx = sumN[k * 3] / cntN[k] - kp[k * 3], ly = sumN[k * 3 + 1] / cntN[k] - kp[k * 3 + 1], lz = sumN[k * 3 + 2] / cntN[k] - kp[k * 3 + 2];
+            const out = lx * nx + ly * ny + lz * nz;
+            // in a hollow: out to its neighbours (and a little of their spread along her, so it stays even)
+            const f = U.rate * fill * underK[k];
+            if (out > 0) { kp[k * 3] += f * (out * nx + U.even * (lx - out * nx)); kp[k * 3 + 1] += f * (out * ny + U.even * (ly - out * ny)); kp[k * 3 + 2] += f * (out * nz + U.even * (lz - out * nz)); }
+            else { kp[k * 3] += f * U.even * (lx - out * nx); kp[k * 3 + 1] += f * U.even * (ly - out * ny); kp[k * 3 + 2] += f * U.even * (lz - out * nz); }
+          }
+        }
+      }
       ironFolds();
       unPierce();
       layCrease();

@@ -486,6 +486,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** in SQUAT the same skin rounded OUT instead (negative: out; Joshua, 2026-10-31: there it "pinches right in the
    * middle and maybe also is bowed inwards instead of outwards") */
   let birthSeatSquat = 0;
+  /** the hollows under her filled in a birth pose (birthNormals.ts `fill`), by pose; a probe may set them */
+  let birthFillSquat = 0, birthFillRecline = 0;
+  /** in SQUAT, how much of her lower buttocks is carried by her pelvis (a probe may set it) */
+  let squatBack = 0;
   // the library outfit she last put on (her changes to it save as hers), and saved clothes waiting for their outfit to load
   let wornFrom: string | null = null;
   // ...and in his fabrics, put on as her outfit is dressed the first time
@@ -1226,7 +1230,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     layBuildBones(build);
     // her middle -- the skin round and behind her vulva -- kept with her pelvis in a birth position (birthWeights.ts;
     // Joshua, 2026-10-30, of RECLINE with it: "Looks a lot better"); the rebuilt area reads her weights again
-    if (birthWeights?.apply(birthMaskOverride ?? (isBirthPose(pose) ? BIRTH_WEIGHTS.share : 0))) vulva?.resyncWeights();
+    // (in SQUAT her lower buttocks stay with her pelvis too, hanging between her heels -- with her thighs they were drawn
+    // forward into two hollows with her middle pinched between, Joshua 2026-10-31; RECLINE keeps them with her thighs)
+    if (birthWeights?.apply(birthMaskOverride ?? (isBirthPose(pose) ? BIRTH_WEIGHTS.share : 0), pose === 'squat' ? squatBack : BIRTH_WEIGHTS.backShare)) vulva?.resyncWeights();
     // her navel, laid on her as just shaped (navelPiece.ts)
     layNavel(bump);
     // which garments are drawn: the outfit editor's choice, or none while her skin is painted bare (CLOTHES · HIDDEN)
@@ -2910,7 +2916,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const g = b.mesh.geometry, P = (g.getAttribute('position') as THREE.BufferAttribute).array as Float32Array, N = (g.getAttribute('normal') as THREE.BufferAttribute).array as Float32Array;
     const map = new Map(bare);
     if (birthRoom && birthRoomOn) map.set(BIRTH_ROOM_FIELD, birthRoom.compute(P));
-    if (birthNormals && birthNormalsOn) map.set(BIRTH_NORMALS_FIELD, birthNormals.compute(P, N));
+    if (birthNormals && birthNormalsOn) map.set(BIRTH_NORMALS_FIELD, birthNormals.compute(P, N, pose === 'squat' ? birthFillSquat : pose === 'recline' ? birthFillRecline : 0));
     sb.fields = { ...sb.fields, fields: map, last: '' };
     applyLook();
   }
@@ -3569,6 +3575,33 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           return { ...vulva.worldAxes(), toKnees: knee.sub(hip).normalize().toArray().map((x) => +x.toFixed(3)), toHead: head.sub(hip).normalize().toArray().map((x) => +x.toFixed(3)) };
         },
         birthMask: (share: number | null) => { birthMaskOverride = share; applyLook(); return { touched: birthWeights?.touched ?? null, debug: birthWeights?.debug }; },
+        // (debug) her skin as drawn, painted by which bones carry it: red her left thigh's, blue her right's, white the
+        // rest; null takes it away
+        weightPaint: (on: boolean) => {
+          const b = bodyOf(); if (!b || !model || !measure) return null;
+          const old = (model.userData.weightPaint as THREE.Mesh | undefined); if (old) { old.removeFromParent(); old.geometry.dispose(); (old.material as THREE.Material).dispose(); model.userData.weightPaint = undefined; }
+          b.mesh.visible = true;
+          if (!on) return false;
+          model.updateMatrixWorld(true); b.mesh.skeleton.update();
+          const g0 = b.mesh.geometry, n = g0.getAttribute('position').count, P2 = new Float32Array(n * 3), C2 = new Float32Array(n * 3), v = new THREE.Vector3();
+          const si = g0.getAttribute('skinIndex'), sw = g0.getAttribute('skinWeight'), j = measure.joints;
+          const thighL = [j.hipL, j.kneeL], thighR = [j.hipR, j.kneeR];
+          for (let i = 0; i < n; i++) {
+            b.mesh.getVertexPosition(i, v); v.toArray(P2, i * 3);
+            let l = 0, r = 0;
+            for (let c = 0; c < 4; c++) { const bi = si.getComponent(i, c), w = sw.getComponent(i, c); if (thighL.includes(bi)) l += w; if (thighR.includes(bi)) r += w; }
+            C2[i * 3] = 1 - r; C2[i * 3 + 1] = 1 - l - r; C2[i * 3 + 2] = 1 - l;
+          }
+          const g2 = new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.BufferAttribute(P2, 3)); g2.setAttribute('color', new THREE.BufferAttribute(C2, 3));
+          g2.setIndex(new THREE.BufferAttribute(Uint32Array.from((b.mesh.userData.allIndices as ArrayLike<number> | undefined) ?? g0.index!.array), 1)); g2.computeVertexNormals();
+          const m2 = new THREE.Mesh(g2, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+          m2.matrixAutoUpdate = false; m2.matrix.copy(b.mesh.matrixWorld); m2.matrixWorldNeedsUpdate = true; m2.frustumCulled = false;
+          three.add(m2);
+          model.userData.weightPaint = m2; b.mesh.visible = false; if (vulva) vulva.mesh.visible = false;
+          return true;
+        },
+        squatBack: (v: number) => { squatBack = v; applyLook(); birthRoomFor = ''; return v; },
+        birthFill: (squat: number, recline: number) => { birthFillSquat = squat; birthFillRecline = recline; birthRoomFor = ''; applyLook(); return true; },
         birthSeat: (on: boolean, squat?: number) => { birthSeatOn = on; if (typeof squat === 'number') birthSeatSquat = squat; applyLook(); return on; },
         birthTweak: (t: Partial<BirthSpec> | null) => { birthTweak = t; applyLook(); return true; },
         birthRoom: (on: boolean) => { birthRoomOn = on; birthRoomFor = ''; applyLook(); return { watched: birthRoom?.watched ?? null, largestMm: birthRoom ? +(birthRoom.largest * 1000).toFixed(1) : null, partsMm: birthRoom ? Object.fromEntries(Object.entries(birthRoom.parts).map(([k2, v2]) => [k2, +(v2 * 1000).toFixed(1)])) : null }; },
