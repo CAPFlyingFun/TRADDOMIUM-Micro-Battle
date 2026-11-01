@@ -250,6 +250,10 @@ export const WOMB_BACK_Z = -0.055;        // in front of her spine (rest metres)
 /** lower down, in her pelvis, it reaches further back toward her sacrum: [y, back z] (rest metres). BIOLOGICAL SHAPE, GAME TUNING */
 export const WOMB_BACK: readonly (readonly [number, number])[] = [[0.80, -0.105], [0.86, -0.095], [0.94, -0.07], [1.0, WOMB_BACK_Z]];
 export const womBackAt = (y: number): number => lerpTable(WOMB_BACK, y, 1);
+/** past term (her belly's slider over 100%) how much more of itself the womb's cap may grow so her skin holds it. GAME TUNING */
+export const WOMB_PAST_TERM = 1.3;
+/** from this week the womb grows into her belly's own shape where her skin is, all of it by term. GAME TUNING */
+export const WOMB_FILL_FROM = 30;
 export const WOMB_FLOOR_Y = 0.87;         // deep in her pelvis, where its bottom (and at term the baby's head) sits: up her 8 cm birth canal, engaged at her cervix at term (Joshua, 2026-11-01: "make it 8cm and curve it so it all works"; it was 0.81, level with her opening; 0.90 left no room for twins and triplets). GAME TUNING
 /** the fundus (top) and the half width by week: [week, top y (m), half width (m)]. BIOLOGICAL SHAPE (fundal height), GAME TUNING (her body) */
 export const FUNDUS: readonly (readonly [number, number, number])[] = [[12, 0.895, 0.045], [16, 0.950, 0.075], [20, 1.010, 0.100], [28, 1.115, 0.125], [36, 1.215, 0.140], [40, 1.230, 0.145], [42, 1.240, 0.150]];
@@ -302,6 +306,14 @@ export function wombFromSkin(skin: ArrayLike<number>, week: number, backShift = 
   for (let i = 0; i < n; i++) if (Math.abs(skin[i * 3]) < 0.03 && Math.abs(skin[i * 3 + 1] - midY) < 0.03) front = Math.max(front, skin[i * 3 + 2]);
   const centre = new THREE.Vector3(0, midY, (WOMB_BACK_Z + front - WOMB_TISSUE_M) / 2);
   const hy = (top - WOMB_FLOOR_Y) / 2, back = 0.25, fwd = Math.max(0.02, front - WOMB_TISSUE_M - centre.z);
+  // PAST TERM HER BELLY IS BIGGER THAN A TERM WOMB (Joshua, 2026-11-01, of 150-200%: "the womb doesn't actually fill in the
+  // whole belly where the skin is"): from week 40 to 42 (her slider's 100% to 200%) the cap widens, rises and reaches down
+  // in front by up to WOMB_PAST_TERM of itself, so her skin is what holds the womb there -- never down through her
+  // pelvic floor, never back past her spine
+  const past = Math.min(1, Math.max(0, (week - 40) / 2)) * WOMB_PAST_TERM;
+  const halfP = half * (1 + past), hyUp = hy * (1 + past);
+  /** how much the womb takes her belly's own shape where her skin is (0 its cap holds it, 1 her skin does): from WOMB_FILL_FROM to term */
+  const fill = Math.min(1, Math.max(0, (week - WOMB_FILL_FROM) / (40 - WOMB_FILL_FROM)));
   /** how far along a direction (going back) the womb's back wall is: where it meets z = womBackAt(y) */
   const backWall = (dy: number, dz: number): number => {
     if (dz >= -1e-6) return Infinity;
@@ -352,12 +364,17 @@ export function wombFromSkin(skin: ArrayLike<number>, week: number, backShift = 
     const th = (t / (NT - 1)) * Math.PI, ph = (p / NP) * 2 * Math.PI;
     const dx = Math.sin(th) * Math.sin(ph), dy = Math.cos(th), dz = Math.sin(th) * Math.cos(ph);
     // the cap: an egg, half height to floor and fundus, a womb's width, flat to her spine behind, as deep as her skin in front
-    const egg = 1 / Math.sqrt((dx / half) ** 2 + (dy / hy) ** 2 + (dz / (dz < 0 ? back : fwd)) ** 2), wall = backWall(dy, dz);
+    const hyAt = dy > 0 ? hyUp : hy * (1 + 1.5 * past * Math.max(0, dz));
+    const egg = 1 / Math.sqrt((dx / halfP) ** 2 + (dy / hyAt) ** 2 + (dz / (dz < 0 ? back : fwd)) ** 2), wall = backWall(dy, dz);
     const cap = Number.isFinite(wall) ? -soft * Math.log(Math.exp(-egg / soft) + Math.exp(-Math.max(0.005, wall) / soft)) : egg;
     const sk = skinR[t * NP + p];
     // soft minimum of the two: they meet without a crease
     // (the skin cell holds skin less tissue: the womb's own wall comes off too, so the sac is inside all three)
-    r[t * NP + p] = Number.isFinite(sk) ? -soft * Math.log(Math.exp(-cap / soft) + Math.exp(-Math.max(0.005, sk - WOMB_WALL_M) / soft)) : cap;
+    // (and from near term on, wherever her belly's skin is, the womb IS her belly's shape, just inside it: her womb and
+    // her babies are what make her belly -- Joshua, 2026-11-01: "the womb should be the same shape as the belly, just
+    // inside... wasted space... it can alter the weight tilt")
+    const held = Number.isFinite(sk) ? -soft * Math.log(Math.exp(-cap / soft) + Math.exp(-Math.max(0.005, sk - WOMB_WALL_M) / soft)) : cap;
+    r[t * NP + p] = Number.isFinite(sk) ? held + (Math.max(0.005, sk - WOMB_WALL_M) - held) * fill : cap;
   }
   // smoothed (each cell toward its neighbours, never past where it started: never further out than the skin allows)
   const tmp = new Float32Array(r.length);
