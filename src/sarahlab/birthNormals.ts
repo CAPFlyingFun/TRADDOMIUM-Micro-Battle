@@ -29,6 +29,9 @@ export const BIRTH_NORMALS = Object.freeze({
   /** her underside rounded (see `compute`'s `pull`): the zone, and how squarely down a point must face as posed (from
    * `faceFrom`, all of it by `faceFull`) */
   underPull: Object.freeze({ faceFrom: -0.15, faceFull: 0.35, behindFrom: 0.0, behindFull: 0.03, behindTo: 0.14, upFull: 0.07, upTo: 0.14, downTo: -0.12, midFrom: -1, midFull: 0, sideFull: 0.12, sideTo: 0.18 }),
+  /** SQUAT's top strip (see `compute`): beside and just behind her vulva, off her middle (its lips), fading out over
+   * her underside and her thighs */
+  squatTop: Object.freeze({ passes: 160, lambda: 0.7, behindFrom: -0.03, behindFull: 0.0, behindTo: 0.12, upFull: 0.04, upTo: 0.09, downTo: -0.05, midFrom: 0.012, midFull: 0.03, sideFull: 0.09, sideTo: 0.14 }),
   under: Object.freeze({ passes: 200, rate: 0.8, even: 0.3, behindFrom: -0.02, behindFull: 0.01, behindTo: 0.22, upFull: 0.06, upTo: 0.13, downTo: -0.12, midFrom: -1, midFull: 0, sideFull: 0.12, sideTo: 0.18 }),
   fold: Object.freeze({ passes: 120, lambda: 0.7, behindFrom: 0.02, behindFull: 0.05, behindTo: 0.24, upFull: 0.08, upTo: 0.15, downTo: -0.06, midFrom: 0.008, midFull: 0.03, sideFull: 0.11, sideTo: 0.17 }),
   /** folds ironed out after it (2026-10-31): two triangles sharing an edge whose facings' dot is below `foldAt` are a
@@ -122,7 +125,7 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
     }
     return out;
   };
-  const foldK = zoneShare(B.fold), underK = zoneShare(B.under), pullK = zoneShare(B.underPull);
+  const foldK = zoneShare(B.fold), underK = zoneShare(B.under), pullK = zoneShare(B.underPull), topK = zoneShare(B.squatTop);
   const mrest = new Float32Array(n * 3);
   let pierced = 0, blowWorst = 0, blowCount = 0, folded = 0;
   const expected: number[] = [];
@@ -393,6 +396,9 @@ export function createBirthNormals(mesh: THREE.SkinnedMesh, toRest: THREE.Matrix
         }
       };
       smoothZone(foldK, B.fold.passes, B.fold.lambda);
+      // (in SQUAT, the strip where her underside's curve meets the skin beside her vulva smoothed into both -- Joshua,
+      // 2026-10-31: "smooth the closest section on top... fade into the underneath and vulva")
+      if (pull > 0) smoothZone(topK, B.squatTop.passes, B.squatTop.lambda);
       // THE HOLLOWS UNDER HER FILLED (Joshua, 2026-10-31, of SQUAT from in front and below: "it pinches right in the
       // middle and maybe also is bowed inwards instead of outwards"). Her middle stays with her pelvis and each buttock's
       // underside goes up with its thigh, which pulls the skin between into two hollows; smoothing only flattens them
