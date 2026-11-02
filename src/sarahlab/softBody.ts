@@ -131,6 +131,12 @@ export interface JiggleUniforms {
   readonly belly: { value: THREE.Vector3 };
   readonly breastL: { value: THREE.Vector3 };
   readonly breastR: { value: THREE.Vector3 };
+  /** HER LEGS' SOFT TISSUE (Joshua, 2026-11-02: legs as soft bodies, "a balloon with release valves"): each thigh's and
+   * each calf's own mass, moving the skin its follow weights say (`LEG_JIGGLE_ATTRIBUTE`) */
+  readonly thighL: { value: THREE.Vector3 };
+  readonly thighR: { value: THREE.Vector3 };
+  readonly calfL: { value: THREE.Vector3 };
+  readonly calfR: { value: THREE.Vector3 };
   /**
    * A BABY'S KICK on her belly (baby.ts `MOVES`): up to `KICKS` at once, each where on her skin (rest metres, xyz) and
    * how far out (w, metres), the way out (xyz) and how wide (w, metres); her geometry to her rest frame, and back for a
@@ -145,6 +151,7 @@ export interface JiggleUniforms {
 export const KICKS = 3;
 export const createJiggleUniforms = (): JiggleUniforms => ({
   belly: { value: new THREE.Vector3() }, breastL: { value: new THREE.Vector3() }, breastR: { value: new THREE.Vector3() },
+  thighL: { value: new THREE.Vector3() }, thighR: { value: new THREE.Vector3() }, calfL: { value: new THREE.Vector3() }, calfR: { value: new THREE.Vector3() },
   kickAt: { value: Array.from({ length: KICKS }, () => new THREE.Vector4()) }, kickDir: { value: Array.from({ length: KICKS }, () => new THREE.Vector4(0, 0, 1, 0.03)) },
   kickRest: { value: new THREE.Matrix4() }, kickUnits: { value: new THREE.Matrix3() },
 });
@@ -205,12 +212,14 @@ export function patchJiggle(material: THREE.Material, uniforms: JiggleUniforms):
     shader.uniforms.uJiggleBelly = uniforms.belly;
     shader.uniforms.uJiggleBreastL = uniforms.breastL;
     shader.uniforms.uJiggleBreastR = uniforms.breastR;
+    shader.uniforms.uJiggleThighL = uniforms.thighL; shader.uniforms.uJiggleThighR = uniforms.thighR;
+    shader.uniforms.uJiggleCalfL = uniforms.calfL; shader.uniforms.uJiggleCalfR = uniforms.calfR;
     shader.uniforms.uKickAt = uniforms.kickAt;
     shader.uniforms.uKickDir = uniforms.kickDir;
     shader.uniforms.uKickRest = uniforms.kickRest;
     shader.uniforms.uKickUnits = uniforms.kickUnits;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\nattribute vec3 jiggle;\nattribute vec3 babyPush;\nuniform vec3 uJiggleBelly;\nuniform vec3 uJiggleBreastL;\nuniform vec3 uJiggleBreastR;\nuniform vec4 uKickAt[${KICKS}];\nuniform vec4 uKickDir[${KICKS}];\nuniform mat4 uKickRest;\nuniform mat3 uKickUnits;`)
+      .replace('#include <common>', `#include <common>\nattribute vec3 jiggle;\nattribute vec3 babyPush;\nuniform vec3 uJiggleThighL;\nuniform vec3 uJiggleThighR;\nuniform vec3 uJiggleCalfL;\nuniform vec3 uJiggleCalfR;\nuniform vec3 uJiggleBelly;\nuniform vec3 uJiggleBreastL;\nuniform vec3 uJiggleBreastR;\nuniform vec4 uKickAt[${KICKS}];\nuniform vec4 uKickDir[${KICKS}];\nuniform mat4 uKickRest;\nuniform mat3 uKickUnits;`)
       .replace('#include <morphtarget_vertex>', `#include <morphtarget_vertex>
 vec3 kickMove = vec3(0.0);
 if (jiggle.x > 0.0) {
@@ -222,7 +231,11 @@ if (jiggle.x > 0.0) {
   }
   kickMove = clamp(jiggle.x * 0.9, 0.0, 1.0) * (uKickUnits * kickMove);
 }
-transformed += babyPush + kickMove + jiggle.x * uJiggleBelly + jiggle.y * uJiggleBreastL + jiggle.z * uJiggleBreastR;`);
+// (her legs ride the breasts' two weights, negative: thigh in y, calf in z, her right leg 10 further down -- the body is
+// at the most attributes a vertex may carry)
+vec2 legA = max(-jiggle.yz, vec2(0.0)), legW = mod(legA, 10.0);
+transformed += babyPush + kickMove + jiggle.x * uJiggleBelly + max(jiggle.y, 0.0) * uJiggleBreastL + max(jiggle.z, 0.0) * uJiggleBreastR
+  + legW.x * (legA.x >= 10.0 ? uJiggleThighR : uJiggleThighL) + legW.y * (legA.y >= 10.0 ? uJiggleCalfR : uJiggleCalfL);`);
   };
   material.customProgramCacheKey = function () { return `${cacheKey ? cacheKey.call(this) : ''}|jiggle`; };
   material.needsUpdate = true;
@@ -236,7 +249,60 @@ transformed += babyPush + kickMove + jiggle.x * uJiggleBelly + jiggle.y * uJiggl
  * jiggle's, so the CPU posers read it the same way.
  */
 export const PUSH_ATTRIBUTE = 'babyPush';
-export interface Jiggle { readonly weights: Float32Array; readonly uniforms: JiggleUniforms; readonly push: Float32Array }
+export interface Jiggle { readonly weights: Float32Array; readonly uniforms: JiggleUniforms; readonly push: Float32Array; readonly legs?: Float32Array | null }
+
+/**
+ * Her legs' follow weights, packed into the jiggle attribute's breast channels (no new attribute: her body is at the most
+ * a vertex may carry): on a leg vertex, -(thigh weight) in y and -(calf weight) in z, her right leg's 10 further down.
+ * `legJiggleWeights` gives them two a vertex (thigh, calf), positive her left leg and negative her right; `packLegs` lays them.
+ */
+export const LEG_RIGHT_OFFSET = 10;
+export function packLegs(weights: Float32Array, legs: Float32Array): void {
+  for (let i = 0; i < legs.length / 2; i++) {
+    const t = legs[i * 2], c = legs[i * 2 + 1];
+    if (!t && !c) continue;
+    const off = t < 0 || c < 0 ? LEG_RIGHT_OFFSET : 0;
+    weights[i * 3 + 1] = -(Math.abs(t) + off); weights[i * 3 + 2] = -(Math.abs(c) + off);
+  }
+}
+/** Each leg's bones: thigh (hip joint), shin (knee joint), foot (ankle joint). */
+export interface LegBones { readonly left: readonly [THREE.Bone, THREE.Bone, THREE.Bone]; readonly right: readonly [THREE.Bone, THREE.Bone, THREE.Bone] }
+/** GAME TUNING: how much of each leg's soft tissue follows its mass -- along the thigh (0 hip .. 1 knee) and calf (0 knee .. 1
+ * ankle), all of it inside `full`, none outside `from` at each end; the back and inner side most, `front` of it in front
+ * (the shin's front is bone: `shinFront`) */
+export const LEG_SOFT = Object.freeze({ thighFrom: [0.05, 0.95] as const, thighFull: [0.3, 0.7] as const, calfFrom: [0.05, 0.85] as const, calfFull: [0.18, 0.55] as const, front: 0.45, shinFront: 0.1 });
+
+/** A mesh's leg follow weights (null when it has none of those bones, or none of its skin is on them). */
+export function legJiggleWeights(mesh: THREE.SkinnedMesh, legs: LegBones): Float32Array | null {
+  const g = mesh.geometry, sk = mesh.skeleton, pos = g.getAttribute('position'), nrm = g.getAttribute('normal'), si = g.getAttribute('skinIndex'), sw = g.getAttribute('skinWeight');
+  if (!sk || !pos || !si || !sw) return null;
+  const n = pos.count, out = new Float32Array(n * 2), L = LEG_SOFT;
+  const jointAt = (b: number) => new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().multiplyMatrices(mesh.bindMatrixInverse, new THREE.Matrix4().copy(sk.boneInverses[b]).invert()));
+  const env = (t: number, from: readonly [number, number], full: readonly [number, number]) => { const a = clamp((t - from[0]) / (full[0] - from[0]), 0, 1), b = clamp((from[1] - t) / (from[1] - full[1]), 0, 1); return a * a * (3 - 2 * a) * b * b * (3 - 2 * b); };
+  let any = false;
+  for (const [side, bones] of [[1, legs.left], [-1, legs.right]] as const) {
+    const ix = bones.map((b) => sk.bones.indexOf(b));
+    if (ix.some((k) => k < 0)) continue;
+    const hip = jointAt(ix[0]), knee = jointAt(ix[1]), ankle = jointAt(ix[2]), v = new THREE.Vector3(), nv = new THREE.Vector3();
+    const thighAx = knee.clone().sub(hip), calfAx = ankle.clone().sub(knee), tl = thighAx.lengthSq(), cl = calfAx.lengthSq();
+    for (let i = 0; i < n; i++) {
+      let wt = 0, wc = 0; for (let k = 0; k < 4; k++) { const b = si.getComponent(i, k), w = sw.getComponent(i, k); if (b === ix[0]) wt += w; else if (b === ix[1]) wc += w; }
+      if (wt + wc < 0.05) continue;
+      v.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+      if (nrm) nv.set(nrm.getX(i), nrm.getY(i), nrm.getZ(i)).normalize(); else nv.set(0, 0, 1);
+      // (her back is -z; her inner thigh faces her middle)
+      const back = 0.5 * (1 - nv.z), inner = Math.max(0, -Math.sign(v.x || side) * nv.x), soft = Math.max(back, 0.8 * inner);
+      const tt = v.clone().sub(hip).dot(thighAx) / (tl || 1), tc = v.clone().sub(knee).dot(calfAx) / (cl || 1);
+      const a = wt * env(tt, L.thighFrom, L.thighFull) * (L.front + (1 - L.front) * soft) * UNITS_PER_METRE;
+      const c = wc * env(tc, L.calfFrom, L.calfFull) * (L.shinFront + (1 - L.shinFront) * back) * UNITS_PER_METRE;
+      if (a > 0 || c > 0) { out[i * 2] = side * a; out[i * 2 + 1] = side * c; any = true; }
+    }
+  }
+  return any ? out : null;
+}
+
+/** THE LEGS' SPRINGS (GAME TUNING): a thigh a little slower and looser than a calf; both well damped. */
+export const LEG_TUNE = Object.freeze({ thigh: { hz: 3.2, damping: 0.4, maxM: 0.01, gain: 1 }, calf: { hz: 4.2, damping: 0.45, maxM: 0.007, gain: 1 } } as const);
 /** A mesh's jiggle, if it was given one. */
 export function jiggleOf(mesh: THREE.Object3D): Jiggle | null {
   const j = (mesh.userData as { jiggle?: Jiggle }).jiggle;
@@ -247,15 +313,18 @@ export function jiggleOf(mesh: THREE.Object3D): Jiggle | null {
  * Give one skinned mesh its follow weights and patch its materials (false when it has no motion shapes). Its own
  * motion shapes stay where they are; the room stops driving them once the masses move it.
  */
-export function attachJiggle(mesh: THREE.Mesh, uniforms: JiggleUniforms): boolean {
+export function attachJiggle(mesh: THREE.Mesh, uniforms: JiggleUniforms, legBones?: LegBones | null): boolean {
   const g = mesh.geometry as THREE.BufferGeometry;
   if (jiggleOf(mesh)) return true;
-  const weights = jiggleWeights(g, mesh.morphTargetDictionary);
+  const legs = legBones && (mesh as THREE.SkinnedMesh).isSkinnedMesh ? legJiggleWeights(mesh as THREE.SkinnedMesh, legBones) : null;
+  const weights = jiggleWeights(g, mesh.morphTargetDictionary) ?? (legs ? new Float32Array((g.getAttribute('position')?.count ?? 0) * 3) : null);
   if (!weights) return false;
+  // (never over a breast's own weight: a leg vertex has none)
+  if (legs) { for (let i = 0; i < legs.length / 2; i++) if (weights[i * 3 + 1] > 0 || weights[i * 3 + 2] > 0) { legs[i * 2] = 0; legs[i * 2 + 1] = 0; } packLegs(weights, legs); }
   g.setAttribute(JIGGLE_ATTRIBUTE, new THREE.BufferAttribute(weights, 3));
   const push = new Float32Array(weights.length);
   g.setAttribute(PUSH_ATTRIBUTE, new THREE.BufferAttribute(push, 3));
-  (mesh.userData as { jiggle?: Jiggle }).jiggle = { weights, uniforms, push };
+  (mesh.userData as { jiggle?: Jiggle }).jiggle = { weights, uniforms, push, legs };
   for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) patchJiggle(m, uniforms);
   return true;
 }
@@ -275,9 +344,19 @@ const kickP = new THREE.Vector3(), kickM = new THREE.Vector3();
 export function jiggleAt(j: Jiggle, v: number, out: { x: number; y: number; z: number }, x?: number, y?: number, z?: number): void {
   const w = j.weights, o = v * 3, b = j.uniforms.belly.value, l = j.uniforms.breastL.value, r = j.uniforms.breastR.value;
   const p = j.push;
-  out.x = p[o] + w[o] * b.x + w[o + 1] * l.x + w[o + 2] * r.x;
-  out.y = p[o + 1] + w[o] * b.y + w[o + 1] * l.y + w[o + 2] * r.y;
-  out.z = p[o + 2] + w[o] * b.z + w[o + 1] * l.z + w[o + 2] * r.z;
+  const wl = Math.max(w[o + 1], 0), wr = Math.max(w[o + 2], 0);
+  out.x = p[o] + w[o] * b.x + wl * l.x + wr * r.x;
+  out.y = p[o + 1] + w[o] * b.y + wl * l.y + wr * r.y;
+  out.z = p[o + 2] + w[o] * b.z + wl * l.z + wr * r.z;
+  // (her legs, packed in the breasts' channels as the shader reads them)
+  if (w[o + 1] < 0 || w[o + 2] < 0) {
+    const u = j.uniforms;
+    for (const [ch, L, R] of [[o + 1, u.thighL, u.thighR], [o + 2, u.calfL, u.calfR]] as const) {
+      const a = Math.max(-w[ch], 0); if (!a) continue;
+      const m = (a >= LEG_RIGHT_OFFSET ? R : L).value, k = a % LEG_RIGHT_OFFSET;
+      out.x += k * m.x; out.y += k * m.y; out.z += k * m.z;
+    }
+  }
   if (x === undefined || y === undefined || z === undefined || !(w[o] > 0)) return;
   const u = j.uniforms;
   const K = u.kickAt.value;

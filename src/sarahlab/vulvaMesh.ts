@@ -282,7 +282,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   readExtras();
   // her springs (softBody.ts): the belly's and breasts' weights, and her baby's push, read back with her shape
   const jig = g.getAttribute(JIGGLE_ATTRIBUTE) as THREE.BufferAttribute | undefined;
-  if (jig) { const j = new Float32Array(P * 3); sampleInto(j, jig.array, 3, bake.src, bake.bary, P); geom.setAttribute(JIGGLE_ATTRIBUTE, new THREE.BufferAttribute(j, 3)); }
+  // (her legs' weights ride the breasts' channels coded negative: a blend of them is no weight, so the area keeps none)
+  if (jig) { const j = new Float32Array(P * 3); sampleInto(j, jig.array, 3, bake.src, bake.bary, P); for (let q = 0; q < P; q++) { if (j[q * 3 + 1] < 0) j[q * 3 + 1] = 0; if (j[q * 3 + 2] < 0) j[q * 3 + 2] = 0; } geom.setAttribute(JIGGLE_ATTRIBUTE, new THREE.BufferAttribute(j, 3)); }
   const pushOf = () => g.getAttribute(PUSH_ATTRIBUTE) as THREE.BufferAttribute | undefined;
   const push = new Float32Array(P * 3);
   if (pushOf()) geom.setAttribute(PUSH_ATTRIBUTE, new THREE.BufferAttribute(push, 3));
