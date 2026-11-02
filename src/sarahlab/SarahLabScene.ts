@@ -319,6 +319,19 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const linked = new Set<BodyControl>();
   // she opens as Joshua set her (sarahLook.ts, 2026-10-24): 73%, her navel a little out, his tee and leggings
   let bump = SARAH_LOOK?.body.bump ?? 100;
+  /**
+   * HER BELLY SETTLES AS SHE LIES BACK (Joshua, 2026-11-01: "when a pregnant woman lies back... the belly appears to
+   * shrink because the weight shifts more inward"; "fully laying back will shrink the belly 60% of normal... a formula
+   * calculation between straight up and flat on back... lerp so it is a smooth transition and not instant... maybe over
+   * 5s"). Upright the womb, baby and fluid hang forward on her belly wall; lying back they settle toward her spine and the
+   * wall relaxes. Her belly is drawn at `1 - most * settle` of its size, `settle` going from 0 with her torso upright to
+   * 1 with it `flatDeg` from upright (flat on her back) -- nothing within `fromDeg` of upright, as she stands -- eased there at most a whole step in `seconds`. Her sliders,
+   * shape and the size she is (her week) are untouched. GAME TUNING
+   */
+  const BELLY_SETTLE = Object.freeze({ most: 0.6, fromDeg: 20, flatDeg: 90, seconds: 5, step: 0.5 });
+  let bellySettle = 0, bellySettleApplied = 0, bellySettleAt = 0, bellySettleOn = true;
+  /** her belly's size as drawn now: her BELLY slider's, settled as she lies back */
+  const shownBump = (): number => bump * (1 - BELLY_SETTLE.most * bellySettle);
   let curl = 0;
   // v2's ARMS control can override any pose; until used, the pose keeps its natural arms.
   // v1 keeps the original T-POSE-only control and its level-arm default.
@@ -1234,13 +1247,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
 
   function applyLook(): void {
     babyDirty = true;
-    const fieldWeights = fieldWeightsAt(bump);
+    const drawn = shownBump(); bellySettleApplied = bellySettle;
+    const fieldWeights = fieldWeightsAt(drawn);
     const build = currentBuild();
     for (const { mesh, fields } of shaped) applyShapeFields(mesh, fields, {
       ...fieldWeights,
-      ...(mesh.userData.recoveredShirt ? fitWeights(bump, 'shape:fitBelly') : {}),
-      ...(mesh.userData.recoveredShirt ? fitWeights(bump, 'shape:fineFit', SHIRT_FINE_FIT_KEYS) : {}),
-      ...(mesh.userData.recoveredLeggings ? fitWeights(bump, 'shape:recoveryLeggings', LEGGINGS_FIT_KEYS) : {}),
+      ...(mesh.userData.recoveredShirt ? fitWeights(drawn, 'shape:fitBelly') : {}),
+      ...(mesh.userData.recoveredShirt ? fitWeights(drawn, 'shape:fineFit', SHIRT_FINE_FIT_KEYS) : {}),
+      ...(mesh.userData.recoveredLeggings ? fitWeights(drawn, 'shape:recoveryLeggings', LEGGINGS_FIT_KEYS) : {}),
     // recovered clothes keep RAW normal sums so the GPU's belly offsets land on what their fit expects; the leggings
     // were normalized here too, and at 0-50% the large belly offsets flipped normals in the fold under her belly
     }, { normalizeNormals: !(mesh.userData.recoveredShirt || mesh.userData.recoveredLeggings), post: buildPost(mesh, fields, build) });
@@ -1251,7 +1265,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // forward into two hollows with her middle pinched between, Joshua 2026-10-31; RECLINE keeps them with her thighs)
     if (birthWeights?.apply(birthMaskOverride ?? (isBirthPose(pose) ? BIRTH_WEIGHTS.share : 0), pose === 'squat' ? squatBack : BIRTH_WEIGHTS.backShare)) vulva?.resyncWeights();
     // her navel, laid on her as just shaped (navelPiece.ts)
-    layNavel(bump);
+    layNavel(drawn);
     // which garments are drawn: the outfit editor's choice, or none while her skin is painted bare (CLOTHES · HIDDEN)
     const view = skinBare ? 'none' : garmentView;
     fabric?.setLowerBare(isBirthPose(pose));
@@ -1260,11 +1274,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       // the fitted light tee keeps its own navel's shape as fitted for her size: NAVEL DETAIL settles it in the shader
       // (clothFlatten). Settled by the morph instead -- as paint under it at a low NAVEL DETAIL used to do (the painted
       // leggings over her navel) -- its navel, which past 125% stands above hers, was pushed into her: a hole in the tee.
-      if (dict && influences) for (const [name, w] of Object.entries(lookWeights(mesh, bump))) {
+      if (dict && influences) for (const [name, w] of Object.entries(lookWeights(mesh, drawn))) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w;
       }
-      applyRecoveredBaseline(mesh, bump);
+      applyRecoveredBaseline(mesh, drawn);
       const name = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name as Garment;
       if (([...GARMENTS, ...RECOVERED_SHIRTS] as readonly string[]).includes(name)) mesh.visible = shownNow(name);
       { const t = trimShown(name, wornGarments(outfit, garments)); if (t !== null) mesh.visible = t; }
@@ -1282,7 +1296,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         const own = name.endsWith('Trim') ? name.slice(0, -4) : name;
         if (view === 'none' || own !== view) mesh.visible = false;
       }
-      if (mesh.userData.recoveredLeggings) updateLeggingsHem(mesh, bump, shownNow('shirtSpandexHigh') ? 'spandex' : 'relaxed');
+      if (mesh.userData.recoveredLeggings) updateLeggingsHem(mesh, drawn, shownNow('shirtSpandexHigh') ? 'spandex' : 'relaxed');
       // the leggings under a worn athletic tee, the same way
       const underTop = mesh.geometry.getAttribute('_under_top');
       if (underTop && mesh.geometry.index) {
@@ -3408,12 +3422,31 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
 
   /** One frame of her: her walk, her pose, her springs, what is laid on her, and the cloth tee over her. */
+  /** how far her torso leans from upright (degrees): her pelvis to her chest, in the world */
+  function torsoTilt(): number {
+    const sk = model && findSkinnedMesh(model);
+    if (!sk || !measure) return 0;
+    const b = sk.skeleton.bones, p = b[measure.joints.pelvis]?.getWorldPosition(new THREE.Vector3()), c = b[measure.joints.chest]?.getWorldPosition(new THREE.Vector3());
+    if (!p || !c) return 0;
+    const d = c.sub(p); const l = d.length();
+    return l > 1e-9 ? (Math.acos(Math.max(-1, Math.min(1, d.y / l))) * 180) / Math.PI : 0;
+  }
+  /** her belly settling toward where her lean puts it, a whole settle at most every `seconds`; laid again in steps */
+  function settleBelly(dt: number): void {
+    const want = !bellySettleOn ? 0 : Math.max(0, Math.min(1, (torsoTilt() - BELLY_SETTLE.fromDeg) / (BELLY_SETTLE.flatDeg - BELLY_SETTLE.fromDeg))), rate = dt / BELLY_SETTLE.seconds;
+    bellySettle += Math.max(-rate, Math.min(rate, want - bellySettle));
+    bellySettleAt += dt;
+    // (laid again when it has moved a step of her belly's size or come to rest, and not more often than ten times a second)
+    const moved = Math.abs(bellySettle - bellySettleApplied) * BELLY_SETTLE.most * bump;
+    if (moved > 1e-3 && bellySettleAt > 0.1 && (moved >= BELLY_SETTLE.step || bellySettle === want)) { bellySettleAt = 0; applyLook(); }
+  }
   function advance(dt: number): void {
       seconds += dt;
       if (pose === 'walk') walked += WALK_SPEED * dt;
       if (sitMoving) { sitAmount = stepSit(sitAmount, pose === 'sit' ? 1 : 0, dt); if (sitAmount === (pose === 'sit' ? 1 : 0)) { sitMoving = false; applyLook(); } }
       else sitAmount = pose === 'sit' ? 1 : 0;
       if (rig) rig.apply(currentTurns());
+      settleBelly(dt);
       keepBirthRoom();
       // VULVA DETAIL through clothes, as the fabric panel has it now (nothing is done unless it changed)
       vulva?.setDressedLips(fabric?.vulvaKeep() ?? DEFAULT_VULVA_KEEP);
@@ -3706,6 +3739,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         squatPull: (v: number) => { squatPull = v; birthRoomFor = ''; applyLook(); return v; },
         squatBack: (v: number) => { squatBack = v; applyLook(); birthRoomFor = ''; return v; },
         birthFill: (squat: number, recline: number) => { birthFillSquat = squat; birthFillRecline = recline; birthRoomFor = ''; applyLook(); return true; },
+        bellySettle: (on?: boolean) => { if (on !== undefined) { bellySettleOn = on; if (!on) { bellySettle = 0; applyLook(); } } return { on: bellySettleOn, settle: +bellySettle.toFixed(3), tiltDeg: +torsoTilt().toFixed(1), drawn: +shownBump().toFixed(1), bump }; },
         birthGap: (on: boolean) => { birthGapOn = on; applyLook(); return { on, ...birthGapInfo }; },
         birthSeat: (on: boolean, squat?: number) => { birthSeatOn = on; if (typeof squat === 'number') birthSeatSquat = squat; applyLook(); return on; },
         birthTweak: (t: Partial<BirthSpec> | null) => { birthTweak = t; applyLook(); return true; },
