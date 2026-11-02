@@ -59,7 +59,7 @@ export const VULVA_OPEN = Object.freeze({
   bead: 0.004, lipWall: 0.008,
   /** GAME TUNING: the balloon's rolled rim round the opening -- how round (metres, at full size), how far its middle stands
    * out of her (a share of that), and how many Taubin passes even the edge it is laid round */
-  rimBead: 0.0036, rimLift: 0.3, rimTuck: 0.002, backMargin: 0.006, edgeTrim: 0.015, edgeKeep: 0.03, rimSmooth: 30, rimWeightReach: 6,
+  rimBead: 0.0036, rimLift: 0.3, rimTuck: 0.002, rimReach: 0.004, openForward: 0.01, backMargin: 0.02, edgeTrim: 0.015, edgeKeep: 0.03, rimSmooth: 30, rimWeightReach: 6,
   /** GAME TUNING: the outer skin ring -- how round (metres), how far out from the rim, how far its middle stands out of
    * her skin (a share of that), and how many Taubin passes even its loop */
   outerRound: 0.005, outerGap: 0.012, outerLift: 0.2, outerSmooth: 30,
@@ -313,10 +313,13 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   // own triangles that the area is drawn in place of, drawn again just behind it (polygon offset) wherever they lie out
   // past the opening -- so a seam where the area does not quite meet her thighs, as her legs pull it, shows her skin,
   // never the room or the inside of her. Hers exactly: her material, her weights, her shape, all shared.
+  // (in the area's own look -- her material without her split's shading, which drew a line on down past the opening --
+  // her springs kept so it moves with her)
   const backMat = bodyMat.clone();
-  backMat.onBeforeCompile = bodyMat.onBeforeCompile;
-  backMat.customProgramCacheKey = bodyMat.customProgramCacheKey;
+  backMat.onBeforeCompile = () => {};
+  backMat.customProgramCacheKey = () => 'vulvaBacking';
   backMat.vertexColors = false;
+  if (jigU) patchJiggle(backMat, jigU);
   backMat.polygonOffset = true; backMat.polygonOffsetFactor = 2; backMat.polygonOffsetUnits = 6;
   const keepMat = () => {
     for (const mat of [patchMat, dressedMat, backMat]) {
@@ -325,7 +328,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'roughness', 'metalness', 'transparent', 'opacity', 'depthWrite', 'visible', 'side', 'wireframe']) if (a[k] !== b[k]) { a[k] = b[k]; changed = true; }
       if (!mat.color.equals(bodyMat.color)) { mat.color.copy(bodyMat.color); changed = true; }
       // her own material is patched again as she changes (a new garment painted on): the dressed one follows it
-      if (mat !== patchMat && (mat.onBeforeCompile !== bodyMat.onBeforeCompile || mat.customProgramCacheKey !== bodyMat.customProgramCacheKey)) {
+      if (mat === dressedMat && (mat.onBeforeCompile !== bodyMat.onBeforeCompile || mat.customProgramCacheKey !== bodyMat.customProgramCacheKey)) {
         mat.onBeforeCompile = bodyMat.onBeforeCompile; mat.customProgramCacheKey = bodyMat.customProgramCacheKey; changed = true;
       }
       if (changed) mat.needsUpdate = true;
@@ -1094,7 +1097,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     edgeDist3 = d; edgeDistAt = posVersion;
     return d;
   }
-  let tubePushed = 0;
+  let tubePushed = 0, splitDbg: number[] = [];
   /** lay the opening on the rest shape just read (restPos) */
   function layOpen(): void {
     const pos = want;
@@ -1163,7 +1166,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       posedNode(k, tmp).sub(Op);
       nodeU[k] = tmp.dot(sideP) / perMetre; nodeS[k] = tmp.dot(alongP) / perMetre;
     }
-    const Lf = Math.abs(nodeS[jf]), Lb = Math.abs(nodeS[jb]);
+    const Lf = Math.abs(nodeS[jf]), Lb = Math.abs(nodeS[jb]); splitDbg = [+(Lf * 100).toFixed(2), +(Lb * 100).toFixed(2)];
     // HELD 1 CM OFF HER LEGS (Joshua, 2026-10-31: the opening "cuts into the legs... add a limit so it automatically
     // stops if it gets 1cm to the thighs/hips/inside legs until the legs spread more apart"). Her skin that her thighs
     // carry, as she is posed now, beside the opening: the nearest on each side across it sets how wide it may go.
@@ -1195,14 +1198,17 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       // arcs through the hinges -- a lens, sharp at the hinges, a slit shut and a circle at 100% -- the hinges moving
       // apart only as far as a 10 cm circle needs (from her split's own length, `L`, to the opening's half width). The
       // corners at the hinges are softened by `hingeRound` (a share of the way to the oval through the same points).
-      const q = colQ[j], L = q >= 0 ? Lf : Lb, a = Math.max(1e-6, halfAcross), c = Math.max(L, L + (0.05 - L) * open, a) * 1.0001;
+      // (the circle's middle moved forward as it opens, by `openForward` at the full opening -- Joshua, 2026-11-02: "the
+      // bottom end of the vagina area shouldn't be going that far back": round her split's own middle, its back reached
+      // twice as far back as her split does)
+      const front = colQ[j] >= 0, sh = VULVA_OPEN.openForward * open, L = Math.max(0, front ? Lf - sh : Lb + sh), a = Math.max(1e-6, halfAcross), c = Math.max(L, L + (0.05 - L) * open, a) * 1.0001;
       const Rl = (c * c + a * a) / (2 * a), hr = VULVA_OPEN.hingeRound;
       const halfAt = (sAbs: number) => {
         if (sAbs >= c) return 0;
         const lens = Math.max(0, Math.sqrt(Math.max(0, Rl * Rl - sAbs * sAbs)) - (Rl - a)), oval = a * Math.sqrt(Math.max(0, 1 - (sAbs / c) ** 2));
         return lens + (oval - lens) * hr;
       };
-      const rho = (k: number) => { const su = Math.abs(nodeS[k * M + j]); if (su >= c) return 2; const w = halfAt(su); return w > 1e-9 ? Math.abs(nodeU[k * M + j]) / w : 2; };
+      const rho = (k: number) => { const su = Math.abs(Math.abs(nodeS[k * M + j]) + (front ? -sh : sh)); if (su >= c) return 2; const w = halfAt(su); return w > 1e-9 ? Math.abs(nodeU[k * M + j]) / w : 2; };
       // the outermost crossing: a column that wanders out of the oval and back in (over her lips' rounds) is opened
       // to where it leaves it for good, so the edge does not catch on a lip
       let next = rho(R);
@@ -1478,7 +1484,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       for (let j = 0; j < M; j++) { wv.fromArray(oS, j * 3).normalize(); wv.toArray(oS, j * 3); } }
     // (ON THE INSIDE of the edge -- Joshua, 2026-11-02: "can the ring be on the inside and not outside?" -- its middle a
     // roll's width in from the edge, so it starts at the edge itself, rolls over and down into the opening)
-    const phi0 = -0.15 * Math.PI, phi1 = 1.5 * Math.PI, lift = L.rimLift * rr;
+    const phi0 = -0.15 * Math.PI, phi1 = 1.5 * Math.PI, lift = L.rimLift * rr, tuck = new THREE.Vector3();
     for (let b = 0; b < KB; b++) {
       const phi = phi0 + (phi1 - phi0) * (b / (KB - 1));
       for (let j = 0; j < M; j++) {
@@ -1487,7 +1493,13 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
         // (its first ring on her skin's own edge, a little out under it: the roll is laid round a smoothed edge, and where
         // her edge reached out past it the two did not meet and the inside of her showed through between them -- RECLINE
         // 100% from the side, 2026-11-02)
-        if (b === 0 && open > 0) pt.fromArray(rim, j * 3).addScaledVector(oj, L.rimTuck * perMetre).addScaledVector(nO, -0.5 * L.rimTuck * perMetre);
+        // (but never more than `rimReach` from where the roll starts: at the opening's ends her edge runs on back along
+        // her closed lips, and the roll followed it there -- a tail at the bottom of the round opening, RECLINE 100%)
+        if (b === 0 && open > 0) {
+          tuck.fromArray(rim, j * 3).addScaledVector(oj, L.rimTuck * perMetre).addScaledVector(nO, -0.5 * L.rimTuck * perMetre).sub(pt);
+          const most = L.rimReach * perMetre; if (tuck.length() > most) tuck.setLength(most);
+          pt.add(tuck);
+        }
         put(b, j, pt);
         if (b === KB - 1) pt.toArray(startOf, j * 3);
       }
@@ -1778,7 +1790,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
         let jump = 0; for (let j = 0; j < M; j++) jump = Math.max(jump, Math.abs(r[j] - 0.5 * (r[(j + M - 1) % M] + r[(j + 1) % M])));
         let off = 0; for (let j = 0; j < M; j++) { const d = ps[j].clone().sub(C); off = Math.max(off, Math.abs(d.dot(n))); }
         return { rMin: +Math.min(...r).toFixed(2), rMax: +Math.max(...r).toFixed(2), jump: +jump.toFixed(3), outOfPlane: +off.toFixed(2) }; })();
-      const rimSize = { roundness, roundDbg, restAcross: dm(jl, jr), restAlong: dm(jb, jf), posedAcross: wd(jl, jr), posedAlong: wd(jb, jf), heldTo, legNear: legNear.length, blocker, bulge: bulgeNow, lipMaxMm: +(lipMax * 1000).toFixed(1), lipCount, uScale, edgeDistMaxMm: +(Math.max(...Array.from(edgeDist).filter((x) => x < 1)) * 1000).toFixed(1) };
+      const rimSize = { roundness, roundDbg, restAcross: dm(jl, jr), restAlong: dm(jb, jf), posedAcross: wd(jl, jr), posedAlong: wd(jb, jf), heldTo, splitFB: splitDbg, legNear: legNear.length, blocker, bulge: bulgeNow, lipMaxMm: +(lipMax * 1000).toFixed(1), lipCount, uScale, edgeDistMaxMm: +(Math.max(...Array.from(edgeDist).filter((x) => x < 1)) * 1000).toFixed(1) };
       const rimRest = new THREE.Vector3(); for (let j = 0; j < M; j++) rimRest.x += rim[j * 3] / M, rimRest.y += rim[j * 3 + 1] / M, rimRest.z += rim[j * 3 + 2] / M;
       rimRest.applyMatrix4(meshToRest);
       const lastW = new THREE.Vector3().fromArray(tubeWant, ((K - 1) * M) * 3).applyMatrix4(meshToRest), cx0 = new THREE.Vector3().fromArray(tubeWant, ((KB + KC + KX) * M) * 3).applyMatrix4(meshToRest);
