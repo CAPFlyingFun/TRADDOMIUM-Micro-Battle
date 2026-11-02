@@ -326,15 +326,17 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * 5s"). Upright the womb, baby and fluid hang forward on her belly wall; lying back they settle toward her spine and the
    * wall relaxes. Her belly is drawn at `1 - most * settle` of its size, `settle` going from 0 with her torso upright to
    * 1 with it `flatDeg` back from how she stands (flat on her back), in a straight line -- Joshua's: 2/3 of a percent of
-   * her size a degree, so 30 degrees back at 100% shows 80%, 45 degrees 70%, flat 40% -- eased there at most a whole step in `seconds`. Her sliders,
+   * her size a degree, so 30 degrees back at 100% shows 80%, 45 degrees 70%, flat 40% -- and the other way, leaning
+   * forward (on her hands and knees, over a ball), her belly hangs forward and stretches out by up to `grow` of itself at
+   * 90 degrees forward (Joshua's estimate, 2026-11-01: "the max could be like 30% more") -- eased there at most a whole step in `seconds`. Her sliders,
    * shape and the size she is (her week) are untouched. GAME TUNING
    */
-  const BELLY_SETTLE = Object.freeze({ most: 0.6, flatDeg: 90, seconds: 5, step: 0.5 });
+  const BELLY_SETTLE = Object.freeze({ most: 0.6, grow: 0.3, flatDeg: 90, seconds: 5, step: 0.5 });
   /** how far her torso leans from upright standing as she stands (her own posture: she leans back a little), measured as she stands */
   let uprightTilt = 15;
   let bellySettle = 0, bellySettleApplied = 0, bellySettleAt = 0, bellySettleOn = true;
   /** her belly's size as drawn now: her BELLY slider's, settled as she lies back */
-  const shownBump = (): number => bump * (1 - BELLY_SETTLE.most * bellySettle);
+  const shownBump = (): number => bump * (1 - BELLY_SETTLE.most * Math.max(0, bellySettle) + BELLY_SETTLE.grow * Math.max(0, -bellySettle));
   let curl = 0;
   // v2's ARMS control can override any pose; until used, the pose keeps its natural arms.
   // v1 keeps the original T-POSE-only control and its level-arm default.
@@ -3425,20 +3427,28 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
 
   /** One frame of her: her walk, her pose, her springs, what is laid on her, and the cloth tee over her. */
-  /** how far her torso leans from upright (degrees): her pelvis to her chest, in the world */
+  /** how far her torso leans from upright (degrees; back positive, forward negative): her pelvis to her chest, in the
+   * world, signed by whether her chest is behind or in front of her hips as her front faces */
   function torsoTilt(): number {
     const sk = model && findSkinnedMesh(model);
     if (!sk || !measure) return 0;
     const b = sk.skeleton.bones, p = b[measure.joints.pelvis]?.getWorldPosition(new THREE.Vector3()), c = b[measure.joints.chest]?.getWorldPosition(new THREE.Vector3());
     if (!p || !c) return 0;
     const d = c.sub(p); const l = d.length();
-    return l > 1e-9 ? (Math.acos(Math.max(-1, Math.min(1, d.y / l))) * 180) / Math.PI : 0;
+    if (l < 1e-9) return 0;
+    const deg = (Math.acos(Math.max(-1, Math.min(1, d.y / l))) * 180) / Math.PI;
+    // (her front: her hips' frame as her baby is carried -- +z of her rest frame, carried by her spine)
+    let front = new THREE.Vector3(0, 0, 1);
+    if (babyFrame) front = front.transformDirection(new THREE.Matrix4().multiplyMatrices(babyFrame.bone.matrixWorld, babyFrame.matrix));
+    const hf = Math.hypot(front.x, front.z), hd = Math.hypot(d.x, d.z);
+    if (hf < 1e-6 || hd < 1e-6) return deg;
+    return (d.x * front.x + d.z * front.z) / (hf * hd) > 0 ? -deg : deg;
   }
   /** her belly settling toward where her lean puts it, a whole settle at most every `seconds`; laid again in steps */
   function settleBelly(dt: number): void {
     const tilt = torsoTilt();
     if (pose === 'stand') uprightTilt = tilt;
-    const want = !bellySettleOn ? 0 : Math.max(0, Math.min(1, (tilt - uprightTilt) / BELLY_SETTLE.flatDeg)), rate = dt / BELLY_SETTLE.seconds;
+    const want = !bellySettleOn ? 0 : Math.max(-1, Math.min(1, (tilt - uprightTilt) / BELLY_SETTLE.flatDeg)), rate = dt / BELLY_SETTLE.seconds;
     bellySettle += Math.max(-rate, Math.min(rate, want - bellySettle));
     bellySettleAt += dt;
     // (laid again when it has moved a step of her belly's size or come to rest, and not more often than ten times a second)

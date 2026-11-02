@@ -76,7 +76,7 @@ export const VULVA_OPEN = Object.freeze({
    * darkest right at the edge. Its crest stands `crest` metres back from the edge; opening, the edge curls `roll` metres
    * on down into the opening, so the lip's inner face shows (see `lipHeight`)
    */
-  rise: 0.015, crest: 0.006, width: 0.028, tuck: 0.0008, flatten: 0.3, inner: 0.005, roll: 0, maxTip: 1.2, edgeRound: 0.35,
+  rise: 0.015, crest: 0.006, width: 0.028, tuck: 0.0008, flatten: 0.55, inner: 0.005, roll: 0, maxTip: 1.2, edgeRound: 0.35, beadRise: 0.006, beadW: 0.008, beadAt: 0.4,
   /** shut, how much of the inside's colour shows at the line where the lips meet (0..1; all of it once open 15%) */
   shutInside: 0.3,
   innerTint: [1.0, 0.6, 0.64] as const, edgeTint: [0.78, 0.42, 0.48] as const,
@@ -524,6 +524,14 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     // skin: shut, the two lips meet as two rounded pillows -- Joshua, 2026-11-01: "the vagina lips when close should still
     // offset out some... it appears like 0% close sucks inward and it needs to go outside with that rounded edge")
     else { const r = Math.min(c, H * L.edgeRound); h = d >= r ? H : H - r + Math.sqrt(Math.max(0, r * r - (r - d) ** 2)); }
+    // THE ROLLED EDGE (Joshua, 2026-11-01, of his photographs of a balloon's mouth open, half open and shut: "the skin
+    // folding over (inside/outside) as that slightly thicker edge"; "try the roll like the balloon lip look"): along the
+    // lip's very edge a round bead `beadRise` high and `beadW` across, its middle `beadAt` of its width in from the edge so
+    // the edge itself is already turning down into the opening, where the canal's wall rolls on. It stays as the lip
+    // stretches flatter, so open or shut the edge is one smooth thick roll.
+    const bw = L.beadW, bc = bw * L.beadAt, br = bw - bc, bx = (d - bc) / br;
+    const bead = d < bw ? L.beadRise * Math.sqrt(Math.max(0, 1 - bx * bx)) : 0;
+    h = Math.max(h, bead);
     h *= taper;
     const closed = 1 - smooth(0, 0.3, open), opening = smooth(0, 0.15, open);
     const tuck = L.tuck * smooth(c, 0, d) * closed * taper;
