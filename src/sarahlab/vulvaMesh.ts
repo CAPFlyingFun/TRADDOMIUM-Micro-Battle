@@ -56,7 +56,10 @@ export const VULVA_OPEN = Object.freeze({
    * is one soft piece, and curls its nose in over the opening by `curl` of its roundness while it is starting to open.
    */
   sheet: false, sheetFoot: 0.022, noseRound: 0.42, curl: 0.55, sheetSmooth: 4, sheetLift: 0.0004,
-  bead: 0.004, lipWall: 0.008, wombWall: 0.003, wombMeet: 35, wallSkin: 0xd09a88, wallPink: 0xc0646e, pleats: 4, pleatDepth: 0.22, cervix: 0.025, cervixShut: 0.006, womb: 0.13, wombRadius: 0.065,
+  bead: 0.004, lipWall: 0.008,
+  /** GAME TUNING: the balloon's rolled rim round the opening -- how round (metres, at full size), how far its middle stands
+   * out of her (a share of that), and how many Taubin passes even the edge it is laid round */
+  rimBead: 0.006, rimLift: 0.35, rimSmooth: 30, rimWeightReach: 6, wombWall: 0.003, wombMeet: 35, wallSkin: 0xa87060, wallPink: 0xc0646e, pleats: 4, pleatDepth: 0.22, cervix: 0.025, cervixShut: 0.006, womb: 0.13, wombRadius: 0.065,
   /** BIOLOGICAL SHAPE (Joshua's estimate, to tune): how far the area bulges out at the full opening (metres; a half sphere,
    * its last `bulgeFoot` share easing onto her skin), and how it
    * grows with the opening (power of the open share: 1 straight, more later) */
@@ -67,6 +70,8 @@ export const VULVA_OPEN = Object.freeze({
   hingeRound: 0.3,
   /** GAME TUNING: how much more her skin is evened round the opening at its ends, where the jaws hinge, as it opens */
   hingeSmooth: 1.2,
+  /** GAME TUNING: how much of the opening's skin her pelvis carries as it opens (the rest her own skin's bones) */
+  pelvisCarry: 0,
   /** GAME TUNING: wide open, how many more Taubin passes even the rim round itself, over what share of the rings, and how
    * much of the way it is drawn to a circle (Joshua, 2026-11-01: "not an even circle... make it look closer to one") */
   rimPasses: 40, rimRings: 0.3, rimRound: 1,
@@ -353,8 +358,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     const ss = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
     const skinC = new THREE.Color(VULVA_OPEN.wallSkin), pinkC = new THREE.Color(VULVA_OPEN.wallPink), canalC = new THREE.Color(0xa8505a), c3 = new THREE.Color();
     for (let m = 0; m < K; m++) {
-      if (m < KL) { if (VULVA_OPEN.sheet) c3.copy(pinkC); else c3.copy(skinC).lerp(pinkC, ss(0, 1, m / (KL - 1))); }
-      else if (m < KB) c3.copy(pinkC);
+      // (the rolled rim: her skin's colour where it comes out from under her skin, pink from over its top on in)
+      if (m < KB) c3.copy(skinC).lerp(pinkC, ss(0.25, 0.55, m / (KB - 1)));
       else { const f = (m - KB) / (K - 1 - KB); c3.copy(pinkC).lerp(canalC, ss(0, 0.15, f)).multiplyScalar(1 - 0.75 * Math.pow(Math.min(1, f * 1.6), 0.7)); }
       for (let j = 0; j < M; j++) { const o = (m * M + j) * 3; col[o] = c3.r; col[o + 1] = c3.g; col[o + 2] = c3.b; }
     }
@@ -876,6 +881,20 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       onColumn(j, e + m * (1 - e / (total || 1)), at);
       bake.sampleFlat(at[0], at[1], smp);
       weightsAt(p, smp);
+      // CARRIED BY HER PELVIS AS IT OPENS (2026-11-02, Joshua of LEGS APART at 100% from the side: "even your wireframe is
+      // not smooth"): her skin round the opening, walked out onto skin her thighs carry, was carried by her thighs too --
+      // posed with her thighs close, each side of the opening went its own way and the area crumpled. The opening is her
+      // pelvis's: `pelvisCarry` of each point's weight handed to her pelvis, all of it at the opening's edge and none at
+      // the area's own edge (so it meets her skin there as before), as much as it is open.
+      if (patchI && patchW) {
+        const k = VULVA_OPEN.pelvisCarry * w * w * smooth(0, 0.3, open);
+        if (k > 0) {
+          let slot = -1; for (let c = 0; c < 4; c++) if (patchI[p * 4 + c] === pelvis) slot = c;
+          if (slot < 0) { let low = 0; for (let c = 1; c < 4; c++) if (patchW[p * 4 + c] < patchW[p * 4 + low]) low = c; slot = low; patchI[p * 4 + slot] = pelvis; patchW[p * 4 + slot] = 0; }
+          for (let c = 0; c < 4; c++) patchW[p * 4 + c] *= 1 - k;
+          patchW[p * 4 + slot] += k;
+        }
+      }
       for (let c = 0; c < 3; c++) {
         pos[p * 3 + c] = smp[3] * BP[smp[0] * 3 + c] + smp[4] * BP[smp[1] * 3 + c] + smp[5] * BP[smp[2] * 3 + c];
         if (BN) nr[p * 3 + c] = smp[3] * BN[smp[0] * 3 + c] + smp[4] * BN[smp[1] * 3 + c] + smp[5] * BN[smp[2] * 3 + c];
@@ -1047,22 +1066,37 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       wallDir[j * 3] = wv.x; wallDir[j * 3 + 1] = wv.y; wallDir[j * 3 + 2] = wv.z;
     }
     const startOf = new Float32Array(M * 3);
-    for (let k = 0; k < KL; k++) {
-      const f = k / (KL - 1);
-      for (let j = 0; j < M; j++) { wv.fromArray(wallDir, j * 3); pt.fromArray(rim, j * 3).addScaledVector(wv, wallIn * f); put(k, j, pt); }
+    void wallIn; void rb;
+    // THE BALLOON'S ROLLED RIM, RIGHT AT THE EDGE (Joshua, 2026-11-02: "when you did the balloon end look before with that
+    // thicker edging, it looked good... try placing it back slightly more outward right at the edge between skin and
+    // inside so it has that smooth shape all around even from the side"). One thick round roll, `rimBead` round, laid
+    // round a SMOOTHED copy of the opening's edge (evened round itself, a step back out after each step in so it keeps its
+    // size) and standing a little out of her: it starts tucked under her skin just outside the edge, rolls over the edge
+    // and down inside, where the canal goes on. Wherever the skin's own edge wanders, the roll is smooth over it.
+    // (none shut: her lips meet over it, and a roll there drew a beaded line down her closed split)
+    const rr = L.rimBead * perMetre * smooth(0.01, 0.25, open);
+    const rimS = Float32Array.from(rim), tmpS = new Float32Array(M * 3);
+    for (let pass = 0; pass < L.rimSmooth; pass++) for (const lam of [0.6, -0.62]) {
+      for (let j = 0; j < M; j++) for (let c = 0; c < 3; c++) tmpS[j * 3 + c] = rimS[j * 3 + c] + lam * (0.5 * (rimS[((j + M - 1) % M) * 3 + c] + rimS[((j + 1) % M) * 3 + c]) - rimS[j * 3 + c]);
+      rimS.set(tmpS);
     }
-    for (let b = 0; b < KB - KL; b++) {
-      const phi = ((b + 1) / (KB - KL)) * Math.PI;
+    // (each point's way out from the opening's middle, evened round too)
+    const oS = new Float32Array(M * 3);
+    { const Cs = new THREE.Vector3(); for (let j = 0; j < M; j++) Cs.x += rimS[j * 3] / M, Cs.y += rimS[j * 3 + 1] / M, Cs.z += rimS[j * 3 + 2] / M;
+      for (let j = 0; j < M; j++) { wv.fromArray(rimS, j * 3).sub(Cs); wv.addScaledVector(nO, -wv.dot(nO)); if (wv.lengthSq() < 1e-14) wv.fromArray(out, j * 3); wv.normalize(); wv.toArray(oS, j * 3); }
+      for (let pass = 0; pass < 6; pass++) { for (let j = 0; j < M; j++) for (let c = 0; c < 3; c++) tmpS[j * 3 + c] = 0.25 * oS[((j + M - 1) % M) * 3 + c] + 0.5 * oS[j * 3 + c] + 0.25 * oS[((j + 1) % M) * 3 + c]; oS.set(tmpS); }
+      for (let j = 0; j < M; j++) { wv.fromArray(oS, j * 3).normalize(); wv.toArray(oS, j * 3); } }
+    const phi0 = -0.3 * Math.PI, phi1 = 1.5 * Math.PI, lift = L.rimLift * rr;
+    for (let b = 0; b < KB; b++) {
+      const phi = phi0 + (phi1 - phi0) * (b / (KB - 1));
       for (let j = 0; j < M; j++) {
-        oj.fromArray(out, j * 3);
-        // (a half round bulging in toward the middle: from the wall's foot, in by `bead`, back out a bead's width deeper)
-        wv.fromArray(wallDir, j * 3);
-        pt.fromArray(rim, j * 3).addScaledVector(wv, wallIn + rb - rb * Math.cos(phi)).addScaledVector(oj, -rb * Math.sin(phi));
-        put(KL + b, j, pt);
-        if (b === KB - KL - 1) pt.toArray(startOf, j * 3);
+        oj.fromArray(oS, j * 3);
+        pt.fromArray(rimS, j * 3).addScaledVector(nO, lift).addScaledVector(oj, rr * Math.cos(phi)).addScaledVector(nO, rr * Math.sin(phi));
+        put(b, j, pt);
+        if (b === KB - 1) pt.toArray(startOf, j * 3);
       }
     }
-    ctr.addScaledVector(inward, wallIn + 2 * rb);
+    ctr.addScaledVector(inward, rr);
     // 2. THE CANAL: the opening's outline carried in along the curve, narrower inward at rest, as wide as the opening
     // once it is open; down its walls soft folds, smoothed out as it stretches; its last rings rounding toward a circle
     const rEnd = Math.max(L.cervixShut * perMetre / 2, meanR * (0.45 + 0.55 * smooth(0, 1, open)));
@@ -1163,6 +1197,15 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
           const o = (m * M + j) * 4, v = base[j] * 4;
           let pel = -1;
           for (let c = 0; c < 4; c++) { a2[o + c] = patchI[v + c]; b2[o + c] = patchW[v + c] * (1 - deep); if (patchI[v + c] === pelvis) pel = c; }
+          // (the rolled rim and the canal's mouth carried as the edge is round about each point -- its weights evened round
+          // the ring -- so posed it stays one smooth roll and does not follow each column's own bones into notches)
+          if (m < KB + 4) {
+            const acc = new Map<number, number>(), WR = VULVA_OPEN.rimWeightReach;
+            for (let dj = -WR; dj <= WR; dj++) { const vj = base[(j + dj + M) % M] * 4, g = 1 - Math.abs(dj) / (WR + 1); for (let c = 0; c < 4; c++) { const w = patchW[vj + c] * g; if (w > 0) acc.set(patchI[vj + c], (acc.get(patchI[vj + c]) ?? 0) + w); } }
+            const top = [...acc].sort((x, y) => y[1] - x[1]).slice(0, 4), sum0 = top.reduce((mm, [, w]) => mm + w, 0) || 1;
+            pel = -1;
+            for (let c = 0; c < 4; c++) { a2[o + c] = top[c]?.[0] ?? 0; b2[o + c] = (top[c] ? top[c][1] / sum0 : 0) * (1 - deep); if (top[c] && top[c][0] === pelvis) pel = c; }
+          }
           if (pel < 0) { let low = 0; for (let c = 1; c < 4; c++) if (b2[o + c] < b2[o + low]) low = c; pel = low; a2[o + pel] = pelvis; b2[o + pel] = 0; }
           b2[o + pel] += deep;
           const sum = b2[o] + b2[o + 1] + b2[o + 2] + b2[o + 3] || 1;
