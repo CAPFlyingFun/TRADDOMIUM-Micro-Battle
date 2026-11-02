@@ -67,6 +67,9 @@ export const VULVA_OPEN = Object.freeze({
   hingeRound: 0.3,
   /** GAME TUNING: how much more her skin is evened round the opening at its ends, where the jaws hinge, as it opens */
   hingeSmooth: 1.2,
+  /** GAME TUNING: wide open, how many more Taubin passes even the rim round itself, over what share of the rings, and how
+   * much of the way it is drawn to a circle (Joshua, 2026-11-01: "not an even circle... make it look closer to one") */
+  rimPasses: 40, rimRings: 0.3, rimRound: 1,
   /**
    * THE LIPS (Joshua, 2026-10-31: "the vagina should look like the lips... you also have the mouth animated that can open
    * and close"): as her mouth is made -- her own skin, shaped round and opened, the inside painted where it shows. Each
@@ -897,6 +900,26 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
         }
         at3.set(nx);
       }
+      // A SMOOTH RIM (Joshua, 2026-11-01: "work more on the opening at 100% to look smooth all around it and not jagged"):
+      // wide open, the columns that walked out from her split's ends land unevenly round the opening and notched its
+      // outline. The rings nearest the edge are evened round themselves again, more the wider it is, with a step back
+      // out after each step in (Taubin's) so the opening keeps its size, the edge most and fading over `rimRings`.
+      { const RR = Math.max(1, Math.round(R * VULVA_OPEN.rimRings)), passes = Math.round(VULVA_OPEN.rimPasses * smooth(0.2, 1, open));
+        for (let pass = 0; pass < passes; pass++) for (const lamS of [0.5, -0.53]) {
+          nx.set(at3);
+          for (let r = 0; r < Math.min(R, RR); r++) {
+            const fall = (1 - r / RR) ** 2;
+            for (let j = 0; j < M; j++) {
+              const k = r * M + j, a = r * M + ((j + M - 1) % M), b = r * M + ((j + 1) % M);
+              if (base[k] < 0 || base[a] < 0 || base[b] < 0) continue;
+              const w = lamS * fall * moved[base[k]];
+              for (let c = 0; c < 3; c++) nx[k * 3 + c] = at3[k * 3 + c] + w * (0.5 * (at3[a * 3 + c] + at3[b * 3 + c]) - at3[k * 3 + c]);
+            }
+          }
+          at3.set(nx);
+        } }
+      // ...and round: each rim point drawn toward a circle round the rim's middle in the opening's plane (its height out
+      // of her kept), all of it wide open; the rings behind it carried along, less and less, over `rimRings`
       for (let p = 0; p < P; p++) { const k = bake.ring[p] * M + bake.column[p]; if (moved[p] > 0) for (let c = 0; c < 3; c++) pos[p * 3 + c] = at3[k * 3 + c]; }
     }
     // its normals: her skin's where each point now lies
@@ -930,6 +953,49 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       }
     }
     bulgeNow = open > 0 ? VULVA_OPEN.bulge * Math.pow(open, VULVA_OPEN.bulgeEase) : 0;
+    // THE RIM MADE ROUND AS SHE IS POSED, last of all (after the lips and the bulge: done before them, they undid it)
+    roundDbg = [];
+    // (not where her legs hold it narrower than it would be: rounded there, its ends were drawn in so far its skin crowded
+    // and tore -- LEGS APART, 2026-11-01 -- so held, it keeps the shape her legs allow)
+    if (open > 0) { const round = VULVA_OPEN.rimRound * smooth(0.3, 1, open), held = heldTo !== null;
+        if (round > 0 && patchI && patchW) for (let iter = 0; iter < 6; iter++) {
+          // (round as she is POSED: each rim point carried by its own bones, as the GPU will carry it -- a circle laid in
+          // her rest shape came out a rounded square once her thighs had turned their side of it -- the circle fitted
+          // there, and each point's move taken back to her rest shape through the inverse of its own bones' turn)
+          const sk = body.skeleton, bm = body.bindMatrix, bmi = body.bindMatrixInverse;
+          const Tof = (pp: number, out: THREE.Matrix4) => {
+            const acc = new THREE.Matrix4().set(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), tmpM = new THREE.Matrix4();
+            for (let c = 0; c < 4; c++) { const w = patchW[pp * 4 + c]; if (w <= 0) continue; const bi = patchI[pp * 4 + c]; tmpM.multiplyMatrices(sk.bones[bi].matrixWorld, sk.boneInverses[bi]); for (let e = 0; e < 16; e++) acc.elements[e] += w * tmpM.elements[e]; }
+            return out.multiplyMatrices(bmi, acc).multiply(bm);
+          };
+          const T = Array.from({ length: M }, () => new THREE.Matrix4()), Pp = new Float32Array(M * 3), d = new THREE.Vector3(), C = new THREE.Vector3();
+          // (her shape's motion targets too -- her belly's slider is one -- as the GPU lays them before her bones)
+          const mInf = body.morphTargetInfluences, mPos = geom.morphAttributes.position;
+          for (let j2 = 0; j2 < M; j2++) {
+            Tof(base[j2], T[j2]); d.fromArray(pos, base[j2] * 3);
+            if (mInf && mPos) for (let m = 0; m < mPos.length; m++) { const w = mInf[m]; if (w) { d.x += w * mPos[m].getX(base[j2]); d.y += w * mPos[m].getY(base[j2]); d.z += w * mPos[m].getZ(base[j2]); } }
+            d.applyMatrix4(T[j2]); d.toArray(Pp, j2 * 3); C.add(d);
+          }
+          C.divideScalar(M);
+          // (the posed rim's own plane: its points' spread, the normal the least of it)
+          const nP = new THREE.Vector3();
+          for (let j2 = 0; j2 < M; j2++) { const a = new THREE.Vector3().fromArray(Pp, j2 * 3).sub(C), b = new THREE.Vector3().fromArray(Pp, ((j2 + 1) % M) * 3).sub(C); nP.add(a.cross(b)); }
+          if (nP.lengthSq() < 1e-18) nP.copy(nO); nP.normalize();
+          let mean = 0; const rr = new Float32Array(M);
+          for (let j2 = 0; j2 < M; j2++) { d.fromArray(Pp, j2 * 3).sub(C); d.addScaledVector(nP, -d.dot(nP)); rr[j2] = d.length(); mean += rr[j2] / M; }
+          // (the target: a circle; held by her legs, its own outline evened round -- an oval with no notches)
+          const target = new Float32Array(M).fill(mean);
+          if (held) { const tmp = Float32Array.from(rr), nx2 = new Float32Array(M); for (let pass = 0; pass < 40; pass++) { for (let j2 = 0; j2 < M; j2++) nx2[j2] = 0.25 * tmp[(j2 + M - 1) % M] + 0.5 * tmp[j2] + 0.25 * tmp[(j2 + 1) % M]; tmp.set(nx2); } target.set(tmp); }
+          roundDbg.push(+(Math.min(...rr) / perMetre * 100).toFixed(2), +(Math.max(...rr) / perMetre * 100).toFixed(2));
+          const RR = Math.max(1, Math.round(R * VULVA_OPEN.rimRings)), dv = new THREE.Vector3(), inv3 = new THREE.Matrix3();
+          for (let j2 = 0; j2 < M; j2++) {
+            if (rr[j2] < 1e-9) continue;
+            d.fromArray(Pp, j2 * 3).sub(C); d.addScaledVector(nP, -d.dot(nP));
+            dv.copy(d).multiplyScalar((target[j2] / rr[j2] - 1) * round);
+            inv3.setFromMatrix4(T[j2]); if (Math.abs(inv3.determinant()) < 1e-12) continue; inv3.invert(); dv.applyMatrix3(inv3);
+            for (let p2 = 0; p2 < P; p2++) { if (bake.column[p2] !== j2) continue; const r = bake.ring[p2]; if (r >= RR) continue; const f = (1 - r / RR) ** 2 * moved[p2]; pos[p2 * 3] += dv.x * f; pos[p2 * 3 + 1] += dv.y * f; pos[p2 * 3 + 2] += dv.z * f; }
+          }
+        } }
     if (VULVA_OPEN.sheet && !dressed) laySheet(pos, nrm, cm);
     // the canal hangs from the lips' edge as shaped (rolled in), so the two meet
     for (let j = 0; j < M; j++) for (let c = 0; c < 3; c++) rim[j * 3 + c] = pos[base[j] * 3 + c];
@@ -1132,7 +1198,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
 
   let posVersion = -1, pushVersion = -1, shown = true, poseSig = NaN;
   /** her womb (setWomb) and the bone that carries it */
-  let womb: WombShape | null = null, wombBone = -1, wombFloor: number[] = [];
+  let womb: WombShape | null = null, wombBone = -1, wombFloor: number[] = [], roundDbg: number[] = [];
   /** each point of the womb's wall carried as the nearest of her skin is (her belly moves her womb with it, so the wall
    * stays under her skin as she bends -- 2026-11-01, carried by one bone it showed through her belly) */
   const wombNear = new Int32Array(KW * M).fill(-1);
@@ -1240,7 +1306,13 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       const dm = (a: number, c: number) => +(Math.hypot(rim[a * 3] - rim[c * 3], rim[a * 3 + 1] - rim[c * 3 + 1], rim[a * 3 + 2] - rim[c * 3 + 2]) / perMetre).toFixed(4);
       const wp = (j: number) => { const o = new THREE.Vector3(); mesh.getVertexPosition(base[j], o); return mesh.localToWorld(o); };
       const wd = (a: number, c: number) => +wp(a).distanceTo(wp(c)).toFixed(4);
-      const rimSize = { restAcross: dm(jl, jr), restAlong: dm(jb, jf), posedAcross: wd(jl, jr), posedAlong: wd(jb, jf), heldTo, legNear: legNear.length, blocker, bulge: bulgeNow, lipMaxMm: +(lipMax * 1000).toFixed(1), lipCount, uScale, edgeDistMaxMm: +(Math.max(...Array.from(edgeDist).filter((x) => x < 1)) * 1000).toFixed(1) };
+      const roundness = (() => { const ps = Array.from({ length: M }, (_, j) => wp(j)), C = ps.reduce((a, b) => a.add(b), new THREE.Vector3()).divideScalar(M), n = new THREE.Vector3();
+        for (let j = 0; j < M; j++) n.add(ps[j].clone().sub(C).cross(ps[(j + 1) % M].clone().sub(C)));
+        n.normalize(); const r = ps.map((p) => { const d = p.clone().sub(C); d.addScaledVector(n, -d.dot(n)); return d.length(); });
+        let jump = 0; for (let j = 0; j < M; j++) jump = Math.max(jump, Math.abs(r[j] - 0.5 * (r[(j + M - 1) % M] + r[(j + 1) % M])));
+        let off = 0; for (let j = 0; j < M; j++) { const d = ps[j].clone().sub(C); off = Math.max(off, Math.abs(d.dot(n))); }
+        return { rMin: +Math.min(...r).toFixed(2), rMax: +Math.max(...r).toFixed(2), jump: +jump.toFixed(3), outOfPlane: +off.toFixed(2) }; })();
+      const rimSize = { roundness, roundDbg, restAcross: dm(jl, jr), restAlong: dm(jb, jf), posedAcross: wd(jl, jr), posedAlong: wd(jb, jf), heldTo, legNear: legNear.length, blocker, bulge: bulgeNow, lipMaxMm: +(lipMax * 1000).toFixed(1), lipCount, uScale, edgeDistMaxMm: +(Math.max(...Array.from(edgeDist).filter((x) => x < 1)) * 1000).toFixed(1) };
       const rimRest = new THREE.Vector3(); for (let j = 0; j < M; j++) rimRest.x += rim[j * 3] / M, rimRest.y += rim[j * 3 + 1] / M, rimRest.z += rim[j * 3 + 2] / M;
       rimRest.applyMatrix4(meshToRest);
       const lastW = new THREE.Vector3().fromArray(tubeWant, ((K - 1) * M) * 3).applyMatrix4(meshToRest), cx0 = new THREE.Vector3().fromArray(tubeWant, ((KB + KC + KX) * M) * 3).applyMatrix4(meshToRest);
