@@ -3455,6 +3455,32 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const moved = Math.abs(bellySettle - bellySettleApplied) * BELLY_SETTLE.most * bump;
     if (moved > 1e-3 && bellySettleAt > 0.1 && (moved >= BELLY_SETTLE.step || bellySettle === want)) { bellySettleAt = 0; applyLook(); }
   }
+  /** the angle between her two thighs (degrees): hip to knee each side, in the world */
+  function thighSpread(): number {
+    const sk = model && findSkinnedMesh(model);
+    if (!sk || !measure) return 0;
+    const b = sk.skeleton.bones, j = measure.joints, w = (i: number) => b[i].getWorldPosition(new THREE.Vector3());
+    const l = w(j.kneeL).sub(w(j.hipL)), r = w(j.kneeR).sub(w(j.hipR));
+    if (l.lengthSq() < 1e-12 || r.lengthSq() < 1e-12) return 0;
+    return (l.angleTo(r) * 180) / Math.PI;
+  }
+  /**
+   * HER POSE OPENS HER A LITTLE (Joshua, 2026-11-02: "the vagina naturally opens about 15% in a squat and 30% in a Recline,
+   * because the skin pulls it open a little bit from standing to those poses, and closes naturally when the leg angles get
+   * closer together"): from the angle between her thighs (measured: STAND 0, LEGS APART 36, SQUAT 85, RECLINE 159 degrees)
+   * through the table --
+   * eased toward it at `perSecond` of the way a second.
+   */
+  const NATURAL_OPEN = Object.freeze({ table: [[30, 0], [85, 0.15], [160, 0.3]] as const, perSecond: 0.5 });
+  let naturalNow = 0;
+  function naturalOpening(dt: number): void {
+    if (!vulva) return;
+    const a0 = thighSpread(), a = Number.isFinite(a0) ? a0 : 0, t = NATURAL_OPEN.table;
+    let want = a <= t[0][0] ? t[0][1] : t[t.length - 1][1];
+    for (let i = 1; i < t.length; i++) if (a <= t[i][0]) { const [a0, v0] = t[i - 1], [a1, v1] = t[i]; want = v0 + ((v1 - v0) * (a - a0)) / (a1 - a0); break; }
+    naturalNow = Math.max(0, Math.min(1, naturalNow + Math.max(-NATURAL_OPEN.perSecond * dt, Math.min(NATURAL_OPEN.perSecond * dt, want - naturalNow))));
+    vulva.setNatural(naturalNow);
+  }
   function advance(dt: number): void {
       seconds += dt;
       if (pose === 'walk') walked += WALK_SPEED * dt;
@@ -3462,6 +3488,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       else sitAmount = pose === 'sit' ? 1 : 0;
       if (rig) rig.apply(currentTurns());
       settleBelly(dt);
+      naturalOpening(dt);
       keepBirthRoom();
       // VULVA DETAIL through clothes, as the fabric panel has it now (nothing is done unless it changed)
       vulva?.setDressedLips(fabric?.vulvaKeep() ?? DEFAULT_VULVA_KEEP);
@@ -3754,6 +3781,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         squatPull: (v: number) => { squatPull = v; birthRoomFor = ''; applyLook(); return v; },
         squatBack: (v: number) => { squatBack = v; applyLook(); birthRoomFor = ''; return v; },
         birthFill: (squat: number, recline: number) => { birthFillSquat = squat; birthFillRecline = recline; birthRoomFor = ''; applyLook(); return true; },
+        legSpread: () => ({ deg: +thighSpread().toFixed(1), natural: +naturalNow.toFixed(3), drawn: vulva ? +vulva.drawnOpen.toFixed(3) : null }),
         bellySettle: (on?: boolean) => { if (on !== undefined) { bellySettleOn = on; if (!on) { bellySettle = 0; applyLook(); } } return { on: bellySettleOn, settle: +bellySettle.toFixed(3), tiltDeg: +torsoTilt().toFixed(1), uprightDeg: +uprightTilt.toFixed(1), drawn: +shownBump().toFixed(1), bump }; },
         birthGap: (on: boolean) => { birthGapOn = on; applyLook(); return { on, ...birthGapInfo }; },
         birthSeat: (on: boolean, squat?: number) => { birthSeatOn = on; if (typeof squat === 'number') birthSeatSquat = squat; applyLook(); return on; },
