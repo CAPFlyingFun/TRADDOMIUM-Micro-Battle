@@ -60,7 +60,7 @@ export const VULVA_OPEN = Object.freeze({
   /** BIOLOGICAL SHAPE (Joshua's estimate, to tune): how far the area bulges out at the full opening (metres; a half sphere,
    * its last `bulgeFoot` share easing onto her skin), and how it
    * grows with the opening (power of the open share: 1 straight, more later) */
-  bulge: 0.05, bulgeEase: 1.3, bulgeFoot: 0.25,
+  bulge: 0.05, bulgeEase: 1.3, bulgeFoot: 0.6,
   /** GAME TUNING: passes evening the opening's edge round its outline */
   edgeSmooth: 6,
   /** GAME TUNING: how much the bear trap's corners at its hinges are rounded (0 a sharp lens, 1 an oval) */
