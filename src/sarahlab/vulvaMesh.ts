@@ -59,12 +59,18 @@ export const VULVA_OPEN = Object.freeze({
   bead: 0.004, lipWall: 0.008,
   /** GAME TUNING: the balloon's rolled rim round the opening -- how round (metres, at full size), how far its middle stands
    * out of her (a share of that), and how many Taubin passes even the edge it is laid round */
-  rimBead: 0.007, rimLift: 0.7, rimSmooth: 30, rimWeightReach: 6,
+  rimBead: 0.0036, rimLift: 0.3, rimSmooth: 30, rimWeightReach: 6,
   /** GAME TUNING: the outer skin ring -- how round (metres), how far out from the rim, how far its middle stands out of
    * her skin (a share of that), and how many Taubin passes even its loop */
   outerRound: 0.005, outerGap: 0.012, outerLift: 0.2, outerSmooth: 30,
+  /** whether the outer skin ring is drawn (Joshua, 2026-11-02: "removing the outer and keep the main inner one"); off, the
+   * skin is still bridged smoothly out to where it would lie */
+  outerRing: false,
   /** GAME TUNING: how many waves round itself the rim's and the outer ring's loops keep (fewer: smoother) */
   loopWaves: 5,
+  /** GAME TUNING: posed, the canal's first `underRings` of its rings kept at least `underMargin` metres inside the rim's
+   * outline round the opening */
+  underMargin: 0.003, underRings: 0.5,
   /** GAME TUNING: how much of the way the skin between the two rings is laid on the smooth band between them */
   bridge: 0.9, wombWall: 0.003, wombMeet: 35, wallSkin: 0xa87060, wallPink: 0xc0646e, pleats: 4, pleatDepth: 0.22, cervix: 0.025, cervixShut: 0.006, womb: 0.13, wombRadius: 0.065,
   /** BIOLOGICAL SHAPE (Joshua's estimate, to tune): how far the area bulges out at the full opening (metres; a half sphere,
@@ -379,6 +385,9 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   const tubeGeom = new THREE.BufferGeometry(), tubePos = new Float32Array(TV * 3);
   tubeGeom.setAttribute('position', new THREE.BufferAttribute(tubePos, 3));
   tubeGeom.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(TV * 3), 3));
+  // (her texture on the rolled rim's outside: one place of it, her skin's tone -- laid in layOpen)
+  const tubeUv = new Float32Array(TV * 2);
+  if (geom.getAttribute('uv')) tubeGeom.setAttribute('uv', new THREE.BufferAttribute(tubeUv, 2));
   // darker the deeper in (no light reaches far down a canal): ring by ring from the mouth
   { const col = new Float32Array(TV * 3);
     // (the bead its own lighter pink, as the lips' inner edge; then darker down the canal, darkest past her cervix)
@@ -388,7 +397,9 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     const skinC = new THREE.Color(VULVA_OPEN.wallSkin), pinkC = new THREE.Color(VULVA_OPEN.wallPink), canalC = new THREE.Color(0xa8505a), c3 = new THREE.Color();
     for (let m = 0; m < K; m++) {
       // (the rolled rim: her skin's colour where it comes out from under her skin, pink from over its top on in)
-      if (m < KB) c3.copy(skinC).lerp(pinkC, ss(0.25, 0.55, m / (KB - 1)));
+      // (the rolled rim is drawn in her own material: her skin outside, tinted to the inside's colour over its top and in --
+      // Joshua, 2026-11-02: "the outer rim and edge the skin color and pink on the inside lining")
+      if (m < KB) { const t = ss(0.3, 0.6, m / (KB - 1)); c3.setRGB(1 + (VULVA_OPEN.innerTint[0] - 1) * t, 1 + (VULVA_OPEN.innerTint[1] - 1) * t, 1 + (VULVA_OPEN.innerTint[2] - 1) * t); void skinC; }
       else { const f = (m - KB) / (K - 1 - KB); c3.copy(pinkC).lerp(canalC, ss(0, 0.15, f)).multiplyScalar(1 - 0.75 * Math.pow(Math.min(1, f * 1.6), 0.7)); }
       for (let j = 0; j < M; j++) { const o = (m * M + j) * 3; col[o] = c3.r; col[o + 1] = c3.g; col[o + 2] = c3.b; }
     }
@@ -411,11 +422,17 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     tubeGeom.setIndex(ti);
     // (two parts: the canal and cervix, and the womb -- which is seen through while her baby is shown)
     const split = (KB + KC + KX - 1) * M * 6;
-    tubeGeom.addGroup(0, split, 0); tubeGeom.addGroup(split, ti.length - split, 1);
+    // (and the rolled rim its own part again, drawn in her own material)
+    const rimTris = (KB - 1) * M * 6;
+    tubeGeom.addGroup(0, rimTris, 2); tubeGeom.addGroup(rimTris, split - rimTris, 0); tubeGeom.addGroup(split, ti.length - split, 1);
   }
   const tubeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.82, metalness: 0, side: THREE.DoubleSide, vertexColors: true, envMapIntensity: 0.35 });
   const wombMat = tubeMat.clone();
-  const tube = new THREE.SkinnedMesh(tubeGeom, [tubeMat, wombMat]);
+  const rimMat = patchMat.clone();
+  rimMat.customProgramCacheKey = () => 'vulvaRim';
+  rimMat.side = THREE.DoubleSide; rimMat.vertexColors = true;
+  if (jigU) patchJiggle(rimMat, jigU);
+  const tube = new THREE.SkinnedMesh(tubeGeom, [tubeMat, wombMat, rimMat]);
   tube.name = 'sarahVagina';
   tube.frustumCulled = false; tube.castShadow = false; tube.receiveShadow = body.receiveShadow;
   tube.position.copy(body.position); tube.quaternion.copy(body.quaternion); tube.scale.copy(body.scale);
@@ -824,7 +841,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       for (let j = 0; j < M; j++) kOut[j] = Math.max(1, bake.ring[outerSrc[j]]);
       for (let pass = 0; pass < 6; pass++) { const t2 = Float32Array.from(kOut); for (let j = 0; j < M; j++) kOut[j] = 0.25 * t2[(j + M - 1) % M] + 0.5 * t2[j] + 0.25 * t2[(j + 1) % M]; }
       const A = new THREE.Vector3(), B = new THREE.Vector3(), T = new THREE.Vector3(), nA = new THREE.Vector3(), nB = new THREE.Vector3();
-      const share = L.bridge * smooth(0.02, 0.3, open), rimLiftG = L.rimLift * L.rimBead * perMetre * smooth(0.01, 0.25, open), outLiftG = L.outerLift * ro;
+      const share = L.bridge * smooth(0.02, 0.3, open), rimLiftG = L.rimLift * L.rimBead * perMetre * smooth(0.01, 0.25, open), outLiftG = L.outerRing ? L.outerLift * ro : 0;
       for (let p = 0; p < P; p++) {
         if (moved[p] <= 0) continue;
         const j = bake.column[p], u = bake.ring[p] / kOut[j];
@@ -872,6 +889,60 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       for (let m = 0; m < src.length; m++) { const sa = src[m], da = dst[m].array as Float32Array; for (let k = 0; k < KO; k++) for (let j = 0; j < M; j++) for (let c = 0; c < 3; c++) da[((k * M + j) * 3) + c] = sa.getComponent(outerSrc[j], c); dst[m].needsUpdate = true; }
     }
   }
+  // ---- THE CANAL KEPT UNDER HER SKIN AS SHE IS POSED (Joshua, 2026-11-02: "make sure the skin is above the tube's skin";
+  // in LEGS APART her thighs close in beside the opening and the canal, carried by her pelvis, stood out through them).
+  // Her skin round the opening that is drawn (not the area's own, which is rebuilt): found once, by place.
+  const blendT = (I: ArrayLike<number>, W: ArrayLike<number>, o: number, out: THREE.Matrix4) => {
+    const sk = body.skeleton, tmpM = new THREE.Matrix4();
+    out.set(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    for (let c = 0; c < 4; c++) { const w = W[o + c]; if (w <= 0) continue; const bi = I[o + c]; tmpM.multiplyMatrices(sk.bones[bi].matrixWorld, sk.boneInverses[bi]); for (let e = 0; e < 16; e++) out.elements[e] += w * tmpM.elements[e]; }
+    return out.premultiply(body.bindMatrixInverse).multiply(body.bindMatrix);
+  };
+  function keepTubeUnder(TI: Uint16Array, TW: Float32Array): void {
+    tubePushed = 0;
+    if (open <= 0 || !patchI || !patchW) return;
+    // THE CANAL'S MOUTH KEPT INSIDE THE RIM AS SHE IS POSED (Joshua, 2026-11-02: "make sure the skin is above the tube's
+    // skin" -- LEGS APART 100%, where her thighs carry her rim's sides one way and the canal, carried by her pelvis, another,
+    // so its first rings stood out past the rim beside it). Each rim point posed by its own bones (and her shape's motion
+    // targets), as the GPU lays it; each canal point near the mouth posed by its own; one standing out past the rim's
+    // outline round the opening's posed middle is drawn back inside it, back through the turn that carries it.
+    const L = VULVA_OPEN, mInf = body.morphTargetInfluences, mPos = geom.morphAttributes.position;
+    body.skeleton.update();
+    const T = new THREE.Matrix4(), v = new THREE.Vector3(), d = new THREE.Vector3(), C = new THREE.Vector3(), inv = new THREE.Matrix3();
+    const Pp = new Float32Array(M * 3);
+    for (let j = 0; j < M; j++) {
+      blendT(patchI, patchW, base[j] * 4, T); v.fromArray(pos, base[j] * 3);
+      if (mInf && mPos) for (let m = 0; m < mPos.length; m++) { const w = mInf[m]; if (w) { v.x += w * mPos[m].getX(base[j]); v.y += w * mPos[m].getY(base[j]); v.z += w * mPos[m].getZ(base[j]); } }
+      v.applyMatrix4(T); v.toArray(Pp, j * 3); C.add(v);
+    }
+    C.divideScalar(M);
+    const nP = new THREE.Vector3();
+    for (let j = 0; j < M; j++) { const a2 = new THREE.Vector3().fromArray(Pp, j * 3).sub(C), b2 = new THREE.Vector3().fromArray(Pp, ((j + 1) % M) * 3).sub(C); nP.add(a2.cross(b2)); }
+    if (nP.lengthSq() < 1e-18) return; nP.normalize();
+    // (the rim's outline: each column's reach out from the middle, in the rim's plane, evened a little so no notch is copied)
+    const reach = new Float32Array(M), tmp = new Float32Array(M);
+    for (let j = 0; j < M; j++) { d.fromArray(Pp, j * 3).sub(C); d.addScaledVector(nP, -d.dot(nP)); reach[j] = d.length(); }
+    for (let pass = 0; pass < 4; pass++) { for (let j = 0; j < M; j++) tmp[j] = Math.min(reach[j], 0.25 * reach[(j + M - 1) % M] + 0.5 * reach[j] + 0.25 * reach[(j + 1) % M]); reach.set(tmp); }
+    const keep = L.underMargin * perMetre, n = Math.max(1, Math.round(KC * L.underRings));
+    let pushed = 0;
+    for (let m = KB; m < KB + n; m++) {
+      // (all of it at the mouth, easing off deeper in, where her body covers the canal whatever its width)
+      const share = 1 - smooth(0.5, 1, (m - KB) / n);
+      for (let j = 0; j < M; j++) {
+        const q = m * M + j;
+        blendT(TI, TW, q * 4, T);
+        v.fromArray(tubePos, q * 3).applyMatrix4(T);
+        d.copy(v).sub(C); d.addScaledVector(nP, -d.dot(nP));
+        const r = d.length(), lim = Math.max(0, reach[j] - keep);
+        if (r <= lim || r < 1e-9) continue;
+        d.multiplyScalar(((lim / r) - 1) * share);
+        inv.setFromMatrix4(T); if (Math.abs(inv.determinant()) < 1e-12) continue; inv.invert(); d.applyMatrix3(inv);
+        tubePos[q * 3] += d.x; tubePos[q * 3 + 1] += d.y; tubePos[q * 3 + 2] += d.z; pushed++;
+      }
+    }
+    tubePushed = pushed;
+  }
+  let tubePushed = 0;
   /** lay the opening on the rest shape just read (restPos) */
   function layOpen(): void {
     const pos = want;
@@ -1223,6 +1294,14 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     // and down inside, where the canal goes on. Wherever the skin's own edge wanders, the roll is smooth over it.
     // (none shut: her lips meet over it, and a roll there drew a beaded line down her closed split)
     const rr = L.rimBead * perMetre * smooth(0.01, 0.25, open);
+    { const auvT = geom.getAttribute('uv') as THREE.BufferAttribute | undefined;
+      if (auvT) {
+        let jm2 = 0; for (let j = 0; j < M; j++) if (Math.abs(colQ[j]) < Math.abs(colQ[jm2])) jm2 = j;
+        const v = base[Math.max(1, Math.round(R * 0.4)) * M + jm2] >= 0 ? base[Math.max(1, Math.round(R * 0.4)) * M + jm2] : base[jm2];
+        const u0 = auvT.getX(v), u1 = auvT.getY(v);
+        for (let i = 0; i < TV; i++) { tubeUv[i * 2] = u0; tubeUv[i * 2 + 1] = u1; }
+        (tubeGeom.getAttribute('uv') as THREE.BufferAttribute).needsUpdate = true;
+      } }
     const rimS = Float32Array.from(rim), tmpS = new Float32Array(M * 3);
     for (let pass = 0; pass < L.rimSmooth; pass++) for (const lam of [0.6, -0.62]) {
       for (let j = 0; j < M; j++) for (let c = 0; c < 3; c++) tmpS[j * 3 + c] = rimS[j * 3 + c] + lam * (0.5 * (rimS[((j + M - 1) % M) * 3 + c] + rimS[((j + 1) % M) * 3 + c]) - rimS[j * 3 + c]);
@@ -1237,17 +1316,20 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       for (let j = 0; j < M; j++) { wv.fromArray(rimS, j * 3).sub(Cs); wv.addScaledVector(nO, -wv.dot(nO)); if (wv.lengthSq() < 1e-14) wv.fromArray(out, j * 3); wv.normalize(); wv.toArray(oS, j * 3); }
       for (let pass = 0; pass < 6; pass++) { for (let j = 0; j < M; j++) for (let c = 0; c < 3; c++) tmpS[j * 3 + c] = 0.25 * oS[((j + M - 1) % M) * 3 + c] + 0.5 * oS[j * 3 + c] + 0.25 * oS[((j + 1) % M) * 3 + c]; oS.set(tmpS); }
       for (let j = 0; j < M; j++) { wv.fromArray(oS, j * 3).normalize(); wv.toArray(oS, j * 3); } }
-    const phi0 = -0.3 * Math.PI, phi1 = 1.5 * Math.PI, lift = L.rimLift * rr;
+    // (ON THE INSIDE of the edge -- Joshua, 2026-11-02: "can the ring be on the inside and not outside?" -- its middle a
+    // roll's width in from the edge, so it starts at the edge itself, rolls over and down into the opening)
+    const phi0 = -0.15 * Math.PI, phi1 = 1.5 * Math.PI, lift = L.rimLift * rr;
     for (let b = 0; b < KB; b++) {
       const phi = phi0 + (phi1 - phi0) * (b / (KB - 1));
       for (let j = 0; j < M; j++) {
         oj.fromArray(oS, j * 3);
-        pt.fromArray(rimS, j * 3).addScaledVector(nO, lift).addScaledVector(oj, rr * Math.cos(phi)).addScaledVector(nO, rr * Math.sin(phi));
+        pt.fromArray(rimS, j * 3).addScaledVector(oj, -rr).addScaledVector(nO, lift).addScaledVector(oj, rr * Math.cos(phi)).addScaledVector(nO, rr * Math.sin(phi));
         put(b, j, pt);
         if (b === KB - 1) pt.toArray(startOf, j * 3);
       }
     }
     ctr.addScaledVector(inward, rr);
+    const rr0 = rr;
     // 2. THE CANAL: the opening's outline carried in along the curve, narrower inward at rest, as wide as the opening
     // once it is open; down its walls soft folds, smoothed out as it stretches; its last rings rounding toward a circle
     const rEnd = Math.max(L.cervixShut * perMetre / 2, meanR * (0.45 + 0.55 * smooth(0, 1, open)));
@@ -1262,8 +1344,13 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       for (let j = 0; j < M; j++) {
         oj.fromArray(out, j * 3);
         // (the outline, less the bead, toward a circle of the canal's end width)
-        const rr = Math.max(0, rimR[j] * scale) * (1 - round) + rEnd * round;
-        const r = rr * (1 + fold * Math.cos(L.pleats * ang[j]));
+        let rr = Math.max(0, rimR[j] * scale) * (1 - round) + rEnd * round;
+        // (never wider than the opening's own outline that way, less the rolled rim, near the mouth: where her legs hold the
+        // opening to a slot, a round canal stood out through her skin beside it -- Joshua, 2026-11-02: "make sure the skin is
+        // above the tube's skin")
+        const capW = 1 - smooth(0.5, 0.9, f), cap = Math.max(0, rimR[j] * scale - 1.5 * rr0);
+        if (rr > cap) rr = cap + (rr - cap) * (1 - capW);
+        const r = rr * (1 + fold * Math.cos(L.pleats * ang[j]) * (1 - capW));
         cj.fromArray(circ, j * 3); oj.lerp(cj, round).normalize();
         off.copy(oj).multiplyScalar(r).applyQuaternion(turn);
         pt.copy(ctr).add(off);
@@ -1371,6 +1458,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
         }
       }
       tI.needsUpdate = true; tW.needsUpdate = true;
+      keepTubeUnder(a2, b2);
     }
     if (outerLaid) {
       for (const name of ['position', 'uv', 'skinIndex', 'skinWeight']) { const a = outerGeom.getAttribute(name) as THREE.BufferAttribute | undefined; if (a) a.needsUpdate = true; }
@@ -1467,7 +1555,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     // (the balloon is inside her, closed: it stays whole however shut she is)
     tube.visible = mesh.visible && !api.noTube;
     sheet.visible = mesh.visible && VULVA_OPEN.sheet && !dressed && sheetLaid;
-    outer.visible = mesh.visible && !dressed && outerLaid && open > 0.02;
+    if (rimMat.map !== patchMat.map || !rimMat.color.equals(patchMat.color)) { rimMat.map = patchMat.map; rimMat.normalMap = patchMat.normalMap; rimMat.roughnessMap = patchMat.roughnessMap; rimMat.color.copy(patchMat.color); rimMat.needsUpdate = true; }
+    outer.visible = mesh.visible && !dressed && outerLaid && open > 0.02 && VULVA_OPEN.outerRing;
     if (outer.morphTargetInfluences !== body.morphTargetInfluences) outer.morphTargetInfluences = body.morphTargetInfluences;
     if (outerMat.map !== patchMat.map || !outerMat.color.equals(patchMat.color)) { outerMat.map = patchMat.map; outerMat.normalMap = patchMat.normalMap; outerMat.roughnessMap = patchMat.roughnessMap; outerMat.color.copy(patchMat.color); outerMat.needsUpdate = true; }
     if (sheet.morphTargetInfluences !== body.morphTargetInfluences) sheet.morphTargetInfluences = body.morphTargetInfluences;
@@ -1521,7 +1610,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       let far = 0, farI = -1; { const c0 = new THREE.Vector3(); for (let j = 0; j < M; j++) c0.x += rim[j * 3] / M, c0.y += rim[j * 3 + 1] / M, c0.z += rim[j * 3 + 2] / M; for (let i = 0; i < SV; i++) { const d = Math.hypot(sheetWant[i * 3] - c0.x, sheetWant[i * 3 + 1] - c0.y, sheetWant[i * 3 + 2] - c0.z) / perMetre; if (d > far) { far = d; farI = i; } } }
       let pfar = 0, pfarI = -1; { const c1 = new THREE.Vector3(), v1 = new THREE.Vector3(); for (let j = 0; j < M; j++) { mesh.getVertexPosition(base[j], v1); c1.addScaledVector(v1, 1 / M); } for (let i = 0; i < SV; i++) { sheet.getVertexPosition(i, v1); const d = v1.distanceTo(c1) / perMetre; if (d > pfar) { pfar = d; pfarI = i; } } }
       const sheetDbg = { pfar: +pfar.toFixed(3), prow: Math.floor(pfarI / NS), pa: pfarI % NS, pbones: Array.from(sheetI.slice(pfarI * 4, pfarI * 4 + 4)), pw: Array.from(sheetW.slice(pfarI * 4, pfarI * 4 + 4)).map((x) => +x.toFixed(2)), from: sheetFrom[pfarI], to: sheetTo[pfarI], f: +sheetF[pfarI].toFixed(2), far: +far.toFixed(3), row: Math.floor(farI / NS), a: farI % NS, bones: Array.from(sheetI.slice(farI * 4, farI * 4 + 4)), w: Array.from(sheetW.slice(farI * 4, farI * 4 + 4)).map((x) => +x.toFixed(2)) };
-      const wombDbg = { sheet: sheetDbg, floor: wombFloor, centre: womb?.centre.toArray().map((x) => +x.toFixed(3)), axis: womb?.axis.toArray().map((x) => +x.toFixed(3)), rimRest: rimRest.toArray().map((x) => +x.toFixed(3)), wombRing0: cx0.toArray().map((x) => +x.toFixed(3)), top: lastW.toArray().map((x) => +x.toFixed(3)), bone: wombBone };
+      const wombDbg = { tubePushed, sheet: sheetDbg, floor: wombFloor, centre: womb?.centre.toArray().map((x) => +x.toFixed(3)), axis: womb?.axis.toArray().map((x) => +x.toFixed(3)), rimRest: rimRest.toArray().map((x) => +x.toFixed(3)), wombRing0: cx0.toArray().map((x) => +x.toFixed(3)), top: lastW.toArray().map((x) => +x.toFixed(3)), bone: wombBone };
       return { wombDbg, rimSize, uScale, sScale, pelvisBoneGiven: pelvisBone, pelvis: body.skeleton.bones[pelvis]?.name, pelvisIndex: pelvis, restPos: bad(restPos), restNrm: bad(restNrm), rim: bad(rim), pos: bad(pos), tau: bad(tau), colQ: bad(colQ), body: bad((g.getAttribute('position') as THREE.BufferAttribute).array), O: O.toArray(), tA: tA.toArray(), nO: nO.toArray(), across: across.toArray(), perMetre, open };
     },
     get open() { return wantOpen; },
@@ -1569,7 +1658,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       } else if (!on && wireMesh) { wireMesh.removeFromParent(); (wireMesh.material as THREE.Material).dispose(); wireMesh = null; }
       sync();
     },
-    dispose() { mesh.removeFromParent(); wireMesh?.removeFromParent(); tube.removeFromParent(); sheet.removeFromParent(); outer.removeFromParent(); outerGeom.dispose(); outerMat.dispose(); geom.dispose(); tubeGeom.dispose(); tubeMat.dispose(); wombMat.dispose(); sheetGeom.dispose(); sheetMat.dispose(); },
+    dispose() { mesh.removeFromParent(); wireMesh?.removeFromParent(); tube.removeFromParent(); sheet.removeFromParent(); outer.removeFromParent(); outerGeom.dispose(); outerMat.dispose(); geom.dispose(); tubeGeom.dispose(); tubeMat.dispose(); wombMat.dispose(); rimMat.dispose(); sheetGeom.dispose(); sheetMat.dispose(); },
   };
   sync();
   return api;
