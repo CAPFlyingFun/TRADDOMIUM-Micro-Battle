@@ -277,7 +277,7 @@ export function legJiggleWeights(mesh: THREE.SkinnedMesh, legs: LegBones): Float
   const g = mesh.geometry, sk = mesh.skeleton, pos = g.getAttribute('position'), nrm = g.getAttribute('normal'), si = g.getAttribute('skinIndex'), sw = g.getAttribute('skinWeight');
   if (!sk || !pos || !si || !sw) return null;
   const n = pos.count, out = new Float32Array(n * 2), L = LEG_SOFT;
-  const jointAt = (b: number) => new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().multiplyMatrices(mesh.bindMatrixInverse, new THREE.Matrix4().copy(sk.boneInverses[b]).invert()));
+  const jointAt = (b: number) => new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().multiplyMatrices(new THREE.Matrix4().copy(mesh.bindMatrix).invert(), new THREE.Matrix4().copy(sk.boneInverses[b]).invert()));
   const env = (t: number, from: readonly [number, number], full: readonly [number, number]) => { const a = clamp((t - from[0]) / (full[0] - from[0]), 0, 1), b = clamp((from[1] - t) / (from[1] - full[1]), 0, 1); return a * a * (3 - 2 * a) * b * b * (3 - 2 * b); };
   let any = false;
   for (const [side, bones] of [[1, legs.left], [-1, legs.right]] as const) {
