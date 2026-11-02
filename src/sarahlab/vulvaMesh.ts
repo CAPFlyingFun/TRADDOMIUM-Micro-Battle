@@ -59,7 +59,7 @@ export const VULVA_OPEN = Object.freeze({
   bead: 0.004, lipWall: 0.008,
   /** GAME TUNING: the balloon's rolled rim round the opening -- how round (metres, at full size), how far its middle stands
    * out of her (a share of that), and how many Taubin passes even the edge it is laid round */
-  rimBead: 0.0036, rimLift: 0.3, rimTuck: 0.002, rimReach: 0.004, openForward: 0.01, backMargin: 0.02, edgeTrim: 0.015, edgeKeep: 0.03, rimSmooth: 30, rimWeightReach: 6,
+  rimBead: 0.0036, rimLift: 0.3, rimTuck: 0.002, rimReach: 0.004, openForward: 0.01, backMargin: 0.02, backInset: 0, edgeTrim: 0.015, edgeKeep: 0.03, rimSmooth: 30, rimWeightReach: 6,
   /** GAME TUNING: the outer skin ring -- how round (metres), how far out from the rim, how far its middle stands out of
    * her skin (a share of that), and how many Taubin passes even its loop */
   outerRound: 0.005, outerGap: 0.012, outerLift: 0.2, outerSmooth: 30,
@@ -156,6 +156,9 @@ export interface VulvaPatch {
   noTube?: boolean;
   /** her own skin drawn behind the area (on unless a probe turns it off to compare) */
   backing: boolean;
+  /** the area's thin outer band given back to the backing (on unless a probe turns it off); laid again by `relayOut` */
+  trim: boolean;
+  relayOut(): void;
   debug(): Record<string, unknown>;
   /** where her split is now (world) and the way it faces (a camera's yaw and pitch to look straight at it) */
   facing(): { at: THREE.Vector3; yaw: number; pitch: number };
@@ -320,6 +323,16 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   backMat.customProgramCacheKey = () => 'vulvaBacking';
   backMat.vertexColors = false;
   if (jigU) patchJiggle(backMat, jigU);
+  // (sunk `backInset` into her along her normal: laid exactly on her original skin, it stood a hair out through the area
+  // wherever the area lies a little inside it -- light and dark specks over RECLINE's side, 2026-11-02)
+  { const prev = backMat.onBeforeCompile, key = backMat.customProgramCacheKey;
+    backMat.onBeforeCompile = function (shader, renderer) {
+      prev.call(this, shader, renderer);
+      if (!(VULVA_OPEN.backInset > 0)) return;
+      const inset = (VULVA_OPEN.backInset * perMetre).toFixed(6);
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\ntransformed -= normalize(objectNormal) * ${inset};`);
+    };
+    backMat.customProgramCacheKey = function () { return `${key ? key.call(this) : ''}|vulvaBackInset`; }; }
   backMat.polygonOffset = true; backMat.polygonOffsetFactor = 2; backMat.polygonOffsetUnits = 6;
   const keepMat = () => {
     for (const mat of [patchMat, dressedMat, backMat]) {
@@ -1033,7 +1046,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     }
     for (let b = 0; b < B; b++) { let m = 0; for (let k = -4; k <= 4; k++) m = Math.max(m, reachAt[(b + k + B) % B]); tmp[b] = m; }
     const margin = VULVA_OPEN.backMargin * perMetre, depth = 0.05 * perMetre;
-    let n2 = 0; backVert.fill(0);
+    let n2 = 0; backVert.fill(0); backTri.clear();
     for (let t = 0; t + 2 < area.length; t += 3) {
       let inside = false;
       for (let k = 0; k < 3 && !inside; k++) {
@@ -1044,26 +1057,52 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       if (inside) continue;
       backIdx[n2++] = area[t]; backIdx[n2++] = area[t + 1]; backIdx[n2++] = area[t + 2];
       backVert[area[t]] = 1; backVert[area[t + 1]] = 1; backVert[area[t + 2]] = 1;
+      backTri.add(triKey(area[t], area[t + 1], area[t + 2]));
     }
     (backGeom.index as THREE.BufferAttribute).needsUpdate = true;
     backGeom.setDrawRange(0, n2);
     backCount = n2 / 3;
   }
   let backCount = 0;
-  const backVert = new Uint8Array(n);
+  const backVert = new Uint8Array(n), backTri = new Set<number>();
+  /** one of her triangles, whatever order its corners come in */
+  const triKey = (a: number, b: number, c: number) => { const lo = Math.min(a, b, c), hi = Math.max(a, b, c), mid = a + b + c - lo - hi; return (lo * n + mid) * n + hi; };
   /** the area's own thin outer band given back to her skin behind it (2026-11-02: cut by her thighs' mask into strips a
    * few points wide, they tore and stood out as she posed -- "textures and stuff bleeding through"): a triangle whose
    * points are all within `edgeTrim` of the area's outer edge, and none of them near the opening (`edgeKeep` from the
    * split), is not drawn; the backing (her own skin there) shows instead. Dropped triangles become empty ones. */
+  /** the points of the area out along a thin strip of it: within `cut` of its outer edge and more than `cut` from any
+   * point that is not (her rest units; a grid of `cut` cells) */
+  function spikeOf(dEdge: Float32Array, cut: number): Uint8Array {
+    const out = new Uint8Array(P), grid = new Map<string, number[]>(), key = (x: number, y: number, z: number) => `${Math.floor(x / cut)},${Math.floor(y / cut)},${Math.floor(z / cut)}`;
+    for (let p = 0; p < P; p++) if (dEdge[p] >= cut) { const k = key(restPos[p * 3], restPos[p * 3 + 1], restPos[p * 3 + 2]); (grid.get(k) ?? grid.set(k, []).get(k)!).push(p); }
+    for (let p = 0; p < P; p++) {
+      if (dEdge[p] >= cut) continue;
+      const x = restPos[p * 3], y = restPos[p * 3 + 1], z = restPos[p * 3 + 2], cx = Math.floor(x / cut), cy = Math.floor(y / cut), cz = Math.floor(z / cut);
+      let near = false;
+      for (let a = -1; a <= 1 && !near; a++) for (let b = -1; b <= 1 && !near; b++) for (let c = -1; c <= 1 && !near; c++) {
+        const l = grid.get(`${cx + a},${cy + b},${cz + c}`); if (!l) continue;
+        for (const q of l) if ((restPos[q * 3] - x) ** 2 + (restPos[q * 3 + 1] - y) ** 2 + (restPos[q * 3 + 2] - z) ** 2 <= cut * cut) { near = true; break; }
+      }
+      if (!near) out[p] = 1;
+    }
+    return out;
+  }
   let trimmed = 0;
   function trimEdge(): void {
     const dEdge = edgeDistances(), src = bake.index, cut = VULVA_OPEN.edgeTrim * perMetre, keepNear = VULVA_OPEN.edgeKeep;
+    // (only the long thin strips, not the band all round: a point of the band more than `cut` from any point of the area's
+    // body is out along a strip -- the band itself, dropped all round, left slivers of her inside showing where the
+    // backing was not quite under it, RECLINE from the side, 2026-11-02)
+    const spike = spikeOf(dEdge, cut);
     let n2 = 0, dropped = 0;
     for (let t = 0; t + 2 < src.length; t += 3) {
       const a = src[t], b = src[t + 1], c = src[t + 2];
       // (and only where her own skin behind it is drawn: under all three of its points)
-      const behind = (p: number) => backVert[bake.src[p * 3]] === 1 && backVert[bake.src[p * 3 + 1]] === 1 && backVert[bake.src[p * 3 + 2]] === 1;
-      const drop = !dressed && api.backing && dEdge[a] < cut && dEdge[b] < cut && dEdge[c] < cut && edgeDist[a] > keepNear && edgeDist[b] > keepNear && edgeDist[c] > keepNear && behind(a) && behind(b) && behind(c);
+      // (the very triangle of hers each of its points lies in, drawn behind it -- not merely her points: a few slivers of
+      // the room or of the balloon showed where those were drawn but a triangle between them was not)
+      const behind = (p: number) => backTri.has(triKey(bake.src[p * 3], bake.src[p * 3 + 1], bake.src[p * 3 + 2]));
+      const drop = !dressed && api.backing && api.trim && spike[a] === 1 && spike[b] === 1 && spike[c] === 1 && edgeDist[a] > keepNear && edgeDist[b] > keepNear && edgeDist[c] > keepNear && behind(a) && behind(b) && behind(c);
       if (drop) { dropped++; continue; }
       patchIdx[n2++] = a; patchIdx[n2++] = b; patchIdx[n2++] = c;
     }
@@ -1753,7 +1792,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     return changed;
   };
   const api: VulvaPatch = {
-    mesh, tube, sheet, bake, sync, solo: false, backing: true,
+    mesh, tube, sheet, bake, sync, solo: false, backing: true, trim: true,
+    relayOut() { openApplied = -1; sync(); },
     resyncWeights() {
       const a = geom.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, b = geom.getAttribute('skinWeight') as THREE.BufferAttribute | undefined;
       if (!a || !b) return;
