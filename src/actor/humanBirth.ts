@@ -66,7 +66,10 @@ export const BIRTH_POSES: Readonly<Record<BirthStyle, BirthSpec>> = Object.freez
   // feet under them, her back upright)
   // (a deeper one -- spread 70, flex 125, knee 150 -- was tried on 2026-11-02 and Joshua preferred these: "before was
   // closer, now it got shifted" round the knee)
-  squat: { spread: 50, spreadPerBump: 6, flex: 118, knee: 140, turnOut: 30, footFlat: true, spine: 4, chest: 2, neck: -6, leanBack: 0, swing: true },
+  // (the knee held to 112 degrees and the thighs opened 12 degrees wider to make up for it -- Joshua, 2026-11-02: "limit
+  // 112°... and widen how far apart the legs are at the hip joints". Past about 110 degrees the front of her knee folded
+  // into a lip and from about 100 her calf sank into her thigh, up to 5 cm at 140: a squat sweep, birthContact.ts)
+  squat: { spread: 62, spreadPerBump: 6, flex: 118, knee: 112, turnOut: 30, footFlat: true, spine: 4, chest: 2, neck: -6, leanBack: 0, swing: true },
   recline: { spread: 80, spreadPerBump: 4, flex: 50, knee: 96, turnOut: 12, footFlat: false, spine: -2, chest: 10, neck: 26, leanBack: 40 },
 });
 
