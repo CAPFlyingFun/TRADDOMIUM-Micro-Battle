@@ -55,7 +55,7 @@ export const VULVA_OPEN = Object.freeze({
    * and lower the wider it is, by the square root of the stretch), is evened round the opening `sheetSmooth` times so it
    * is one soft piece, and curls its nose in over the opening by `curl` of its roundness while it is starting to open.
    */
-  sheet: true, sheetFoot: 0.022, noseRound: 0.42, curl: 0.55, sheetSmooth: 4, sheetLift: 0.0004,
+  sheet: false, sheetFoot: 0.022, noseRound: 0.42, curl: 0.55, sheetSmooth: 4, sheetLift: 0.0004,
   bead: 0.004, lipWall: 0.008, wombWall: 0.003, wombMeet: 35, wallSkin: 0xd09a88, wallPink: 0xc0646e, pleats: 4, pleatDepth: 0.22, cervix: 0.025, cervixShut: 0.006, womb: 0.13, wombRadius: 0.065,
   /** BIOLOGICAL SHAPE (Joshua's estimate, to tune): how far the area bulges out at the full opening (metres; a half sphere,
    * its last `bulgeFoot` share easing onto her skin), and how it
@@ -76,7 +76,7 @@ export const VULVA_OPEN = Object.freeze({
    * darkest right at the edge. Its crest stands `crest` metres back from the edge; opening, the edge curls `roll` metres
    * on down into the opening, so the lip's inner face shows (see `lipHeight`)
    */
-  rise: 0.012, crest: 0.006, width: 0.028, tuck: 0.0008, flatten: 0.3, inner: 0.005, roll: 0, maxTip: 1.2, edgeRound: 0.35,
+  rise: 0.015, crest: 0.006, width: 0.028, tuck: 0.0008, flatten: 0.3, inner: 0.005, roll: 0, maxTip: 1.2, edgeRound: 0.35,
   /** shut, how much of the inside's colour shows at the line where the lips meet (0..1; all of it once open 15%) */
   shutInside: 0.3,
   innerTint: [1.0, 0.6, 0.64] as const, edgeTint: [0.78, 0.42, 0.48] as const,

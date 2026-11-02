@@ -325,10 +325,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * calculation between straight up and flat on back... lerp so it is a smooth transition and not instant... maybe over
    * 5s"). Upright the womb, baby and fluid hang forward on her belly wall; lying back they settle toward her spine and the
    * wall relaxes. Her belly is drawn at `1 - most * settle` of its size, `settle` going from 0 with her torso upright to
-   * 1 with it `flatDeg` from upright (flat on her back) -- nothing within `fromDeg` of upright, as she stands -- eased there at most a whole step in `seconds`. Her sliders,
+   * 1 with it `flatDeg` back from how she stands (flat on her back), in a straight line -- Joshua's: 2/3 of a percent of
+   * her size a degree, so 30 degrees back at 100% shows 80%, 45 degrees 70%, flat 40% -- eased there at most a whole step in `seconds`. Her sliders,
    * shape and the size she is (her week) are untouched. GAME TUNING
    */
-  const BELLY_SETTLE = Object.freeze({ most: 0.6, fromDeg: 20, flatDeg: 90, seconds: 5, step: 0.5 });
+  const BELLY_SETTLE = Object.freeze({ most: 0.6, flatDeg: 90, seconds: 5, step: 0.5 });
+  /** how far her torso leans from upright standing as she stands (her own posture: she leans back a little), measured as she stands */
+  let uprightTilt = 15;
   let bellySettle = 0, bellySettleApplied = 0, bellySettleAt = 0, bellySettleOn = true;
   /** her belly's size as drawn now: her BELLY slider's, settled as she lies back */
   const shownBump = (): number => bump * (1 - BELLY_SETTLE.most * bellySettle);
@@ -3433,7 +3436,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
   /** her belly settling toward where her lean puts it, a whole settle at most every `seconds`; laid again in steps */
   function settleBelly(dt: number): void {
-    const want = !bellySettleOn ? 0 : Math.max(0, Math.min(1, (torsoTilt() - BELLY_SETTLE.fromDeg) / (BELLY_SETTLE.flatDeg - BELLY_SETTLE.fromDeg))), rate = dt / BELLY_SETTLE.seconds;
+    const tilt = torsoTilt();
+    if (pose === 'stand') uprightTilt = tilt;
+    const want = !bellySettleOn ? 0 : Math.max(0, Math.min(1, (tilt - uprightTilt) / BELLY_SETTLE.flatDeg)), rate = dt / BELLY_SETTLE.seconds;
     bellySettle += Math.max(-rate, Math.min(rate, want - bellySettle));
     bellySettleAt += dt;
     // (laid again when it has moved a step of her belly's size or come to rest, and not more often than ten times a second)
@@ -3739,7 +3744,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         squatPull: (v: number) => { squatPull = v; birthRoomFor = ''; applyLook(); return v; },
         squatBack: (v: number) => { squatBack = v; applyLook(); birthRoomFor = ''; return v; },
         birthFill: (squat: number, recline: number) => { birthFillSquat = squat; birthFillRecline = recline; birthRoomFor = ''; applyLook(); return true; },
-        bellySettle: (on?: boolean) => { if (on !== undefined) { bellySettleOn = on; if (!on) { bellySettle = 0; applyLook(); } } return { on: bellySettleOn, settle: +bellySettle.toFixed(3), tiltDeg: +torsoTilt().toFixed(1), drawn: +shownBump().toFixed(1), bump }; },
+        bellySettle: (on?: boolean) => { if (on !== undefined) { bellySettleOn = on; if (!on) { bellySettle = 0; applyLook(); } } return { on: bellySettleOn, settle: +bellySettle.toFixed(3), tiltDeg: +torsoTilt().toFixed(1), uprightDeg: +uprightTilt.toFixed(1), drawn: +shownBump().toFixed(1), bump }; },
         birthGap: (on: boolean) => { birthGapOn = on; applyLook(); return { on, ...birthGapInfo }; },
         birthSeat: (on: boolean, squat?: number) => { birthSeatOn = on; if (typeof squat === 'number') birthSeatSquat = squat; applyLook(); return on; },
         birthTweak: (t: Partial<BirthSpec> | null) => { birthTweak = t; applyLook(); return true; },
