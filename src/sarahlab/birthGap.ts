@@ -105,22 +105,39 @@ function gapFrame(basePos: ArrayLike<number>, baseNrm: ArrayLike<number>, toRest
   return { rest, my, mz, inner, need: at };
 }
 
-/** The field, in her geometry's units: the points it moves and by how much (three a point). */
+/** The field, in her geometry's units: the points it moves and by how much (three a point), and how it turns their normals. */
 export function birthGapField(basePos: ArrayLike<number>, baseNrm: ArrayLike<number>, toRest: THREE.Matrix4): { index: Uint32Array; pos: Float32Array; nrm: Float32Array } {
   const f = gapFrame(basePos, baseNrm, toRest);
   if (!f) return { index: new Uint32Array(0), pos: new Float32Array(0), nrm: new Float32Array(0) };
   const { rest, my, mz } = f, n = rest.length / 3, toGeom = new THREE.Matrix3().setFromMatrix4(toRest).invert();
-  const idx: number[] = [], pos: number[] = [], d = new THREE.Vector3();
+  // the move across at a point of her rest frame (metres): her thigh's lack at that height, by the share there
+  const move = (x: number, y: number, z: number) => f.need(y - my) * birthGapShare(x, y - my, mz - z) * Math.sign(x);
+  const nToRest = new THREE.Matrix3().getNormalMatrix(toRest), nToGeom = new THREE.Matrix3().copy(nToRest).invert();
+  const idx: number[] = [], pos: number[] = [], nrm: number[] = [], d = new THREE.Vector3(), nv = new THREE.Vector3(), g = new THREE.Vector3();
+  const h = 0.002;
   for (let i = 0; i < n; i++) {
-    const x = rest[i * 3], up = rest[i * 3 + 1] - my, share = birthGapShare(x, up, mz - rest[i * 3 + 2]);
+    const x = rest[i * 3], y = rest[i * 3 + 1], z = rest[i * 3 + 2], up = y - my, share = birthGapShare(x, up, mz - z);
     if (share <= 0) continue;
     const s = f.need(up) * share * Math.sign(x);
     if (Math.abs(s) < 1e-6) continue;
     d.set(s, 0, 0).applyMatrix3(toGeom);
     idx.push(i); pos.push(d.x, d.y, d.z);
+    // (and her normal turned as the move turns her skin -- moved and not turned, a strip of her inner thigh lit as though
+    // it faced the other way: a white streak down it in LEGS APART, 2026-11-02). The move is across only (x by f), so
+    // the skin's gradient F = I + e_x (grad f)^T, and a normal goes as F^-T n = n - grad f * n_x / (1 + df/dx)
+    // (her very middle is not moved -- sign(x) -- so the gradient is taken on her own side of it)
+    const side = Math.sign(x) || 1, xa = side > 0 ? Math.max(x, h) : Math.min(x, -h);
+    g.set((move(xa + h, y, z) - move(xa - h, y, z)) / (2 * h), (move(x, y + h, z) - move(x, y - h, z)) / (2 * h), (move(x, y, z + h) - move(x, y, z - h)) / (2 * h));
+    nv.fromArray(baseNrm, i * 3).applyMatrix3(nToRest).normalize();
+    const k = nv.x / Math.max(0.2, 1 + g.x);
+    nv.x -= g.x * k; nv.y -= g.y * k; nv.z -= g.z * k;
+    // (as a change to her normal in her geometry's own units: turned there, made unit, less the one she has)
+    nv.applyMatrix3(nToGeom).normalize();
+    const bl = Math.hypot(baseNrm[i * 3], baseNrm[i * 3 + 1], baseNrm[i * 3 + 2]) || 1;
+    nrm.push(nv.x - baseNrm[i * 3] / bl, nv.y - baseNrm[i * 3 + 1] / bl, nv.z - baseNrm[i * 3 + 2] / bl);
   }
   birthGapInfo.moved = idx.length;
-  return { index: Uint32Array.from(idx), pos: Float32Array.from(pos), nrm: new Float32Array(pos.length) };
+  return { index: Uint32Array.from(idx), pos: Float32Array.from(pos), nrm: Float32Array.from(nrm) };
 }
 
 /**

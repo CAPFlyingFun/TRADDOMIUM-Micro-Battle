@@ -3692,6 +3692,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // her body's draw emptied (the rebuilt area and its tube left on their own), or back
         vulvaSolo: (on: boolean) => { const b = bodyOf(); if (!b) return false; b.mesh.visible = !on; if (vulva) { vulva.solo = on; vulva.sync(); } const m = vulva?.mesh; let root: THREE.Object3D | null = m ?? null; while (root?.parent) root = root.parent; return { patch: !!m, visible: m?.visible, parent: m?.parent?.name ?? m?.parent?.type, inScene: root?.type, drawRange: [m?.geometry.drawRange.start, m?.geometry.drawRange.count], count: m?.geometry.getAttribute('position').count, idx: m?.geometry.index?.count, bodyIsPatchGeom: m?.geometry === b.mesh.geometry }; },
         vulvaNoTube: (on: boolean) => { if (vulva) { vulva.noTube = on; vulva.sync(); } return true; },
+        vulvaBacking: (on: boolean) => { if (vulva) { vulva.backing = on; vulva.sync(); } return true; },
         vulvaPatchDrawn: (on: boolean) => { if (vulva) vulva.mesh.geometry.setDrawRange(0, on ? Infinity : 0); return true; },
         // aim straight at her split: from its own facing, at a distance (and turned a little either way)
         vulvaAim: (distance: number, yawOff = 0, pitchOff = 0) => {

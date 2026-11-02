@@ -47,6 +47,8 @@ export function laidOut(x: number, y: number, z: number, centre: { y: number; z:
 export interface VulvaBake {
   /** her body's triangles without the area's */
   readonly keep: Uint32Array;
+  /** the area's own triangles of her body (the ones it is drawn in place of) */
+  readonly area: Uint32Array;
   /** how many vertices the rebuilt area has */
   readonly count: number;
   /** each vertex: where it is -- three of her vertices and how much of each (it lies in that triangle of hers) */
@@ -365,7 +367,7 @@ export function bakeVulva(rest: ArrayLike<number>, key: ArrayLike<number>, indic
     tri(a, b, c); tri(b, d, c);
   }
   return {
-    keep: Uint32Array.from(keep), count: ringOf.length, src: Uint32Array.from(src), bary: Float32Array.from(bary),
+    keep: Uint32Array.from(keep), area: Uint32Array.from(tris), count: ringOf.length, src: Uint32Array.from(src), bary: Float32Array.from(bary),
     uvSrc: Uint32Array.from(uvSrc), uvBary: Float32Array.from(uvBary),
     ring: Uint16Array.from(ringOf), column: Uint16Array.from(colOf), flat: Float32Array.from(flat), lip: Int8Array.from(lipOf),
     index: Uint32Array.from(index), outline: M, missed, split: { u: u0m, mid: splitMid.s, back: sB, front: sF },

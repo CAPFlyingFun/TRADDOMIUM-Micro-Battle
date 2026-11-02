@@ -59,7 +59,7 @@ export const VULVA_OPEN = Object.freeze({
   bead: 0.004, lipWall: 0.008,
   /** GAME TUNING: the balloon's rolled rim round the opening -- how round (metres, at full size), how far its middle stands
    * out of her (a share of that), and how many Taubin passes even the edge it is laid round */
-  rimBead: 0.0036, rimLift: 0.3, rimSmooth: 30, rimWeightReach: 6,
+  rimBead: 0.0036, rimLift: 0.3, rimTuck: 0.002, backMargin: 0.006, edgeTrim: 0.015, edgeKeep: 0.03, rimSmooth: 30, rimWeightReach: 6,
   /** GAME TUNING: the outer skin ring -- how round (metres), how far out from the rim, how far its middle stands out of
    * her skin (a share of that), and how many Taubin passes even its loop */
   outerRound: 0.005, outerGap: 0.012, outerLift: 0.2, outerSmooth: 30,
@@ -79,7 +79,7 @@ export const VULVA_OPEN = Object.freeze({
   /** BIOLOGICAL SHAPE (Joshua's estimate, to tune): how far the area bulges out at the full opening (metres; a half sphere,
    * its last `bulgeFoot` share easing onto her skin), and how it
    * grows with the opening (power of the open share: 1 straight, more later) */
-  bulge: 0.05, bulgeEase: 1.3, bulgeFoot: 0.6,
+  bulge: 0.05, bulgeEase: 1.3, bulgeFoot: 0.6, bulgeReach: 0.06, bulgeFootM: 0.02,
   /** GAME TUNING: passes evening the opening's edge round its outline */
   edgeSmooth: 6,
   /** GAME TUNING: how much the bear trap's corners at its hinges are rounded (0 a sharp lens, 1 an oval) */
@@ -154,6 +154,8 @@ export interface VulvaPatch {
   /** drawn even while her body is not (a probe's look at the area on its own) */
   solo: boolean;
   noTube?: boolean;
+  /** her own skin drawn behind the area (on unless a probe turns it off to compare) */
+  backing: boolean;
   debug(): Record<string, unknown>;
   /** where her split is now (world) and the way it faces (a camera's yaw and pitch to look straight at it) */
   facing(): { at: THREE.Vector3; yaw: number; pitch: number };
@@ -288,7 +290,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     geom.morphAttributes[kind] = list.map((m) => { const out = new Float32Array(P * 3); sampleInto(out, floatsOf(m), 3, bake.src, bake.bary, P); return new THREE.BufferAttribute(out, 3); });
   }
   geom.morphTargetsRelative = g.morphTargetsRelative;
-  geom.setIndex(new THREE.BufferAttribute(bake.index, 1));
+  const patchIdx = Uint32Array.from(bake.index);
+  geom.setIndex(new THREE.BufferAttribute(patchIdx, 1));
 
   // her material, copied so the area can carry its own colour (the lips' inside); kept in step with hers every frame
   const bodyMat = (Array.isArray(body.material) ? body.material[0] : body.material) as THREE.MeshStandardMaterial;
@@ -306,15 +309,24 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   dressedMat.onBeforeCompile = bodyMat.onBeforeCompile;
   dressedMat.customProgramCacheKey = bodyMat.customProgramCacheKey;
   dressedMat.vertexColors = false;
+  // HER OWN SKIN BEHIND THE AREA (2026-11-02, Joshua circling where "textures and stuff [were] bleeding through"): her
+  // own triangles that the area is drawn in place of, drawn again just behind it (polygon offset) wherever they lie out
+  // past the opening -- so a seam where the area does not quite meet her thighs, as her legs pull it, shows her skin,
+  // never the room or the inside of her. Hers exactly: her material, her weights, her shape, all shared.
+  const backMat = bodyMat.clone();
+  backMat.onBeforeCompile = bodyMat.onBeforeCompile;
+  backMat.customProgramCacheKey = bodyMat.customProgramCacheKey;
+  backMat.vertexColors = false;
+  backMat.polygonOffset = true; backMat.polygonOffsetFactor = 2; backMat.polygonOffsetUnits = 6;
   const keepMat = () => {
-    for (const mat of [patchMat, dressedMat]) {
+    for (const mat of [patchMat, dressedMat, backMat]) {
       const a = mat as unknown as Record<string, unknown>, b = bodyMat as unknown as Record<string, unknown>;
       let changed = false;
       for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'roughness', 'metalness', 'transparent', 'opacity', 'depthWrite', 'visible', 'side', 'wireframe']) if (a[k] !== b[k]) { a[k] = b[k]; changed = true; }
       if (!mat.color.equals(bodyMat.color)) { mat.color.copy(bodyMat.color); changed = true; }
       // her own material is patched again as she changes (a new garment painted on): the dressed one follows it
-      if (mat === dressedMat && (dressedMat.onBeforeCompile !== bodyMat.onBeforeCompile || dressedMat.customProgramCacheKey !== bodyMat.customProgramCacheKey)) {
-        dressedMat.onBeforeCompile = bodyMat.onBeforeCompile; dressedMat.customProgramCacheKey = bodyMat.customProgramCacheKey; changed = true;
+      if (mat !== patchMat && (mat.onBeforeCompile !== bodyMat.onBeforeCompile || mat.customProgramCacheKey !== bodyMat.customProgramCacheKey)) {
+        mat.onBeforeCompile = bodyMat.onBeforeCompile; mat.customProgramCacheKey = bodyMat.customProgramCacheKey; changed = true;
       }
       if (changed) mat.needsUpdate = true;
     }
@@ -335,6 +347,22 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   body.userData.allIndices = keep;
   g.setIndex(new THREE.BufferAttribute(Uint32Array.from(keep), 1));
   body.userData.coverMask = undefined;
+  // (the backing: her geometry's own attributes shared, its own list of triangles, chosen as the opening is laid)
+  const backGeom = new THREE.BufferGeometry();
+  const shareBody = () => {
+    for (const name of Object.keys(g.attributes)) if (backGeom.getAttribute(name) !== g.getAttribute(name)) backGeom.setAttribute(name, g.getAttribute(name));
+    backGeom.morphAttributes = g.morphAttributes; backGeom.morphTargetsRelative = g.morphTargetsRelative;
+  };
+  shareBody();
+  const backIdx = new Uint32Array(Math.max(3, bake.area.length));
+  backGeom.setIndex(new THREE.BufferAttribute(backIdx, 1)); backGeom.setDrawRange(0, 0);
+  const backing = new THREE.SkinnedMesh(backGeom, backMat);
+  backing.castShadow = false; backing.receiveShadow = body.receiveShadow;
+  backing.position.copy(body.position); backing.quaternion.copy(body.quaternion); backing.scale.copy(body.scale);
+  backing.morphTargetDictionary = body.morphTargetDictionary; backing.morphTargetInfluences = body.morphTargetInfluences;
+  backing.bind(body.skeleton, body.bindMatrix);
+  backing.frustumCulled = false;
+  body.parent?.add(backing);
 
   // ---- THE OPENING (Joshua's hoop, 2026-10-30): the split is the flattened end of a tube; opening it goes slit, oval,
   // round, the area domes out round it (his photos of crowning), and the tube runs on inside, pink.
@@ -987,6 +1015,85 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     lipsLifted = lifted;
   }
   let lipsLifted = 0;
+  /** the backing's triangles: the area's own, but none that lie within the opening's outline (and `backMargin` past it,
+   * round its middle in its plane) -- there her skin has moved aside and the opening is open */
+  function layBacking(): void {
+    const bpA = g.getAttribute('position') as THREE.BufferAttribute, area = bake.area;
+    const C = new THREE.Vector3(); for (let j = 0; j < M; j++) { C.x += rim[j * 3] / M; C.y += rim[j * 3 + 1] / M; C.z += rim[j * 3 + 2] / M; }
+    const ax = Math.abs(nO.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+    const e1 = ax.addScaledVector(nO, -ax.dot(nO)).normalize(), e2 = new THREE.Vector3().crossVectors(nO, e1);
+    const B = 96, reachAt = new Float32Array(B), tmp = new Float32Array(B), d = new THREE.Vector3();
+    const binOf = (x: number, y: number) => ((Math.floor(((Math.atan2(y, x) + Math.PI) / (2 * Math.PI)) * B) % B) + B) % B;
+    for (let j = 0; j < M; j++) {
+      d.set(rim[j * 3] - C.x, rim[j * 3 + 1] - C.y, rim[j * 3 + 2] - C.z); d.addScaledVector(nO, -d.dot(nO));
+      const b = binOf(d.dot(e1), d.dot(e2)); reachAt[b] = Math.max(reachAt[b], d.length());
+    }
+    for (let b = 0; b < B; b++) { let m = 0; for (let k = -4; k <= 4; k++) m = Math.max(m, reachAt[(b + k + B) % B]); tmp[b] = m; }
+    const margin = VULVA_OPEN.backMargin * perMetre, depth = 0.05 * perMetre;
+    let n2 = 0; backVert.fill(0);
+    for (let t = 0; t + 2 < area.length; t += 3) {
+      let inside = false;
+      for (let k = 0; k < 3 && !inside; k++) {
+        const v = area[t + k]; d.set(bpA.getX(v) - C.x, bpA.getY(v) - C.y, bpA.getZ(v) - C.z);
+        const dn = d.dot(nO); d.addScaledVector(nO, -dn);
+        if (Math.abs(dn) < depth && d.length() < tmp[binOf(d.dot(e1), d.dot(e2))] + margin) inside = true;
+      }
+      if (inside) continue;
+      backIdx[n2++] = area[t]; backIdx[n2++] = area[t + 1]; backIdx[n2++] = area[t + 2];
+      backVert[area[t]] = 1; backVert[area[t + 1]] = 1; backVert[area[t + 2]] = 1;
+    }
+    (backGeom.index as THREE.BufferAttribute).needsUpdate = true;
+    backGeom.setDrawRange(0, n2);
+    backCount = n2 / 3;
+  }
+  let backCount = 0;
+  const backVert = new Uint8Array(n);
+  /** the area's own thin outer band given back to her skin behind it (2026-11-02: cut by her thighs' mask into strips a
+   * few points wide, they tore and stood out as she posed -- "textures and stuff bleeding through"): a triangle whose
+   * points are all within `edgeTrim` of the area's outer edge, and none of them near the opening (`edgeKeep` from the
+   * split), is not drawn; the backing (her own skin there) shows instead. Dropped triangles become empty ones. */
+  let trimmed = 0;
+  function trimEdge(): void {
+    const dEdge = edgeDistances(), src = bake.index, cut = VULVA_OPEN.edgeTrim * perMetre, keepNear = VULVA_OPEN.edgeKeep;
+    let n2 = 0, dropped = 0;
+    for (let t = 0; t + 2 < src.length; t += 3) {
+      const a = src[t], b = src[t + 1], c = src[t + 2];
+      // (and only where her own skin behind it is drawn: under all three of its points)
+      const behind = (p: number) => backVert[bake.src[p * 3]] === 1 && backVert[bake.src[p * 3 + 1]] === 1 && backVert[bake.src[p * 3 + 2]] === 1;
+      const drop = !dressed && api.backing && dEdge[a] < cut && dEdge[b] < cut && dEdge[c] < cut && edgeDist[a] > keepNear && edgeDist[b] > keepNear && edgeDist[c] > keepNear && behind(a) && behind(b) && behind(c);
+      if (drop) { dropped++; continue; }
+      patchIdx[n2++] = a; patchIdx[n2++] = b; patchIdx[n2++] = c;
+    }
+    while (n2 < src.length) patchIdx[n2++] = src[0];
+    (geom.index as THREE.BufferAttribute).needsUpdate = true;
+    trimmed = dropped;
+  }
+  /** each point's distance (her rest units) from the area's own outer edge: its edges that one triangle has, out past its
+   * first rings (the opening's edge is not it), worked out again when her shape is read again */
+  let outerEdgeIdx: Int32Array | null = null, edgeDist3: Float32Array | null = null, edgeDistAt = -1;
+  function edgeDistances(): Float32Array {
+    if (!outerEdgeIdx) {
+      const ix = geom.index, count = new Map<number, number>(), on = new Uint8Array(P);
+      if (ix) {
+        for (let t = 0; t + 2 < ix.count; t += 3) for (let e = 0; e < 3; e++) {
+          const a2 = ix.getX(t + e), b2 = ix.getX(t + ((e + 1) % 3)), k = a2 < b2 ? a2 * P + b2 : b2 * P + a2;
+          count.set(k, (count.get(k) ?? 0) + 1);
+        }
+        for (const [k, c] of count) if (c === 1) { const a2 = Math.floor(k / P), b2 = k % P; if (bake.ring[a2] > 1) on[a2] = 1; if (bake.ring[b2] > 1) on[b2] = 1; }
+      }
+      const list: number[] = []; for (let p = 0; p < P; p++) if (on[p]) list.push(p);
+      outerEdgeIdx = Int32Array.from(list);
+    }
+    if (edgeDist3 && edgeDistAt === posVersion) return edgeDist3;
+    const E = outerEdgeIdx, d = edgeDist3 ?? new Float32Array(P);
+    for (let p = 0; p < P; p++) {
+      let best = Infinity; const x = restPos[p * 3], y = restPos[p * 3 + 1], z = restPos[p * 3 + 2];
+      for (let k = 0; k < E.length; k++) { const q = E[k], dd = (restPos[q * 3] - x) ** 2 + (restPos[q * 3 + 1] - y) ** 2 + (restPos[q * 3 + 2] - z) ** 2; if (dd < best) best = dd; }
+      d[p] = E.length ? Math.sqrt(best) : Infinity;
+    }
+    edgeDist3 = d; edgeDistAt = posVersion;
+    return d;
+  }
   let tubePushed = 0;
   /** lay the opening on the rest shape just read (restPos) */
   function layOpen(): void {
@@ -1224,16 +1331,21 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     const bAmt = dressed ? 0 : bulgeAmt;
     if (bAmt > 0 && VULVA_OPEN.bulge > 0) {
       const H = VULVA_OPEN.bulge * Math.pow(bAmt, VULVA_OPEN.bulgeEase), out = nO;
+      // A DOME ROUND THE OPENING, smooth over her skin (2026-11-02: laid column by column, each scaled to its own
+      // column's length, it tore where her legs hold the opening -- the columns there are cut short by her thighs and
+      // their neighbours were not, so side by side they stood out by different amounts): the opening's edge and all
+      // inside it `bulge` out; from there a round shoulder down to nothing `bulgeReach` further out; and within
+      // `bulgeFootM` of the area's own outer edge, wherever that is, eased onto her skin, so it never steps.
+      const Cb = new THREE.Vector3(); let nb = 0;
+      for (let j = 0; j < M; j++) { const q = base[j]; if (q < 0) continue; Cb.x += pos[q * 3]; Cb.y += pos[q * 3 + 1]; Cb.z += pos[q * 3 + 2]; nb++; }
+      Cb.divideScalar(Math.max(1, nb));
+      const inPlane = (q: number) => { const dx = pos[q * 3] - Cb.x, dy = pos[q * 3 + 1] - Cb.y, dz = pos[q * 3 + 2] - Cb.z, k = dx * out.x + dy * out.y + dz * out.z; return Math.hypot(dx - k * out.x, dy - k * out.y, dz - k * out.z); };
+      let r0 = 0; for (let j = 0; j < M; j++) if (base[j] >= 0) r0 += inPlane(base[j]) / Math.max(1, nb);
+      const reach = VULVA_OPEN.bulgeReach * perMetre, footW = VULVA_OPEN.bulgeFootM * perMetre, dEdge = edgeDistances();
       for (let p = 0; p < P; p++) {
-        if (tau[p] >= 1) continue;
-        const j = bake.column[p], total = cm[R * M + j] || 1, m = cm[bake.ring[p] * M + j], e = edges[j];
-        // A HALF SPHERE (Joshua, 2026-11-01: "the bulge should be shaped like a half sphere"): where the point now lies,
-        // as a share of the way from the split to the area's edge (s), it stands on a sphere round the opening's middle
-        // -- the opening its top, cut off where the head shows -- scaled so the opening's edge stands `bulge` out; the
-        // last `bulgeFoot` of the way eases it onto her skin, so its foot is not a step
-        const s = Math.max(0, Math.min(1, (e + m * (1 - e / total)) / total)), s0 = Math.min(0.95, e / total);
-        const sphere = Math.sqrt(Math.max(0, 1 - s * s)) / Math.sqrt(1 - s0 * s0), foot = smooth(1, 1 - VULVA_OPEN.bulgeFoot, s);
-        const h = H * Math.min(1, sphere) * foot * perMetre;
+        const t = Math.min(1, Math.max(0, (inPlane(p) - r0) / reach)), dome = Math.pow(1 - t * t, 1.5);
+        const h = H * perMetre * dome * smooth(VULVA_OPEN.edgeTrim * perMetre, VULVA_OPEN.edgeTrim * perMetre + footW, dEdge[p]);
+        if (h <= 0) continue;
         pos[p * 3] += out.x * h; pos[p * 3 + 1] += out.y * h; pos[p * 3 + 2] += out.z * h;
       }
     }
@@ -1284,6 +1396,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     if (VULVA_OPEN.sheet && !dressed) laySheet(pos, nrm, cm);
     // the canal hangs from the lips' edge as shaped (rolled in), so the two meet
     for (let j = 0; j < M; j++) for (let c = 0; c < 3; c++) rim[j * 3 + c] = pos[base[j] * 3 + c];
+    layBacking(); trimEdge();
     // THE BALLOON: one skin from the opening's rim to the top of her womb (see VULVA_OPEN.bead)
     const C0 = vv.set(0, 0, 0);
     for (let j = 0; j < M; j++) C0.x += rim[j * 3] / M, C0.y += rim[j * 3 + 1] / M, C0.z += rim[j * 3 + 2] / M;
@@ -1371,6 +1484,10 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       for (let j = 0; j < M; j++) {
         oj.fromArray(oS, j * 3);
         pt.fromArray(rimS, j * 3).addScaledVector(oj, -rr).addScaledVector(nO, lift).addScaledVector(oj, rr * Math.cos(phi)).addScaledVector(nO, rr * Math.sin(phi));
+        // (its first ring on her skin's own edge, a little out under it: the roll is laid round a smoothed edge, and where
+        // her edge reached out past it the two did not meet and the inside of her showed through between them -- RECLINE
+        // 100% from the side, 2026-11-02)
+        if (b === 0 && open > 0) pt.fromArray(rim, j * 3).addScaledVector(oj, L.rimTuck * perMetre).addScaledVector(nO, -0.5 * L.rimTuck * perMetre);
         put(b, j, pt);
         if (b === KB - 1) pt.toArray(startOf, j * 3);
       }
@@ -1380,6 +1497,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     // 2. THE CANAL: the opening's outline carried in along the curve, narrower inward at rest, as wide as the opening
     // once it is open; down its walls soft folds, smoothed out as it stretches; its last rings rounding toward a circle
     const rEnd = Math.max(L.cervixShut * perMetre / 2, meanR * (0.45 + 0.55 * smooth(0, 1, open)));
+    const bulgeOff = nO.clone().multiplyScalar(bulgeNow * perMetre);
     for (let k = 0; k < KC; k++) {
       const m = KB + k, f = k / (KC - 1), narrow = 1 - 0.55 * smooth(0, 0.35, f);
       const scale = narrow + (1 - narrow) * smooth(0, 1, open);
@@ -1404,9 +1522,13 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
         // (its first rings go on from where each bead ended, easing onto the canal's own shape)
         if (k === 0) { const o = j * 3; startOf[o] -= pt.x; startOf[o + 1] -= pt.y; startOf[o + 2] -= pt.z; }
         const ease = 1 - smooth(0, 0.4, f); pt.x += startOf[j * 3] * ease; pt.y += startOf[j * 3 + 1] * ease; pt.z += startOf[j * 3 + 2] * ease;
+        // (the bulge carries the mouth out, not the canal: deeper in it stays where it was, stretched -- carried out whole,
+        // its top came out through her skin over the opening, SQUAT 100% with the bulge, 2026-11-02)
+        pt.addScaledVector(bulgeOff, -smooth(0, 0.6, f));
         put(m, j, pt);
       }
     }
+    ctr.sub(bulgeOff);
     // 3. THE CERVIX: a neck, its own opening dilating with hers (shut, a few millimetres; at 100%, the opening's width)
     const rCx = Math.max(L.cervixShut * perMetre / 2, 0.05 * perMetre * open);
     if (womb) {
@@ -1486,7 +1608,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
           for (let c = 0; c < 4; c++) { a2[o + c] = patchI[v + c]; b2[o + c] = patchW[v + c] * (1 - deep); if (patchI[v + c] === pelvis) pel = c; }
           // (the rolled rim and the canal's mouth carried as the edge is round about each point -- its weights evened round
           // the ring -- so posed it stays one smooth roll and does not follow each column's own bones into notches)
-          if (m < KB + evenTo) {
+          if (m > 0 && m < KB + evenTo) {
             const acc = new Map<number, number>(), WR = VULVA_OPEN.rimWeightReach;
             for (let dj = -WR; dj <= WR; dj++) { const vj = base[(j + dj + M) % M] * 4, g = 1 - Math.abs(dj) / (WR + 1); for (let c = 0; c < 4; c++) { const w = patchW[vj + c] * g; if (w > 0) acc.set(patchI[vj + c], (acc.get(patchI[vj + c]) ?? 0) + w); } }
             const top = [...acc].sort((x, y) => y[1] - x[1]).slice(0, 4), sum0 = top.reduce((mm, [, w]) => mm + w, 0) || 1;
@@ -1605,6 +1727,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     mesh.visible = (body.visible || api.solo) && shown;
     // (the balloon is inside her, closed: it stays whole however shut she is)
     tube.visible = mesh.visible && !api.noTube;
+    shareBody(); backing.visible = mesh.visible && !dressed && api.backing;
+    if (backing.morphTargetInfluences !== body.morphTargetInfluences) backing.morphTargetInfluences = body.morphTargetInfluences;
     sheet.visible = mesh.visible && VULVA_OPEN.sheet && !dressed && sheetLaid;
     if (rimMat.map !== patchMat.map || !rimMat.color.equals(patchMat.color)) { rimMat.map = patchMat.map; rimMat.normalMap = patchMat.normalMap; rimMat.roughnessMap = patchMat.roughnessMap; rimMat.color.copy(patchMat.color); rimMat.needsUpdate = true; }
     outer.visible = mesh.visible && !dressed && outerLaid && open > 0.02 && VULVA_OPEN.outerRing;
@@ -1617,7 +1741,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     return changed;
   };
   const api: VulvaPatch = {
-    mesh, tube, sheet, bake, sync, solo: false,
+    mesh, tube, sheet, bake, sync, solo: false, backing: true,
     resyncWeights() {
       const a = geom.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, b = geom.getAttribute('skinWeight') as THREE.BufferAttribute | undefined;
       if (!a || !b) return;
@@ -1661,7 +1785,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       let far = 0, farI = -1; { const c0 = new THREE.Vector3(); for (let j = 0; j < M; j++) c0.x += rim[j * 3] / M, c0.y += rim[j * 3 + 1] / M, c0.z += rim[j * 3 + 2] / M; for (let i = 0; i < SV; i++) { const d = Math.hypot(sheetWant[i * 3] - c0.x, sheetWant[i * 3 + 1] - c0.y, sheetWant[i * 3 + 2] - c0.z) / perMetre; if (d > far) { far = d; farI = i; } } }
       let pfar = 0, pfarI = -1; { const c1 = new THREE.Vector3(), v1 = new THREE.Vector3(); for (let j = 0; j < M; j++) { mesh.getVertexPosition(base[j], v1); c1.addScaledVector(v1, 1 / M); } for (let i = 0; i < SV; i++) { sheet.getVertexPosition(i, v1); const d = v1.distanceTo(c1) / perMetre; if (d > pfar) { pfar = d; pfarI = i; } } }
       const sheetDbg = { pfar: +pfar.toFixed(3), prow: Math.floor(pfarI / NS), pa: pfarI % NS, pbones: Array.from(sheetI.slice(pfarI * 4, pfarI * 4 + 4)), pw: Array.from(sheetW.slice(pfarI * 4, pfarI * 4 + 4)).map((x) => +x.toFixed(2)), from: sheetFrom[pfarI], to: sheetTo[pfarI], f: +sheetF[pfarI].toFixed(2), far: +far.toFixed(3), row: Math.floor(farI / NS), a: farI % NS, bones: Array.from(sheetI.slice(farI * 4, farI * 4 + 4)), w: Array.from(sheetW.slice(farI * 4, farI * 4 + 4)).map((x) => +x.toFixed(2)) };
-      const wombDbg = { tubePushed, lipsLifted, sheet: sheetDbg, floor: wombFloor, centre: womb?.centre.toArray().map((x) => +x.toFixed(3)), axis: womb?.axis.toArray().map((x) => +x.toFixed(3)), rimRest: rimRest.toArray().map((x) => +x.toFixed(3)), wombRing0: cx0.toArray().map((x) => +x.toFixed(3)), top: lastW.toArray().map((x) => +x.toFixed(3)), bone: wombBone };
+      const wombDbg = { backCount, trimmed, tubePushed, lipsLifted, sheet: sheetDbg, floor: wombFloor, centre: womb?.centre.toArray().map((x) => +x.toFixed(3)), axis: womb?.axis.toArray().map((x) => +x.toFixed(3)), rimRest: rimRest.toArray().map((x) => +x.toFixed(3)), wombRing0: cx0.toArray().map((x) => +x.toFixed(3)), top: lastW.toArray().map((x) => +x.toFixed(3)), bone: wombBone };
       return { wombDbg, rimSize, uScale, sScale, pelvisBoneGiven: pelvisBone, pelvis: body.skeleton.bones[pelvis]?.name, pelvisIndex: pelvis, restPos: bad(restPos), restNrm: bad(restNrm), rim: bad(rim), pos: bad(pos), tau: bad(tau), colQ: bad(colQ), body: bad((g.getAttribute('position') as THREE.BufferAttribute).array), O: O.toArray(), tA: tA.toArray(), nO: nO.toArray(), across: across.toArray(), perMetre, open };
     },
     get open() { return wantOpen; },
@@ -1715,7 +1839,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       } else if (!on && wireMesh) { wireMesh.removeFromParent(); (wireMesh.material as THREE.Material).dispose(); wireMesh = null; }
       sync();
     },
-    dispose() { mesh.removeFromParent(); wireMesh?.removeFromParent(); tube.removeFromParent(); sheet.removeFromParent(); outer.removeFromParent(); outerGeom.dispose(); outerMat.dispose(); geom.dispose(); tubeGeom.dispose(); tubeMat.dispose(); wombMat.dispose(); rimMat.dispose(); sheetGeom.dispose(); sheetMat.dispose(); },
+    // (the backing's geometry shares her own attributes: not disposed, or her own buffers would go with it)
+    dispose() { backing.removeFromParent(); backMat.dispose(); mesh.removeFromParent(); wireMesh?.removeFromParent(); tube.removeFromParent(); sheet.removeFromParent(); outer.removeFromParent(); outerGeom.dispose(); outerMat.dispose(); geom.dispose(); tubeGeom.dispose(); tubeMat.dispose(); wombMat.dispose(); rimMat.dispose(); sheetGeom.dispose(); sheetMat.dispose(); },
   };
   sync();
   return api;
