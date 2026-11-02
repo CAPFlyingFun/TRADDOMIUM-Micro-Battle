@@ -64,7 +64,9 @@ export const VULVA_OPEN = Object.freeze({
    * her skin (a share of that), and how many Taubin passes even its loop */
   outerRound: 0.005, outerGap: 0.012, outerLift: 0.2, outerSmooth: 30,
   /** GAME TUNING: how many waves round itself the rim's and the outer ring's loops keep (fewer: smoother) */
-  loopWaves: 5, wombWall: 0.003, wombMeet: 35, wallSkin: 0xa87060, wallPink: 0xc0646e, pleats: 4, pleatDepth: 0.22, cervix: 0.025, cervixShut: 0.006, womb: 0.13, wombRadius: 0.065,
+  loopWaves: 5,
+  /** GAME TUNING: how much of the way the skin between the two rings is laid on the smooth band between them */
+  bridge: 0.9, wombWall: 0.003, wombMeet: 35, wallSkin: 0xa87060, wallPink: 0xc0646e, pleats: 4, pleatDepth: 0.22, cervix: 0.025, cervixShut: 0.006, womb: 0.13, wombRadius: 0.065,
   /** BIOLOGICAL SHAPE (Joshua's estimate, to tune): how far the area bulges out at the full opening (metres; a half sphere,
    * its last `bulgeFoot` share easing onto her skin), and how it
    * grows with the opening (power of the open share: 1 straight, more later) */
@@ -491,6 +493,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   outer.bind(body.skeleton, body.bindMatrix);
   body.parent?.add(outer);
   let outerLaid = false;
+  /** the opening's edge as the balloon's rim is laid round it (smoothed), kept for the skin bridged to the outer ring */
+  const rimSmoothed = new Float32Array(M * 3);
   const outerSrc = new Int32Array(M);
   /** each sheet point: the two of the area's points it lies between (its foot, the opening's edge) and how far (0 foot .. 1 edge) */
   const sheetFrom = new Int32Array(SV), sheetTo = new Int32Array(SV), sheetF = new Float32Array(SV), sheetFootN = new Float32Array(2 * NRW * 3);
@@ -811,6 +815,30 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     }
     smoothLoop(loop, M, L.loopWaves);
     for (let pass = 0; pass < 10; pass++) { for (let j = 0; j < M; j++) for (let c = 0; c < 3; c++) tmp[j * 3 + c] = 0.25 * nl[((j + M - 1) % M) * 3 + c] + 0.5 * nl[j * 3 + c] + 0.25 * nl[((j + 1) % M) * 3 + c]; nl.set(tmp); }
+    // THE SKIN BETWEEN THE TWO RINGS BRIDGED SMOOTHLY (Joshua, 2026-11-02: "blend the two rings together better so they
+    // don't look so separated with gaps, and fix the tears on the side views"). Each column's skin from the opening's edge
+    // out to the outer ring is laid on a smooth band from the balloon's rim to the outer ring's loop -- a straight run
+    // between them, rising to meet each roll -- instead of where its own triangles happened to fall (which crumpled and
+    // tore where her thighs squeeze it). `bridge` of the way, as much as the ring is there.
+    { const kOut = new Float32Array(M);
+      for (let j = 0; j < M; j++) kOut[j] = Math.max(1, bake.ring[outerSrc[j]]);
+      for (let pass = 0; pass < 6; pass++) { const t2 = Float32Array.from(kOut); for (let j = 0; j < M; j++) kOut[j] = 0.25 * t2[(j + M - 1) % M] + 0.5 * t2[j] + 0.25 * t2[(j + 1) % M]; }
+      const A = new THREE.Vector3(), B = new THREE.Vector3(), T = new THREE.Vector3(), nA = new THREE.Vector3(), nB = new THREE.Vector3();
+      const share = L.bridge * smooth(0.02, 0.3, open), rimLiftG = L.rimLift * L.rimBead * perMetre * smooth(0.01, 0.25, open), outLiftG = L.outerLift * ro;
+      for (let p = 0; p < P; p++) {
+        if (moved[p] <= 0) continue;
+        const j = bake.column[p], u = bake.ring[p] / kOut[j];
+        if (u > 1.35) continue;
+        const t = Math.min(1, u), fade = share * moved[p] * (u <= 1 ? 1 : smooth(1.35, 1, u));
+        A.fromArray(rimSmoothed, j * 3); B.fromArray(loop, j * 3);
+        nA.copy(nO).normalize(); nB.fromArray(nl, j * 3).normalize();
+        // (along the band, eased at both ends so it meets each roll square; standing as high as each roll's middle near it)
+        const e = t * t * (3 - 2 * t), lift = rimLiftG * (1 - t) * (1 - t) + outLiftG * t * t;
+        T.copy(A).lerp(B, e).addScaledVector(nA.lerp(nB, e).normalize(), lift);
+        for (let c = 0; c < 3; c++) at[p * 3 + c] += (T.getComponent(c) - at[p * 3 + c]) * fade;
+        const nx = nA.x, ny = nA.y, nz = nA.z, l = Math.hypot(nx, ny, nz) || 1;
+        an[p * 3] += (nx / l - an[p * 3]) * fade; an[p * 3 + 1] += (ny / l - an[p * 3 + 1]) * fade; an[p * 3 + 2] += (nz / l - an[p * 3 + 2]) * fade;
+      } }
     const nn = new THREE.Vector3(), o = new THREE.Vector3(), q = new THREE.Vector3();
     for (let j = 0; j < M; j++) {
       nn.fromArray(nl, j * 3).normalize();
@@ -1202,6 +1230,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     }
     // (and then only its broad shape kept: a notch where her split's ends meet came through the passes above as a V)
     smoothLoop(rimS, M, L.loopWaves);
+    rimSmoothed.set(rimS);
     // (each point's way out from the opening's middle, evened round too)
     const oS = new Float32Array(M * 3);
     { const Cs = new THREE.Vector3(); for (let j = 0; j < M; j++) Cs.x += rimS[j * 3] / M, Cs.y += rimS[j * 3 + 1] / M, Cs.z += rimS[j * 3 + 2] / M;
