@@ -196,6 +196,7 @@ export const SARAH_LAB_FIELD = Object.freeze({
   fingers: 'sarahlab-fingers',
   /** her birth opening (vulvaMesh.ts): closed to the full 10 cm, for looking at it in the room */
   birthOpen: 'sarahlab-birth-open',
+  birthBulge: 'sarahlab-birth-bulge',
   arms: 'sarahlab-arms',
   /** `${body}<control>`: a body control's line; its slider follows it */
   body: 'sarahlab-body-',
@@ -837,6 +838,16 @@ export function birthOpenLine(percent: number, heldTo: number | null = null): st
   // (held back by her legs: what it is, and why -- spread her legs and it goes on)
   if (heldTo !== null) return `BIRTH OPENING ${p}% · held to ${(heldTo * 100).toFixed(1)} cm by her legs`;
   return `BIRTH OPENING ${p}% · ${(p / 10).toFixed(1)} cm across`;
+}
+
+/**
+ * The birth bulge slider's line (Joshua, 2026-11-02: a separate slider for the area pushing outward, since in a real
+ * birth it opens first and only bulges out once the baby's head is low, past her cervix and in the birth canal).
+ */
+export function birthBulgeLine(percent: number, cmAtFull = 5): string {
+  const p = Math.round(Math.min(100, Math.max(0, percent)));
+  if (p === 0) return 'BIRTH BULGE · none';
+  return `BIRTH BULGE ${p}% · ${((p / 100) * cmAtFull).toFixed(1)} cm out`;
 }
 
 export function bumpLine(bumpPercent: number): string {

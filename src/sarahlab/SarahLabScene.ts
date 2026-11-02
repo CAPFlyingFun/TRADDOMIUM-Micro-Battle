@@ -103,7 +103,7 @@ import { NAVEL_MORPHS, type NavelPiece } from './navelPiece';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  SARAH_V2_HAIR_MODEL, BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, birthOpenLine, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, teeLengthParts, sleevesLine, necklineLine, neckShapeLine, CLOTH_NECKLINE_DEFAULT, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, CLOTH_TEE_LENGTH_DEFAULT, clothTuning, clothRestScale, type ClothTune,
+  SARAH_V2_HAIR_MODEL, BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, birthOpenLine, birthBulgeLine, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, teeLengthParts, sleevesLine, necklineLine, neckShapeLine, CLOTH_NECKLINE_DEFAULT, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, CLOTH_TEE_LENGTH_DEFAULT, clothTuning, clothRestScale, type ClothTune,
   labTitle, CLOTH_SEATED_LINE, bellyMotionWeights, bellyWeights, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatFor, navelState, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, walkBounceAccel, walkSwayAccel,
   offeredOutfits, outfitThumbPath,
   type Garment, type SarahLabPose, isBirthPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, SARAH_DEFAULT_OUTFIT, SIM_TEE_OUTFIT, RECOVERED_GARMENTS,
@@ -504,7 +504,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const rangeRows: { spec: RandomSpec; row: HTMLElement; lo: HTMLInputElement; hi: HTMLInputElement }[] = [];
   let bumpInput: HTMLInputElement | null = null;
   /** the BIRTH OPENING slider (percent, 0 closed .. 100 the full 10 cm) */
-  let birthOpenInput: HTMLInputElement | null = null, birthOpenPct = 0;
+  let birthOpenInput: HTMLInputElement | null = null, birthOpenPct = 0, birthBulgeInput: HTMLInputElement | null = null, birthBulgePct = 0;
   /** her lowest buttocks pressed in in a birth pose (a probe may turn it off to compare) */
   let birthSeatOn = true;
   /** in SQUAT the same skin rounded OUT instead (negative: out; Joshua, 2026-10-31: there it "pinches right in the
@@ -991,6 +991,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (vulva) birthOpenPct = Math.round(vulva.open * 100);
       if (f2) f2.textContent = birthOpenLine(birthOpenPct, vulva?.heldTo ?? null);
       if (birthOpenInput && Number(birthOpenInput.value) !== birthOpenPct) birthOpenInput.value = String(birthOpenPct); }
+    { const f3 = fields[SARAH_LAB_FIELD.birthBulge];
+      if (vulva) birthBulgePct = Math.round(vulva.bulge * 100);
+      if (f3) f3.textContent = birthBulgeLine(birthBulgePct, VULVA_OPEN.bulge * 100);
+      if (birthBulgeInput && Number(birthBulgeInput.value) !== birthBulgePct) birthBulgeInput.value = String(birthBulgePct); }
     if (bumpInput && Number(bumpInput.value) !== bump) bumpInput.value = String(bump);
     for (const spec of BODY_RANDOM_SPECS) {
       const b = lockButtons.get(spec.key);
@@ -1873,6 +1877,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     armsInput = slider(SARAH_LAB_FIELD.arms, armsDeg, (v) => { armsDeg = v; armsOverride = true; }, 90, 'pose');
     // her birth opening, closed to the full 10 cm (with the birth poses: LEGS APART, SQUAT, RECLINE)
     birthOpenInput = slider(SARAH_LAB_FIELD.birthOpen, birthOpenPct, (v) => { birthOpenPct = v; vulva?.setOpen(v / 100); }, 100, 'pose');
+    // and how far the area round it is pushed out, on its own (in a birth it opens first, and bulges once her baby's head
+    // is low in the canal)
+    birthBulgeInput = slider(SARAH_LAB_FIELD.birthBulge, birthBulgePct, (v) => { birthBulgePct = v; vulva?.setBulge(v / 100); }, 100, 'pose');
     // a painted shirt's length, for every painted shirt she puts on (its drape follows: tunicDrape.ts)
     shirtLengthInput = slider(SARAH_LAB_FIELD.shirtLength, Math.round(DEFAULT_SHIRT_LENGTH * 100), (v) => { fabric?.setShirtLength(v / 100); }, 100, 'outfit');
     // THE CLOTH EXPERIMENT: the light tee as cloth, and its length to mid-thigh (Joshua, 2026-10-23)
@@ -2907,10 +2914,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     if (!vulva || !babyFrame) return;
     const sk = bodyOf()?.mesh.skeleton, bone = sk ? sk.bones.indexOf(babyFrame.bone) : -1;
     if (babyWomb) { balloonWombKey = 'baby'; vulva.setWomb(babyWomb, bone); return; }
-    const key = `${bump.toFixed(3)}|${babyCount}|${body.babyWeight.toFixed(2)}`;
-    if (key === balloonWombKey) return;
+    // (keyed on her belly's skin as it is drawn, not only on the sliders: 2026-11-02, Joshua -- on a fresh load her womb
+    // showed through her belly and her shirt until a pose was pressed: it had been laid round her belly as it was while
+    // the room was still putting her shape on, and the sliders had not moved since)
     const skin = bellySkin();
     if (!skin) return;
+    let sig = 0; for (let i = 0; i < skin.length; i += 3) sig += skin[i] * 1.3 + skin[i + 1] * 3.7 + skin[i + 2] * 7.1;
+    const key = `${bump.toFixed(3)}|${babyCount}|${body.babyWeight.toFixed(2)}|${sig.toFixed(4)}`;
+    if (key === balloonWombKey) return;
     balloonWombKey = key;
     try { vulva.setWomb(wombFromSkin(skin, weekForBump(bump, babyCount)), bone); } catch (error) { console.error('[sarahlab] her womb for the balloon could not be laid', error); vulva.setWomb(null); }
   }
@@ -3399,7 +3410,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             // (her legs' skin, and 1 cm in from it, kept out of the area: VULVA_OPEN.legMask; and the tops of her inner
             // thighs under her vulva, though her torso carries them: birthGap.ts)
             const bw = birthWeights as BirthWeights | null, under = birthGapUnderMask(sb.fields.basePos, sb.fields.baseNrm!, babyFrame.meshToRest), legSkin = bw ? (i: number) => under[i] === 1 || bw.legDistance(i) > -VULVA_OPEN.legMask : undefined;
-            try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest, measure?.joints.pelvis, measure ? [measure.joints.hipL, measure.joints.hipR, measure.joints.kneeL, measure.joints.kneeR] : [], legSkin); vulva?.setOpen(birthOpenPct / 100); balloonWombKey = ''; layBalloonWomb(); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
+            try { vulva = createVulvaPatch(bm!, sb.fields.basePos, babyFrame.meshToRest, measure?.joints.pelvis, measure ? [measure.joints.hipL, measure.joints.hipR, measure.joints.kneeL, measure.joints.kneeR] : [], legSkin); vulva?.setOpen(birthOpenPct / 100); vulva?.setBulge(birthBulgePct / 100); balloonWombKey = ''; layBalloonWomb(); } catch (error) { console.error('[sarahlab] her vulva could not be rebuilt; her own skin is drawn', error); vulva = null; }
             try { birthNormals = createBirthNormals(bm!, babyFrame.meshToRest, herTris, measure ? [measure.joints.hipL, measure.joints.hipR] : [], (i) => birthWeights?.maskOf(i) ?? 0, undefined /* the crease planes dented her belly: off (2026-10-31) */, measure?.joints.pelvis, undefined, measure ? [measure.joints.hipL, measure.joints.hipR] : []); } catch (error) { console.error('[sarahlab] her birth-pose normals could not be made', error); birthNormals = null; }
             // each knee: where her thigh's skin hands over to her shin's (both carry it), in her rest frame
             try {
@@ -3681,6 +3692,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // her body's draw emptied (the rebuilt area and its tube left on their own), or back
         vulvaSolo: (on: boolean) => { const b = bodyOf(); if (!b) return false; b.mesh.visible = !on; if (vulva) { vulva.solo = on; vulva.sync(); } const m = vulva?.mesh; let root: THREE.Object3D | null = m ?? null; while (root?.parent) root = root.parent; return { patch: !!m, visible: m?.visible, parent: m?.parent?.name ?? m?.parent?.type, inScene: root?.type, drawRange: [m?.geometry.drawRange.start, m?.geometry.drawRange.count], count: m?.geometry.getAttribute('position').count, idx: m?.geometry.index?.count, bodyIsPatchGeom: m?.geometry === b.mesh.geometry }; },
         vulvaNoTube: (on: boolean) => { if (vulva) { vulva.noTube = on; vulva.sync(); } return true; },
+        vulvaPatchDrawn: (on: boolean) => { if (vulva) vulva.mesh.geometry.setDrawRange(0, on ? Infinity : 0); return true; },
         // aim straight at her split: from its own facing, at a distance (and turned a little either way)
         vulvaAim: (distance: number, yawOff = 0, pitchOff = 0) => {
           if (!vulva) return null; model?.updateMatrixWorld(true);
@@ -3892,6 +3904,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         },
         birthNormals: (on: boolean) => { birthNormalsOn = on; birthRoomFor = ''; applyLook(); return { watched: birthNormals?.watched ?? null, pierced: birthNormals?.pierced ?? null }; },
         vulvaOpen: (o: number) => { if (!vulva) return null; vulva.setOpen(o); return vulva.open; },
+        vulvaBulge: (b: number) => { if (!vulva) return null; vulva.setBulge(b); return vulva.bulge; },
         vulva: (on: boolean, wire = false) => { if (!vulva) return null; vulva.show(on); vulva.wire(on && wire); const sk = model && findSkinnedMesh(model), m = vulva.mesh, c = new THREE.Vector3(), v = new THREE.Vector3(); let k = 0;
           model?.updateMatrixWorld(true);
           for (let i = 0; i < vulva.bake.count; i++) if (vulva.bake.ring[i] === 0) { m.getVertexPosition(i, v); m.localToWorld(v); c.add(v); k++; }
