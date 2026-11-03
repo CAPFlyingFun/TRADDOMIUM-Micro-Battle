@@ -382,6 +382,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   // measured from it), what they last eased toward, where her front is without a bump, and a probe's held lean
   const softBelly = restingSoftBelly(), softUpright = new THREE.Vector3(0, -1, 0), softDown = new THREE.Vector3(0, -1, 0);
   let softWant: SoftBellyWant | null = null, softBaseZ: number | null = null, softHeld: { lean: number; side: number } | null = null, softOn = true;
+  // food and water in her (0..1 a full meal): her belly a little firmer (Joshua, 2026-11-03: for the story -- set by a probe until then)
+  let bellyFed = 0;
   /** Where each mass hangs from, in a bone's frame: what it feels move. The belly in front of her spine, each breast on her chest. */
   type Anchor = { bone: THREE.Bone; local: THREE.Vector3; bind: THREE.Quaternion; p: THREE.Vector3; v: THREE.Vector3; primed: number };
   let anchors: { belly: Anchor; breastL: Anchor; breastR: Anchor } | null = null;
@@ -2816,7 +2818,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const half = Math.max(0.05, sacRadius(babyWomb, 0, -1, 0)), deep = Math.max(0.05, sacRadius(babyWomb, 0, 0, 1));
       baby = { low: Math.max(0, (babyWomb.centre.y - mid.y) / half) + (birthNow ? 0.3 * birthNow.engage : 0), forward: Math.max(0, (mid.z - babyWomb.centre.z) / deep) };
     }
-    softWant = softBellyWant(down, softUpright, baby, fullness, body.bellyFirmness);
+    softWant = softBellyWant(down, softUpright, baby, fullness, body.bellyFirmness, bellyFed);
     const want = softOn ? softWant : { side: 0, sag: 0, depth: 0 };
     stepSoftBelly(softBelly, dt, want, fullness);
     // (no bump, nothing to move)
@@ -4307,7 +4309,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           })() } : null;
           return { rest: rp, headPastMouthCm: along, headFromPathCm: offAxis, headR: r0 ? +(headRadiusOf(r0.scale.x) * 100).toFixed(2) : null, open: vulva?.drawnOpen, clock: birthClock, running: birthRunning, pace: birthPace, now: birthNow, path: birthPath ? { length: +birthPath.length.toFixed(4), points: birthPath.points.length } : null, head: birthHeadModel?.toArray().map((x) => +x.toFixed(3)) ?? null, line: birthLine(birthNow) };
         },
-        softBelly: (o?: { on?: boolean; held?: { lean: number; side: number } | null }) => { if (o?.on !== undefined) softOn = o.on; if (o && 'held' in o) softHeld = o.held ?? null; const v = jiggle.bellySoft.value; return { on: softOn, held: softHeld, want: softWant, now: { side: +softBelly.side.toFixed(3), sag: +softBelly.sag.toFixed(3), depth: +softBelly.depth.toFixed(3) }, shader: [v.x, v.y, v.z, v.w].map((x) => +x.toFixed(3)), upright: softUpright.toArray().map((x) => +x.toFixed(3)), down: softDown.toArray().map((x) => +x.toFixed(3)) }; },
+        softBelly: (o?: { on?: boolean; held?: { lean: number; side: number } | null; fed?: number }) => { if (o?.on !== undefined) softOn = o.on; if (o && 'held' in o) softHeld = o.held ?? null; if (o?.fed !== undefined) bellyFed = Math.max(0, Math.min(1, o.fed)); const v = jiggle.bellySoft.value; return { on: softOn, held: softHeld, want: softWant, now: { side: +softBelly.side.toFixed(3), sag: +softBelly.sag.toFixed(3), depth: +softBelly.depth.toFixed(3) }, shader: [v.x, v.y, v.z, v.w].map((x) => +x.toFixed(3)), upright: softUpright.toArray().map((x) => +x.toFixed(3)), down: softDown.toArray().map((x) => +x.toFixed(3)) }; },
         hipTurn: (on?: boolean) => { if (on !== undefined && on !== hipTurnOn) { hipTurnOn = on; birthRoomFor = ''; applyLook(); } return { on: hipTurnOn, here: hipTurnHere(), stats: hipTurn?.stats ?? null }; },
         kneeTurn: (on?: boolean) => { if (on !== undefined && on !== kneeTurnOn) { kneeTurnOn = on; birthRoomFor = ''; applyLook(); } return { on: kneeTurnOn, stats: kneeTurn?.stats ?? null }; },
         birthContact: (on?: boolean) => { if (on !== undefined && on !== birthContactOn) { birthContactOn = on; birthRoomFor = ''; applyLook(); } return { on: birthContactOn, valve: +contactValve.x.toFixed(3), stats: birthContact?.stats ?? null, legMeshes: skinned.filter((m) => { const a = (m.geometry as THREE.BufferGeometry).getAttribute('jiggle'); if (!a) return false; for (let i = 0; i < a.count; i++) if (a.getY(i) < 0) return true; return false; }).length, legs: Object.fromEntries(Object.entries(legMasses).map(([k, m]) => [k, +(Math.hypot(m.x, m.y, m.z) * 1000).toFixed(2)])) }; },

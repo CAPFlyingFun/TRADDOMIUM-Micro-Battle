@@ -385,9 +385,13 @@ export function jiggleAt(j: Jiggle, v: number, out: { x: number; y: number; z: n
  *
  *   1  gravity leaning her FORWARD (more) or BACK (less) changes her belly, mainly its DEPTH -- fully forward, as on hands
  *      and knees, 15% deeper; fully back, flat on a bed, 50% shallower; in proportion between;
- *   1a leaning to a SIDE, as lying on it to sleep, gravity tips her belly that way;
+ *   1a leaning to a SIDE, as lying on it to sleep, gravity tips her belly that way, by its weight; and on her side it is
+ *      15% shallower -- rolled from her back to her side it fills back out from 50% to that (Joshua, 2026-11-03: "laying
+ *      on the side at rotated 90° is basically like standing straight up... I would do depth for the side -15%");
  *   2  her BABY's place in it: lower, it sags; further forward, a little deeper;
- *   3  how FULL it is holds its shape: the fuller, the less 1, 1a and 2 change it (as milk firms her breasts).
+ *   3  how FULL it is holds its shape: the fuller, the less 1, 1a and 2 change it (as milk firms her breasts); and food
+ *      and water in her (`fed`) firm it a little more (Joshua: "whenever she eats and drinks... her belly firmness can
+ *      increase").
  *
  * Her belly's own shape is where it rests; three soft moves bend it, each a heavy, damped spring easing toward what the
  * rules ask -- its HANG to a side, its SAG and its DEPTH -- and each moves a point by how far that point stands out of
@@ -398,12 +402,13 @@ export function jiggleAt(j: Jiggle, v: number, out: { x: number; y: number; z: n
 export const BELLY_SOFT = Object.freeze({
   /** rule 1: her depth changed fully forward / fully back (a share of how far her belly stands out) */
   leanForward: 0.15, leanBack: 0.5,
-  /** rule 1a: her belly's hang fully on her side (per metre it stands out) */
-  side: 0.35,
+  /** rule 1a: her belly's hang fully on her side (per metre it stands out, at full term's weight), and its depth there */
+  side: 0.35, sideDepth: 0.15,
   /** rule 2: its sag for a baby lowest in it, and its depth for one furthest forward */
   sagBaby: 0.25, depthBaby: 0.08,
-  /** rule 3: at full term these are as given; a womb `fullness` 0 changes `1 / (1 - fullSoft)` as much, 1.5 a half */
-  fullSoft: 0.5,
+  /** rule 3: at full term these are as given; a womb `fullness` 0 changes `1 / (1 - fullSoft)` as much, 1.5 a half; and
+   * fully `fed`, her FIRMNESS this much more */
+  fullSoft: 0.5, fedFirm: 25,
   /** the springs: how quick (Hz, at full term: quicker the fuller) and how damped (1 settles without passing) */
   hz: Object.freeze({ side: 0.7, sag: 0.7, depth: 0.5 }), damping: 0.85,
 });
@@ -418,10 +423,11 @@ export interface SoftBellyWant { readonly side: number; readonly sag: number; re
 /**
  * Rule 3's give: how much her belly gives to gravity and her baby, 1 at full term (`fullness` 1) and FIRMNESS 50.
  * `fullness`: her womb against a full-term one (her belly's size, her babies and their fluid; less once her baby is born);
- * `firmness`: her FIRMNESS control (0..100).
+ * `firmness`: her FIRMNESS control (0..100); `fed`: food and water in her (0 .. 1 a full meal), firming it a little.
  */
-export function softBellyGive(fullness: number, firmness = 50): number {
-  const F = clamp(Number.isFinite(fullness) ? fullness : 1, 0, 1.5), f = clamp(Number.isFinite(firmness) ? firmness : 50, 0, 100) / 100;
+export function softBellyGive(fullness: number, firmness = 50, fed = 0): number {
+  const F = clamp(Number.isFinite(fullness) ? fullness : 1, 0, 1.5);
+  const f = clamp((Number.isFinite(firmness) ? firmness : 50) + BELLY_SOFT.fedFirm * clamp(Number.isFinite(fed) ? fed : 0, 0, 1), 0, 100) / 100;
   return ((1 - BELLY_SOFT.fullSoft * F) / (1 - BELLY_SOFT.fullSoft)) * (1.5 - f);
 }
 
@@ -430,16 +436,19 @@ export function softBellyGive(fullness: number, firmness = 50): number {
  * `upright`: the same as she stands (her lean is measured from it); `baby`: its place in her womb -- `low` (0 its middle
  * .. 1 the bottom of her womb) and `forward` (0 .. 1 its front) -- or null; `fullness` and `firmness` as `softBellyGive`.
  */
-export function softBellyWant(down: { x: number; y: number; z: number }, upright: { x: number; y: number; z: number }, baby: { low: number; forward: number } | null, fullness: number, firmness = 50): SoftBellyWant {
-  const S = BELLY_SOFT, give = softBellyGive(fullness, firmness);
+export function softBellyWant(down: { x: number; y: number; z: number }, upright: { x: number; y: number; z: number }, baby: { low: number; forward: number } | null, fullness: number, firmness = 50, fed = 0): SoftBellyWant {
+  const S = BELLY_SOFT, give = softBellyGive(fullness, firmness, fed);
   // her lean forward (+) or back (-) and to her left (+) or right (-), degrees from standing
   // (how far gravity pulls out of her front, and toward her left: on her side the first is nothing, whatever her pitch)
   const pitch = (g: { z: number }) => Math.asin(clamp(g.z, -1, 1)), roll = (g: { x: number }) => Math.asin(clamp(g.x, -1, 1));
   const leanDeg = clamp(((pitch(down) - pitch(upright)) * 180) / Math.PI, -90, 90), sideDeg = clamp(((roll(down) - roll(upright)) * 180) / Math.PI, -90, 90);
-  let depth = (leanDeg >= 0 ? S.leanForward : -S.leanBack) * (Math.abs(leanDeg) / 90);
+  // (forward or back by how far she leans so; and on her side, its own -- rolled from her back to her side, the one
+  // hands over to the other as the angles do)
+  let depth = (leanDeg >= 0 ? S.leanForward : -S.leanBack) * (Math.abs(leanDeg) / 90) - S.sideDepth * (Math.abs(sideDeg) / 90);
   let sag = 0;
   if (baby) { sag -= S.sagBaby * clamp(baby.low, 0, 1); depth += S.depthBaby * clamp(baby.forward, 0, 1); }
-  const side = S.side * Math.sin((sideDeg * Math.PI) / 180);
+  // (its hang by its weight: at full term as given, lighter less, heavier more)
+  const side = S.side * Math.sin((sideDeg * Math.PI) / 180) * clamp(Number.isFinite(fullness) ? fullness : 1, 0, 2);
   return { side: side * give, sag: sag * give, depth: Math.max(-0.9, depth * give), leanDeg, sideDeg, give };
 }
 

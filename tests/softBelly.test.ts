@@ -23,8 +23,21 @@ describe('her soft belly (Joshua, 2026-11-03: four rules)', () => {
     const left = softBellyWant(down(0, 90), upright, null, 1), right = softBellyWant(down(0, -90), upright, null, 1);
     expect(left.side).toBeCloseTo(BELLY_SOFT.side, 6);
     expect(right.side).toBeCloseTo(-BELLY_SOFT.side, 6);
-    // (and on her side she leans neither forward nor back: no depth from rule 1)
-    expect(left.depth).toBeCloseTo(0, 6);
+    // (and on her side 15% shallower; rolled from her back to her side it fills back out from 50%)
+    expect(left.depth).toBeCloseTo(-BELLY_SOFT.sideDepth, 6);
+    const rolled = (r: number) => { const a = (r * Math.PI) / 180; return softBellyWant({ x: Math.sin(a), y: 0, z: -Math.cos(a) }, upright, null, 1).depth; };
+    expect(rolled(0)).toBeCloseTo(-0.5, 6);
+    expect(rolled(90)).toBeCloseTo(-0.15, 6);
+    let was = rolled(0); for (let r = 5; r <= 90; r += 5) { const d = rolled(r); expect(d).toBeGreaterThanOrEqual(was - 1e-9); was = d; }
+  });
+  it('hangs by its weight: lighter less, heavier more', () => {
+    const at = (F: number) => softBellyWant(down(0, 90), upright, null, F).side;
+    expect(at(1)).toBeCloseTo(BELLY_SOFT.side, 6);
+    expect(at(0.3)).toBeLessThan(at(1));
+  });
+  it('fed, it is a little firmer', () => {
+    expect(softBellyGive(1, 50, 1)).toBeLessThan(softBellyGive(1, 50, 0));
+    expect(softBellyGive(1, 50, 0)).toBeCloseTo(1, 6);
   });
   it('rule 2: a baby lower sags it, further forward deepens it', () => {
     const w = softBellyWant(down(0), upright, { low: 1, forward: 1 }, 1);
