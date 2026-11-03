@@ -111,6 +111,9 @@ const BIRTH_WOMB_IN = 0.015;
 const BIRTH_REST = Object.freeze({ top: 1.2, span: 0.3, across: 0.05, depth: 0.32, over: 0.7, gap: 0 });
 /** GAME TUNING: its straight body faded in over its curled one between these shares of its legs' straightening */
 const BABY_BODY_FADE = [0.3, 0.7] as const;
+/** GAME TUNING: where a hand rests on a knee -- its fingertip on the top of the thigh (`out` above its middle) so far back
+ * up it from the knee, the wrist `lift` higher than the fingers (metres) */
+const KNEE_HANDS = Object.freeze({ out: 0.06, up: 0.04, lift: 0.015 });
 const BIRTH_HEAD = Object.freeze({ radius: 0.0475, atLength: 0.51, lift: [0, 0.008, 0.007] as const, tangentSpan: 0.0125, bodyBehind: 0.1, pastMouth: 0.6 });
 import { BIRTH_CONTACT_FIELD, createBirthContact, type BirthContact } from './birthContact';
 import { KNEE_TURN_FIELD, createKneeTurn, type KneeTurn } from './kneeTurn';
@@ -441,6 +444,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const LIE_MODES = ['auto', 'head', 'breech', 'side', 'random'] as const;
   /** the other babies (twins, triplets): copies of the first; and each one's own sac when there is more than one */
   let babyCopies: THREE.Object3D[] = [], babyOwnSacs: THREE.Mesh[] = [];
+  /** how her hands' reach onto her knees went last (reclined) */
+  let kneeHold: { L: number; R: number; holding: boolean; [k: string]: number | boolean } | null = null;
   /** each baby's straight body (BABY_STRAIGHT_MODEL), kept out of `userData` so a clone of it does not serialise a mesh */
   const babyStraight = new WeakMap<THREE.Object3D, THREE.SkinnedMesh>();
   /** THE BALANCE's weight on her tilt shape now: its degrees on the TILT scale, carried by her thighs as she sits as her own tilt is. */
@@ -2727,6 +2732,83 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     return [...base, ...extra];
   }
 
+  /**
+   * RECLINED, HER PALMS ON HER KNEES (Joshua, 2026-11-03: "place Sarah's palms on her knees as I couldn't tell if the
+   * Baby's foot was sticking out of Sarah's hand, plus, would be more realistic"). A pass over her bones as they are
+   * drawn this frame -- her build lengthens them, so a reach worked out on her bind missed -- each arm reached by its two
+   * bones to put the hand flat on the top of its thigh just above the knee, fingers along the thigh toward it, palm down,
+   * elbow out to her side.
+   */
+  function handsOnKnees(): void {
+    kneeHold = null;
+    if (pose !== 'recline' || !model || !rig || !measure) return;
+    // (her own skeleton: the model also carries her baby's, which has more bones)
+    const sk = bodyOf()?.mesh; if (!sk) return;
+    const bones = sk.skeleton.bones, j = measure.joints, B = rig.bind, K = KNEE_HANDS;
+    model.updateMatrixWorld(true);
+    const wp = (i: number) => bones[i].getWorldPosition(new THREE.Vector3());
+    const turnWorld = (i: number, q: THREE.Quaternion) => { const b = bones[i], pq = b.parent ? b.parent.getWorldQuaternion(new THREE.Quaternion()) : new THREE.Quaternion(), bq = b.getWorldQuaternion(new THREE.Quaternion()); b.quaternion.copy(pq.invert().multiply(q).multiply(bq)); b.updateMatrixWorld(true); };
+    const hand = handJointsOf(B);
+    const out: Record<string, number> = {};
+    { let top: THREE.Object3D = bones[0]; while (top.parent && (top.parent as THREE.Bone).isBone) top = top.parent; (top.parent ?? top).updateMatrixWorld(true); }
+    const arm = (sh: number, el: number, wr: number, hip: number, knee: number, ankle: number, other: number, name: 'L' | 'R') => {
+      const h = hand[name === 'L' ? 0 : 1]; if (!h || bones[el]?.parent !== bones[sh] || bones[wr]?.parent !== bones[el]) return;
+      const S = wp(sh), H = wp(hip), Kn = wp(knee), A = wp(ankle), td = Kn.clone().sub(H), thigh = td.length(); td.normalize();
+      // (world units a metre, from her thigh as drawn against its bind length)
+      const bindThigh = Math.hypot(B[knee].x - B[hip].x, B[knee].y - B[hip].y, B[knee].z - B[hip].z) / rig!.bindScale, perM = thigh / Math.max(1e-6, bindThigh);
+      // the top of the thigh: away from the way the shin folds
+      const sd = A.clone().sub(Kn).normalize(), top = sd.clone().addScaledVector(td, -sd.dot(td)).negate().normalize();
+      const handLen = wp(h.tip).distanceTo(wp(wr));
+      const T = Kn.clone().addScaledVector(top, K.out * perM).addScaledVector(td, -K.up * perM);
+      const W = T.clone().addScaledVector(td, -handLen).addScaledVector(top, K.lift * perM);
+      // two bones from the shoulder to the wrist, the elbow out to her side and back toward her hips
+      const E0 = wp(el), a = E0.distanceTo(S), b = wp(wr).distanceTo(E0), SW = W.clone().sub(S); let d = SW.length();
+      out[name + 'Reach'] = +(d / (a + b)).toFixed(3);
+      const most = (a + b) * 0.995; if (d > most) { W.copy(S).addScaledVector(SW.normalize(), most); d = most; }
+      const dir = W.clone().sub(S).normalize(), pole = S.clone().sub(wp(other)).normalize().addScaledVector(H.clone().sub(S).normalize(), 0.6); pole.addScaledVector(dir, -pole.dot(dir)).normalize();
+      const x = (a * a - b * b + d * d) / (2 * d), E = S.clone().addScaledVector(dir, x).addScaledVector(pole, Math.sqrt(Math.max(0, a * a - x * x)));
+      turnWorld(sh, new THREE.Quaternion().setFromUnitVectors(E0.clone().sub(S).normalize(), E.clone().sub(S).normalize()));
+      const E1 = wp(el); turnWorld(el, new THREE.Quaternion().setFromUnitVectors(wp(wr).sub(E1).normalize(), W.clone().sub(E1).normalize()));
+      // the hand: along the thigh toward the knee, its palm down onto it
+      const w1 = wp(wr), along = wp(h.tip).sub(w1).normalize(), across = wp(h.index).sub(wp(h.little));
+      const palm = new THREE.Vector3().crossVectors(wp(h.knuckles[0]).sub(w1), across).multiplyScalar(-h.sign).normalize();
+      const basis = (al: THREE.Vector3, face: THREE.Vector3) => { const f2 = face.clone().addScaledVector(al, -face.dot(al)).normalize(); return new THREE.Matrix4().makeBasis(al, f2, new THREE.Vector3().crossVectors(al, f2)); };
+      const from = basis(along, palm), to = basis(td, top.clone().negate());
+      turnWorld(wr, new THREE.Quaternion().setFromRotationMatrix(to.multiply(from.transpose())));
+      // (how far its fingertip is from where it was to go, cm, for the probes)
+      out[name] = +(wp(h.tip).distanceTo(T) / perM * 100).toFixed(1);
+    };
+    arm(j.shoulderL, j.elbowL, j.wristL, j.hipL, j.kneeL, j.ankleL, j.shoulderR, 'L');
+    arm(j.shoulderR, j.elbowR, j.wristR, j.hipR, j.kneeR, j.ankleR, j.shoulderL, 'R');
+    // (and every other skeleton of hers -- her body may be drawn by one her clothes and helpers do not share -- given the
+    // same turns, bone for bone by name)
+    { const moved = [j.shoulderL, j.elbowL, j.wristL, j.shoulderR, j.elbowR, j.wristR].map((i) => bones[i]);
+      const seen = new Set<THREE.Skeleton>([sk.skeleton]);
+      for (const m of skinned) { if (!m.skeleton || seen.has(m.skeleton)) continue; seen.add(m.skeleton); for (const b of moved) { const o = m.skeleton.bones.find((x) => x.name === b.name); if (o && o !== b) o.quaternion.copy(b.quaternion); } } }
+    kneeHold = { L: out.L ?? -1, R: out.R ?? -1, holding: out.L !== undefined && out.R !== undefined, reachL: out.LReach ?? -1, reachR: out.RReach ?? -1 };
+  }
+  /** Each hand's joints, from her bind: its fingertip (the wrist's furthest descendant), the knuckles, the index and the
+   * little finger's first joints, and the sign that turns (knuckles x little-to-index) into the palm (as bindPalm). */
+  let handJoints: Array<{ tip: number; knuckles: number[]; index: number; little: number; sign: number } | null> | null = null, handJointsFor: unknown = null;
+  function handJointsOf(B: readonly { x: number; y: number; z: number; parent: number }[]): Array<{ tip: number; knuckles: number[]; index: number; little: number; sign: number } | null> {
+    if (handJoints && handJointsFor === B) return handJoints;
+    handJointsFor = B;
+    const kids: number[][] = B.map(() => []); B.forEach((b, i) => { if (b.parent >= 0) kids[b.parent].push(i); });
+    const one = (wr: number) => {
+      let handAt = -1; const q = [wr]; while (q.length) { const at = q.shift()!; if (kids[at].length >= 4) { handAt = at; break; } q.push(...kids[at]); }
+      if (handAt < 0) return null;
+      const under = (i: number): boolean => { for (let k = i; k >= 0; k = B[k].parent) if (k === wr) return true; return false; };
+      let tip = wr, far = 0; for (let i = 0; i < B.length; i++) if (i !== wr && under(i)) { const dd = Math.hypot(B[i].x - B[wr].x, B[i].y - B[wr].y, B[i].z - B[wr].z); if (dd > far) { far = dd; tip = i; } }
+      const bases = kids[handAt].map((k) => kids[k][0] ?? k), c = bases.reduce((acc, b) => [acc[0] + B[b].x / bases.length, acc[1] + B[b].y / bases.length, acc[2] + B[b].z / bases.length], [0, 0, 0]);
+      const dist = (a: number, b: { x: number; y: number; z: number }) => Math.hypot(B[a].x - b.x, B[a].y - b.y, B[a].z - b.z);
+      const cc = { x: c[0], y: c[1], z: c[2] }, thumb = bases.reduce((best, b) => (dist(b, cc) > dist(best, cc) ? b : best), bases[0]);
+      const rest = bases.filter((b) => b !== thumb).sort((a, b) => dist(a, B[thumb]) - dist(b, B[thumb]));
+      if (rest.length < 2) return null;
+      return { tip, knuckles: [handAt], index: rest[0], little: rest[rest.length - 1], sign: Math.sign(B[wr].x) || 1 };
+    };
+    handJoints = [one(measure!.joints.wristL), one(measure!.joints.wristR)];
+    return handJoints;
+  }
   /** Her turns this frame: her pose, or on the way between standing and seated, the two blended (`poseBlend.ts`). */
   function currentTurns(): readonly JointTurn[] {
     if (!sitMoving || sitAmount <= 0 || sitAmount >= 1) return turnsFor();
@@ -2766,7 +2848,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const standFeet = stand.feet.clone().add(v().set(0, standLift * M, 0));
     const seatedAt = v().set(standFeet.x - sit.feet.x, (seatTop + 0.1) * M - sit.hips.y, standFeet.z - sit.feet.z);
     // this frame's pose, and her set so her feet are where she stood, at the height they have come to
-    rig.apply(currentTurns()); garmentRoom?.applyPose();
+    rig.apply(currentTurns()); handsOnKnees(); garmentRoom?.applyPose();
     const now = read(), e = sitEase(sitAmount);
     const lowStanding = stand.low + standLift * M, lowSeated = sit.low + seatedAt.y, low = lowStanding + (lowSeated - lowStanding) * e;
     model.position.set(standFeet.x - now.feet.x, low - now.low, standFeet.z - now.feet.z);
@@ -2802,7 +2884,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         position.set(stand.hips.x, RECLINE_HIPS_M * M, stand.hips.z).sub(now.hips.clone().applyQuaternion(q));
       } else position.set(stand.feet.x - now.feet.x, stand.low + standLift * M - now.low, stand.feet.z - now.feet.z);
       birthPlaced = { key, position, quaternion: q };
-      rig.apply(currentTurns());
+      rig.apply(currentTurns()); handsOnKnees();
     }
     model.position.copy(birthPlaced.position); model.quaternion.copy(birthPlaced.quaternion);
     model.updateMatrixWorld(true);
@@ -3999,6 +4081,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       feelMotion(dt);
       // her face: her eyes, her blinks, her jaw
       faceFrame(dt);
+      // (her hands on her knees, reclined: over her bones as everything above has laid them this frame)
+      handsOnKnees();
       // a painted top's cleavage bridge is laid where her breasts are this frame
       if (fabric && model) { model.updateMatrixWorld(true); fabric.frame(); }
       // and every built strap laid on her skin as she is this frame
@@ -4481,6 +4565,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // axis from the crown of its head, each slice's widest and narrowest extent across (cm); `aimAt` (a share of its
         // length from its head) points the camera there
         // (a probe's look at her baby alone: her own meshes hidden, the baby's left)
+        kneeHands: () => kneeHold,
         herHidden: (on: boolean) => {
           const inBaby = (o: THREE.Object3D) => { for (let q: THREE.Object3D | null = o; q; q = q.parent) if (q === babyHolder) return true; return false; };
           model?.traverse((o) => { if ((o as THREE.Mesh).isMesh && !inBaby(o)) { const u = o.userData as { wasVisible?: boolean }; if (on) { u.wasVisible ??= o.visible; o.visible = false; } else if (u.wasVisible !== undefined) { o.visible = u.wasVisible; delete u.wasVisible; } } });
