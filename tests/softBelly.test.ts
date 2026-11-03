@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { BELLY_SOFT, createJiggleUniforms, navelPressPercent, NAVEL_PRESS, restingSoftBelly, softAt, softBellyGive, softBellyWant, stepSoftBelly, UNITS_PER_METRE } from '../src/sarahlab/softBody';
+import { BELLY_SOFT, createJiggleUniforms, navelPressPercent, NAVEL_PRESS, PUBIC_PRESS, pubicPressWant, restingSoftBelly, softAt, softBellyGive, softBellyWant, stepSoftBelly, UNITS_PER_METRE } from '../src/sarahlab/softBody';
 
 // the way down in her frame (x her left, y up, z out of her front), `lean` degrees forward and `side` to her left
 const down = (lean: number, side = 0) => { const p = (lean * Math.PI) / 180, r = (side * Math.PI) / 180; return { x: Math.sin(r), y: -Math.cos(r) * Math.cos(p), z: Math.cos(r) * Math.sin(p) }; };
@@ -73,5 +73,12 @@ describe('her soft belly (Joshua, 2026-11-03: four rules)', () => {
     expect(navelPressPercent(1, { low: 0, forward: 1 })).toBeCloseTo(100 + NAVEL_PRESS.forward, 6);
     expect(navelPressPercent(1, { low: 1.0, forward: 0 })).toBeCloseTo(100 - NAVEL_PRESS.dropped, 6);
     expect(navelPressPercent(1, { low: 0.2, forward: 0 })).toBeCloseTo(100, 6);
+  });
+  it('her pubic area is pressed as the head comes under her pubic arch, a little more in a contraction, gone once out', () => {
+    expect(pubicPressWant(0.2, 0)).toBe(0);
+    expect(pubicPressWant(PUBIC_PRESS.full, 1)).toBeCloseTo(PUBIC_PRESS.most, 6);
+    expect(pubicPressWant(PUBIC_PRESS.full, 0)).toBeLessThan(pubicPressWant(PUBIC_PRESS.full, 1));
+    expect(pubicPressWant(2, 1)).toBe(0);
+    for (let d = 0; d <= 2; d += 0.05) expect(pubicPressWant(d, 1)).toBeLessThanOrEqual(PUBIC_PRESS.most + 1e-9);
   });
 });

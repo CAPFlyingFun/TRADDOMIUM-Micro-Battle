@@ -83,7 +83,7 @@ import { BIRTH_CLEFT_FIELD, BIRTH_LIPS_FIELD, birthAreaCentre, birthAreaFields, 
 import { BIRTH_POSES, poseBirth, type BirthSpec } from '../actor/humanBirth';
 import { AUTO_LIES, BABIES_NAME, BABY_MODEL, BABY_MODEL_LENGTH, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, poseOnHer, poseDescent, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, wombFromSkin, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { setPush, jiggleOf as jiggleOfMesh, navelPressPercent, restingSoftBelly, softAt, softBellyWant, stepSoftBelly, type SoftBellyWant } from './softBody';
+import { PUBIC_PRESS, pubicPressWant, setPush, jiggleOf as jiggleOfMesh, navelPressPercent, restingSoftBelly, softAt, softBellyWant, stepSoftBelly, type SoftBellyWant } from './softBody';
 import { createVulvaPatch, VULVA_OPEN, type VulvaPatch } from './vulvaMesh';
 import { BIRTH_THIGHS_FIELD, birthThighsField } from './birthThighs';
 import { BIRTH_SEAT_FIELD, birthSeatField } from './birthSeat';
@@ -384,6 +384,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let softWant: SoftBellyWant | null = null, softBaseZ: number | null = null, softHeld: { lean: number; side: number } | null = null, softOn = true;
   // food and water in her (0..1 a full meal): her belly a little firmer (Joshua, 2026-11-03: for the story -- set by a probe until then)
   let bellyFed = 0;
+  // her pubic area pressed by her baby's head (softBody.ts `PUBIC_PRESS`): its spring, and where it presses (rest metres)
+  const pubicPress = { x: 0, v: 0 };
+  let pubicOn = true;
+  let pubicCentre: THREE.Vector3 | null = null;
   // the pressure behind her navel (a belly size, softBody.ts `navelPressPercent`), and the in/out number last laid from it
   let navelPress: number | null = null, navelLaidX = NaN, navelLaidAt = 0;
   /** Where each mass hangs from, in a bone's frame: what it feels move. The belly in front of her spine, each breast on her chest. */
@@ -2830,6 +2834,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     if (navel && navelLaidAt > 0.25 && Math.abs(navelX(shownBump()) - navelLaidX) > 0.02) { navelLaidAt = 0; layNavel(shownBump()); }
     const want = softOn ? softWant : { side: 0, sag: 0, depth: 0 };
     stepSoftBelly(softBelly, dt, want, fullness);
+    // her pubic area: pressed as her baby's head comes under her pubic arch, a spring easing to it
+    { const want = birthNow && vulva && pubicOn ? pubicPressWant(birthNow.down, birthNow.contraction) : 0, P = PUBIC_PRESS, w = 2 * Math.PI * P.hz, steps = Math.max(1, Math.ceil(dt / 0.01)), h = dt / steps;
+      for (let i = 0; i < steps; i++) { pubicPress.v += (w * w * (want - pubicPress.x) - 2 * P.damping * w * pubicPress.v) * h; pubicPress.x += pubicPress.v * h; }
+      if (vulva && (want > 0 || Math.abs(pubicPress.x) > 1e-5)) {
+        pubicCentre ??= vulva.openingRest().add(new THREE.Vector3(0, P.up, P.out));
+        jiggle.pubicAt.value.set(pubicCentre.x, pubicCentre.y, pubicCentre.z, pubicPress.x);
+        { const d = tmp.set(0, -0.35, 1).normalize(); jiggle.pubicDir.value.set(d.x, d.y, d.z, P.wide); }
+      } else { jiggle.pubicAt.value.w = 0; if (!birthNow) pubicCentre = null; } }
     // (no bump, nothing to move)
     const k = Math.min(1, Math.max(0, bump / 30));
     jiggle.bellySoft.value.set(softBelly.side * k, softBelly.sag * k, softBelly.depth * k, softBaseZ ?? 0.1);
@@ -4326,6 +4338,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           orbit.yaw = Math.PI / 2 + yawOff; orbit.pitch = pitch; orbit.distance = distance; orbit.target.copy(at); turning = false;
           return at.toArray().map((x) => +(x / M).toFixed(3));
         },
+        canalPathSoft: (on: boolean) => { if (vulva) vulva.pathSoft = on; return true; },
+        pubicPress: (on?: boolean) => ({ ...(on !== undefined ? ((pubicOn = on), {}) : {}), mm: +(pubicPress.x * 1000).toFixed(2), at: jiggle.pubicAt.value.toArray().map((x) => +x.toFixed(3)) }),
         navelPress: () => ({ press: navelPress === null ? null : +navelPress.toFixed(1), x: +navelX(shownBump()).toFixed(3), laid: +navelLaidX.toFixed(3), line: navelState(navelPress ?? bump, body.navel) }),
         softBelly: (o?: { on?: boolean; held?: { lean: number; side: number } | null; fed?: number }) => { if (o?.on !== undefined) softOn = o.on; if (o && 'held' in o) softHeld = o.held ?? null; if (o?.fed !== undefined) bellyFed = Math.max(0, Math.min(1, o.fed)); const v = jiggle.bellySoft.value; return { on: softOn, held: softHeld, want: softWant, now: { side: +softBelly.side.toFixed(3), sag: +softBelly.sag.toFixed(3), depth: +softBelly.depth.toFixed(3) }, shader: [v.x, v.y, v.z, v.w].map((x) => +x.toFixed(3)), upright: softUpright.toArray().map((x) => +x.toFixed(3)), down: softDown.toArray().map((x) => +x.toFixed(3)) }; },
         hipTurn: (on?: boolean) => { if (on !== undefined && on !== hipTurnOn) { hipTurnOn = on; birthRoomFor = ''; applyLook(); } return { on: hipTurnOn, here: hipTurnHere(), stats: hipTurn?.stats ?? null }; },

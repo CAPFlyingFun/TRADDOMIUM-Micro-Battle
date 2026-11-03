@@ -149,6 +149,10 @@ export interface JiggleUniforms {
   /** HER BELLY'S SOFT SHAPE (`stepSoftBelly`): x its hang to her left, y its sag up, z its depth, each per metre it stands
    * out of her (`softAt`); w where her front is without a bump (z, rest metres), what it stands out from */
   readonly bellySoft: { value: THREE.Vector4 };
+  /** HER PUBIC AREA PRESSED BY HER BABY'S HEAD (`pubicPressWant`): where (xyz, rest metres) and how far (w, metres) */
+  readonly pubicAt: { value: THREE.Vector4 };
+  /** ...which way (xyz, rest) and how wide (w, metres) */
+  readonly pubicDir: { value: THREE.Vector4 };
 }
 /** How many kicks her belly shows at once (one a baby). */
 export const KICKS = 3;
@@ -158,6 +162,7 @@ export const createJiggleUniforms = (): JiggleUniforms => ({
   kickAt: { value: Array.from({ length: KICKS }, () => new THREE.Vector4()) }, kickDir: { value: Array.from({ length: KICKS }, () => new THREE.Vector4(0, 0, 1, 0.03)) },
   kickRest: { value: new THREE.Matrix4() }, kickUnits: { value: new THREE.Matrix3() },
   bellySoft: { value: new THREE.Vector4(0, 0, 0, 0.1) },
+  pubicAt: { value: new THREE.Vector4(0, 0, 0, 0) }, pubicDir: { value: new THREE.Vector4(0, 0, 1, 0.04) },
 });
 
 /** A kick's move at a point of her (rest metres) for a belly follow weight, rest metres, into `out` (its xyz added). */
@@ -223,8 +228,9 @@ export function patchJiggle(material: THREE.Material, uniforms: JiggleUniforms):
     shader.uniforms.uKickRest = uniforms.kickRest;
     shader.uniforms.uKickUnits = uniforms.kickUnits;
     shader.uniforms.uBellySoft = uniforms.bellySoft;
+    shader.uniforms.uPubicAt = uniforms.pubicAt; shader.uniforms.uPubicDir = uniforms.pubicDir;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\nattribute vec3 jiggle;\nattribute vec3 babyPush;\nuniform vec3 uJiggleThighL;\nuniform vec3 uJiggleThighR;\nuniform vec3 uJiggleCalfL;\nuniform vec3 uJiggleCalfR;\nuniform vec3 uJiggleBelly;\nuniform vec3 uJiggleBreastL;\nuniform vec3 uJiggleBreastR;\nuniform vec4 uKickAt[${KICKS}];\nuniform vec4 uKickDir[${KICKS}];\nuniform mat4 uKickRest;\nuniform mat3 uKickUnits;\nuniform vec4 uBellySoft;`)
+      .replace('#include <common>', `#include <common>\nattribute vec3 jiggle;\nattribute vec3 babyPush;\nuniform vec3 uJiggleThighL;\nuniform vec3 uJiggleThighR;\nuniform vec3 uJiggleCalfL;\nuniform vec3 uJiggleCalfR;\nuniform vec3 uJiggleBelly;\nuniform vec3 uJiggleBreastL;\nuniform vec3 uJiggleBreastR;\nuniform vec4 uKickAt[${KICKS}];\nuniform vec4 uKickDir[${KICKS}];\nuniform mat4 uKickRest;\nuniform mat3 uKickUnits;\nuniform vec4 uBellySoft;\nuniform vec4 uPubicAt;\nuniform vec4 uPubicDir;`)
       .replace('#include <morphtarget_vertex>', `#include <morphtarget_vertex>
 vec3 kickMove = vec3(0.0);
 if (jiggle.x > 0.0) {
@@ -237,6 +243,11 @@ if (jiggle.x > 0.0) {
   kickMove = clamp(jiggle.x * 0.9, 0.0, 1.0) * (uKickUnits * kickMove);
   // her belly's soft shape: each point moved by how far it stands out of her, its edges held (softAt)
   kickMove += clamp(jiggle.x * ${(1 / UNITS_PER_METRE).toFixed(8)}, 0.0, 1.0) * (uKickUnits * (uBellySoft.xyz * max(kickP.z - uBellySoft.w, 0.0)));
+}
+// her pubic area pressed by her baby's head (every point of her: her skin, her opening, what she wears)
+if (uPubicAt.w != 0.0) {
+  vec3 pubicD = (uKickRest * vec4(transformed, 1.0)).xyz - uPubicAt.xyz;
+  kickMove += uKickUnits * (uPubicDir.xyz * (uPubicAt.w * exp(-dot(pubicD, pubicD) / (uPubicDir.w * uPubicDir.w))));
 }
 // (her legs ride the breasts' two weights, negative: thigh in y, calf in z, her right leg 10 further down -- the body is
 // at the most attributes a vertex may carry)
@@ -364,11 +375,14 @@ export function jiggleAt(j: Jiggle, v: number, out: { x: number; y: number; z: n
       out.x += k * m.x; out.y += k * m.y; out.z += k * m.z;
     }
   }
-  if (x === undefined || y === undefined || z === undefined || !(w[o] > 0)) return;
+  if (x === undefined || y === undefined || z === undefined) return;
   const u = j.uniforms;
   kickP.set(x, y, z).applyMatrix4(u.kickRest.value);
+  if (!(w[o] > 0)) { pubicAt(u, kickP, kickM).applyMatrix3(u.kickUnits.value); out.x += kickM.x; out.y += kickM.y; out.z += kickM.z; return; }
   // (her belly's soft shape, as the shader moves it)
   softAt(u, w[o], kickP, kickM).applyMatrix3(u.kickUnits.value);
+  out.x += kickM.x; out.y += kickM.y; out.z += kickM.z;
+  pubicAt(u, kickP, kickM).applyMatrix3(u.kickUnits.value);
   out.x += kickM.x; out.y += kickM.y; out.z += kickM.z;
   const K = u.kickAt.value;
   let any = false; for (let k = 0; k < K.length; k++) if (K[k].w > 0) { any = true; break; }
@@ -492,12 +506,18 @@ export function patchWombSoft(material: THREE.Material, uniforms: JiggleUniforms
     shader.uniforms.uJiggleBelly = uniforms.belly;
     shader.uniforms.uKickUnits = uniforms.kickUnits;
     shader.uniforms.uBellySoft = uniforms.bellySoft;
+    shader.uniforms.uKickRest = uniforms.kickRest; shader.uniforms.uPubicAt = uniforms.pubicAt; shader.uniforms.uPubicDir = uniforms.pubicDir;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\nattribute vec4 ${SOFT_REF_ATTRIBUTE};\nuniform vec3 uJiggleBelly;\nuniform mat3 uKickUnits;\nuniform vec4 uBellySoft;`)
+      .replace('#include <common>', `#include <common>\nattribute vec4 ${SOFT_REF_ATTRIBUTE};\nuniform vec3 uJiggleBelly;\nuniform mat3 uKickUnits;\nuniform mat4 uKickRest;\nuniform vec4 uBellySoft;\nuniform vec4 uPubicAt;\nuniform vec4 uPubicDir;`)
       .replace('#include <morphtarget_vertex>', `#include <morphtarget_vertex>
 if (${SOFT_REF_ATTRIBUTE}.w > 0.0) {
   float softShare = clamp(${SOFT_REF_ATTRIBUTE}.w * ${(1 / UNITS_PER_METRE).toFixed(8)}, 0.0, 1.0);
   transformed += ${SOFT_REF_ATTRIBUTE}.w * uJiggleBelly + softShare * (uKickUnits * (uBellySoft.xyz * max(${SOFT_REF_ATTRIBUTE}.z - uBellySoft.w, 0.0)));
+}
+// (her canal's mouth pressed with her opening, as her skin round it is)
+if (uPubicAt.w != 0.0) {
+  vec3 pubicD = (uKickRest * vec4(transformed, 1.0)).xyz - uPubicAt.xyz;
+  transformed += uKickUnits * (uPubicDir.xyz * (uPubicAt.w * exp(-dot(pubicD, pubicD) / (uPubicDir.w * uPubicDir.w))));
 }`);
   };
   material.customProgramCacheKey = function () { return `${cacheKey ? cacheKey.call(this) : ''}|wombSoft`; };
@@ -518,4 +538,37 @@ export function navelPressPercent(fullness: number, baby: { low: number; forward
   // (a baby low in her womb -- most of all dropped into her pelvis in labour -- presses below her navel, not behind it)
   if (baby) p += NAVEL_PRESS.forward * clamp(baby.forward, 0, 1) * clamp(1 - baby.low, 0, 1) - NAVEL_PRESS.dropped * clamp((baby.low - 0.3) / 0.7, 0, 1);
   return Math.max(0, p);
+}
+
+/**
+ * HER PUBIC AREA PRESSED BY HER BABY'S HEAD (Joshua, 2026-11-03: "as the baby moves downward, her pubic will also
+ * realistically move just a little to adjust"; done with the birth "since it's connected and need to sync up"). As the
+ * head passes under her pubic arch the soft tissue in front of it -- her mons, over her pubic bone -- is pressed forward
+ * and a little down (the perineum behind bulges on its own: vulvaMesh's bulge): a few millimetres, smooth round the
+ * point, growing as the head comes through, a little more in each contraction, easing once the head is out. GAME TUNING.
+ */
+export const PUBIC_PRESS = Object.freeze({
+  /** at most (metres), and how wide it spreads (metres) */
+  most: 0.008, wide: 0.035,
+  /** where: up from the middle of her opening and out of her (metres, her rest frame) */
+  up: 0.045, out: 0.012,
+  /** the head's way down her canal over which it grows (0 the top of her cervix .. 1 its middle at her opening), the
+   * share a contraction adds, and how far past her opening it is gone */
+  from: 0.45, full: 0.95, squeeze: 0.3, goneBy: 1.4,
+  /** how quick its spring (Hz) and how damped */
+  hz: 1.2, damping: 0.8,
+});
+/** How far her pubic area is pressed (metres) with her baby's head `down` her canal and her `contraction` (0..1). */
+export function pubicPressWant(down: number, contraction: number): number {
+  const P = PUBIC_PRESS, s = (a: number, b: number, v: number) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+  if (!Number.isFinite(down)) return 0;
+  const coming = s(P.from, P.full, down) * (1 - s(1, P.goneBy, down));
+  return P.most * coming * (1 - P.squeeze + P.squeeze * clamp(contraction, 0, 1));
+}
+/** The press's move at a point (rest metres), rest metres, into `out` -- what the shader adds. */
+export function pubicAt(u: JiggleUniforms, p: { x: number; y: number; z: number }, out: THREE.Vector3): THREE.Vector3 {
+  const a = u.pubicAt.value, d = u.pubicDir.value;
+  if (!a.w) return out.set(0, 0, 0);
+  const dx = p.x - a.x, dy = p.y - a.y, dz = p.z - a.z, f = a.w * Math.exp(-(dx * dx + dy * dy + dz * dz) / (d.w * d.w));
+  return out.set(d.x * f, d.y * f, d.z * f);
 }

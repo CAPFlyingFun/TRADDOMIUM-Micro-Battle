@@ -6,7 +6,7 @@
  */
 import * as THREE from 'three';
 import { bakeVulva, type VulvaBake } from './vulvaPatch';
-import { JIGGLE_ATTRIBUTE, PUSH_ATTRIBUTE, SOFT_REF_ATTRIBUTE, patchJiggle, patchWombSoft } from './softBody';
+import { JIGGLE_ATTRIBUTE, PUSH_ATTRIBUTE, SOFT_REF_ATTRIBUTE, UNITS_PER_METRE, patchJiggle, patchWombSoft } from './softBody';
 import { birthAreaCentre } from './birthArea';
 import { sacRadius, type WombShape } from './baby';
 
@@ -156,6 +156,10 @@ export interface VulvaPatch {
   /** the canal's middle as drawn now (world), from the top of her cervix to the mouth, and each point's distance down it
    * (metres, as laid); `length` the whole way */
   canalPath(): { points: THREE.Vector3[]; down: number[]; length: number } | null;
+  /** the middle of her opening's rim as laid on her rest shape (her rest frame, metres) */
+  openingRest(): THREE.Vector3;
+  /** (a probe's: the canal path read with her belly's soft move, as drawn -- on -- or without it) */
+  pathSoft: boolean;
   /** how far open she is drawn now (the larger of the slider's and her pose's) */
   readonly drawnOpen: number;
   readonly open: number;
@@ -1931,6 +1935,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     return changed;
   };
   const api: VulvaPatch = {
+    pathSoft: true,
     mesh, tube, sheet, bake, sync, solo: false, backing: true, trim: true,
     relayOut() { openApplied = -1; sync(); },
     resyncWeights() {
@@ -2030,13 +2035,28 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       headAt = a; headR = r; wantStretch();
     },
     stepCanal(dt) { stepCanalRings(dt); if (stretchDirty) sync(); },
+    openingRest() {
+      const c = new THREE.Vector3(); for (let j = 0; j < M; j++) c.x += rim[j * 3] / M, c.y += rim[j * 3 + 1] / M, c.z += rim[j * 3 + 2] / M;
+      return c.applyMatrix4(meshToRest);
+    },
     canalPath() {
       if (!canalLen) return null;
       tube.updateMatrixWorld(true); body.skeleton.update();
       const pts: THREE.Vector3[] = [], down: number[] = [], v = new THREE.Vector3(), step = Math.max(1, Math.floor(M / 8));
+      // (each point as the shader draws it: her belly's soft move and bounce too, as `patchWombSoft` adds them -- 2026-11-03,
+      // Joshua: mid-birth the head ran low of her opening; it followed her canal without the move her canal was drawn with)
+      const pa = tubeGeom.getAttribute('position') as THREE.BufferAttribute, d = new THREE.Vector3(), sv = new THREE.Vector3();
+      const at = (q: number, out: THREE.Vector3) => {
+        const w = softRef[q * 4 + 3];
+        if (!(w > 0) || !jigU || !api.pathSoft) { tube.getVertexPosition(q, out); return; }
+        const s4 = jigU.bellySoft.value, share = Math.min(1, Math.max(0, w / UNITS_PER_METRE)), h = Math.max(softRef[q * 4 + 2] - s4.w, 0) * share;
+        d.copy(jigU.belly.value).multiplyScalar(w).add(sv.set(s4.x * h, s4.y * h, s4.z * h).applyMatrix3(jigU.kickUnits.value));
+        const x = pa.getX(q), y = pa.getY(q), z = pa.getZ(q);
+        pa.setXYZ(q, x + d.x, y + d.y, z + d.z); tube.getVertexPosition(q, out); pa.setXYZ(q, x, y, z);
+      };
       for (const m of CANAL_RINGS) {
         const c = new THREE.Vector3(); let k = 0;
-        for (let j = 0; j < M; j += step) { tube.getVertexPosition(m * M + j, v); c.add(v); k++; }
+        for (let j = 0; j < M; j += step) { at(m * M + j, v); c.add(v); k++; }
         pts.push(c.divideScalar(k).applyMatrix4(tube.matrixWorld)); down.push(ringDown[m]);
       }
       return { points: pts, down, length: canalLen };
