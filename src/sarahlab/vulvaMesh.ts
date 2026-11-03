@@ -79,11 +79,11 @@ export const VULVA_OPEN = Object.freeze({
   /** BIOLOGICAL SHAPE (Joshua's estimate, to tune): how far the area bulges out at the full opening (metres; a half sphere,
    * its last `bulgeFoot` share easing onto her skin), and how it
    * grows with the opening (power of the open share: 1 straight, more later) */
-  bulge: 0.05, bulgeEase: 1.3, bulgeFoot: 0.6, bulgeReach: 0.06,
+  bulge: 0.05, bulgeEase: 1.3, bulgeFoot: 0.6, bulgeReach: 0.06, bulgeLean: 0.4,
   /** her baby passing (`setPassing`): what of it within `passSlab` of her opening's plane is its outline there; each rim
    * point takes the farthest of it within `passSpanDeg` of its own way out, `passWall` outside it, evened round
    * `passEven` times (metres; GAME TUNING) */
-  passSlab: 0.012, passSpanDeg: 14, passWall: 0.003, passEven: 3, passStray: 1.6, passMouth: 0.03, passShift: 0.035, passShiftBody: 0.03, passFitQ: 0.98, passHeadQ: 0.5, passHeadPast: 0.6, passReach: 0.1, passOval: 0.85, passBinDeg: 5, canalMostR: 0.05, passHeadReach: 1.7, passLeast: 0.015, bulgeFootM: 0.02,
+  passSlab: 0.012, passSpanDeg: 14, passWall: 0.003, passEven: 3, passStray: 1.6, passMouth: 0.03, passShift: 0.035, passShiftBody: 0.03, passShiftUp: 0.43, passFitQ: 0.98, passMostAlong: 0.12, passMostAcross: 0.1, passHeadQ: 0.5, passHeadFit: false, passHeadPast: 0.6, passReach: 0.1, passOval: 0.85, passBinDeg: 5, canalMostR: 0.05, passHeadReach: 1.7, passLeast: 0.015, bulgeFootM: 0.02,
   /** GAME TUNING: passes evening the opening's edge round its outline */
   edgeSmooth: 6,
   /** GAME TUNING: how much the bear trap's corners at its hinges are rounded (0 a sharp lens, 1 an oval) */
@@ -632,6 +632,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   let colMetres: Float32Array | null = null;
   /** the opening's width held back by her legs (metres across), or null when it is not */
   let heldTo: number | null = null, blocker: number[] = [], bulgeNow = 0, lipMax = 0, lipCount = 0;
+  /** each rim column's share of the bulge (more at the bottom: VULVA_OPEN.bulgeLean), 1 with none */
+  const bulgeLeanW = new Float32Array(M).fill(1);
   /** her skin near the area that her thighs carry now (vertices), worked out again when her weights change */
   let legNear: number[] = [], legNearVersion = -1;
   const findLegNear = () => {
@@ -1423,8 +1425,17 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       const inPlane = (q: number) => { const dx = pos[q * 3] - Cb.x, dy = pos[q * 3 + 1] - Cb.y, dz = pos[q * 3 + 2] - Cb.z, k = dx * out.x + dy * out.y + dz * out.z; return Math.hypot(dx - k * out.x, dy - k * out.y, dz - k * out.z); };
       let r0 = 0; for (let j = 0; j < M; j++) if (base[j] >= 0) r0 += inPlane(base[j]) / Math.max(1, nb);
       const reach = VULVA_OPEN.bulgeReach * perMetre, footW = VULVA_OPEN.bulgeFootM * perMetre, dEdge = edgeDistances();
+      // MORE AT THE BOTTOM THAN THE TOP (Joshua, 2026-11-03: "a slight bottom bulge... 70% more bottom half... 30% top
+      // half"): her perineum gives and bulges, her pubic bone above does not. The same dome, `1 - bulgeLean` of it at the
+      // top of its reach, `1 + bulgeLean` at the bottom, straight between -- 30% in its top half, 70% in its bottom
+      const upB = new THREE.Vector3(); { let jb2 = 0, jf2 = 0; for (let j = 0; j < M; j++) { if (colQ[j] < colQ[jb2]) jb2 = j; if (colQ[j] > colQ[jf2]) jf2 = j; }
+        const qa = base[jf2], qb = base[jb2]; if (qa >= 0 && qb >= 0) { upB.set(pos[qa * 3] - pos[qb * 3], pos[qa * 3 + 1] - pos[qb * 3 + 1], pos[qa * 3 + 2] - pos[qb * 3 + 2]); upB.addScaledVector(out, -upB.dot(out)); if (upB.lengthSq() > 1e-18) upB.normalize(); else upB.set(0, 0, 0); } }
+      const span = r0 + reach;
+      // (and each rim column's share of it, for her canal's mouth to be carried out as far as the skin it hangs from)
+      for (let j = 0; j < M; j++) { const q = base[j]; bulgeLeanW[j] = q < 0 ? 1 : 1 - VULVA_OPEN.bulgeLean * Math.min(1, Math.max(-1, ((pos[q * 3] - Cb.x) * upB.x + (pos[q * 3 + 1] - Cb.y) * upB.y + (pos[q * 3 + 2] - Cb.z) * upB.z) / Math.max(1e-9, span))); }
       for (let p = 0; p < P; p++) {
-        const t = Math.min(1, Math.max(0, (inPlane(p) - r0) / reach)), dome = Math.pow(1 - t * t, 1.5);
+        const t = Math.min(1, Math.max(0, (inPlane(p) - r0) / reach)), upness = Math.min(1, Math.max(-1, ((pos[p * 3] - Cb.x) * upB.x + (pos[p * 3 + 1] - Cb.y) * upB.y + (pos[p * 3 + 2] - Cb.z) * upB.z) / Math.max(1e-9, span)));
+        const dome = Math.pow(1 - t * t, 1.5) * (1 - VULVA_OPEN.bulgeLean * upness);
         const h = H * perMetre * dome * smooth(VULVA_OPEN.edgeTrim * perMetre, VULVA_OPEN.edgeTrim * perMetre + footW, dEdge[p]);
         if (h <= 0) continue;
         pos[p * 3] += out.x * h; pos[p * 3 + 1] += out.y * h; pos[p * 3 + 2] += out.z * h;
@@ -1481,6 +1492,9 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
             if (aN.dot(nP) < 0) aN.negate();
             const u = new THREE.Vector3().fromArray(Pp, 0).sub(C), w3 = new THREE.Vector3();
             u.addScaledVector(aN, -u.dot(aN)).normalize(); w3.crossVectors(aN, u);
+            // (the way up her slit, toward her pubic bone, square to the way it travels: from her rim's back end to its front)
+            const slitUp = new THREE.Vector3(); { let jb2 = 0, jf2 = 0; for (let j2 = 0; j2 < M; j2++) { if (colQ[j2] < colQ[jb2]) jb2 = j2; if (colQ[j2] > colQ[jf2]) jf2 = j2; }
+              slitUp.fromArray(Pp, jf2 * 3).sub(new THREE.Vector3().fromArray(Pp, jb2 * 3)); slitUp.addScaledVector(aN, -slitUp.dot(aN)); if (slitUp.lengthSq() > 1e-18) slitUp.normalize(); else slitUp.set(0, 0, 0); }
             const slab = VULVA_OPEN.passSlab * perMetre, th: number[] = [], rd: number[] = [], v = new THREE.Vector3();
             for (let i = 0; i < passLocal.length; i += 3) {
               if (!Number.isFinite(passLocal[i])) continue;
@@ -1521,7 +1535,9 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
               // under its head as it crowned)
               // (and only while its head is in her opening: once its middle is well past, what crosses her opening is its
               // neck, and the sphere's narrowing slice says it -- measured, its chin and shoulders held her open round it)
-              if (th.length >= 12 && h < VULVA_OPEN.passHeadPast * headR) {
+              // (off now its head is a real newborn's, the size of that sphere: its tucked hands under its chin, beside its
+              // head as it crowned, were read as its head and drew her opening off its middle)
+              if (VULVA_OPEN.passHeadFit && th.length >= 12 && h < VULVA_OPEN.passHeadPast * headR) {
                 let mx = 0, my = 0; for (let i = 0; i < th.length; i++) { mx += rd[i] * Math.cos(th[i]); my += rd[i] * Math.sin(th[i]); } mx /= th.length; my /= th.length;
                 const ds = th.map((t2, i) => Math.hypot(rd[i] * Math.cos(t2) - mx, rd[i] * Math.sin(t2) - my)).sort((a, b) => a - b);
                 hugCx = mx; hugCy = my; sec = ds[Math.min(ds.length - 1, Math.floor(ds.length * VULVA_OPEN.passHeadQ))] + VULVA_OPEN.passWall * perMetre;
@@ -1539,6 +1555,10 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
             if (hugOk) {
               hugDbg = { ...hugDbg, offCm: +(Math.hypot(hugCx, hugCy) / perMetre * 100).toFixed(2) };
               const shift = Math.hypot(hugCx, hugCy), most = (headLocal ? VULVA_OPEN.passShift : VULVA_OPEN.passShiftBody) * perMetre; if (shift > most) { hugCx *= most / shift; hugCy *= most / shift; }
+              // (drawn down toward her perineum as far as that, but up toward her pubic bone, which does not give, only
+              // `passShiftUp` as far -- Joshua, 2026-11-03: 70% the bottom half, 30% the top)
+              { const su = slitUp.dot(u), sw = slitUp.dot(w3), up = hugCx * su + hugCy * sw;
+                if (up > 0) { const cut = up * (1 - VULVA_OPEN.passShiftUp); hugCx -= cut * su; hugCy -= cut * sw; } }
               // (the body's oval, round its middle where her opening is drawn to: as big as most of it -- `passOval` of
               // what crosses there inside it -- and her skin's thickness more; what stands out past it, below)
               if (bodyOval) {
@@ -1576,6 +1596,22 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
               { const tmp = new Float32Array(M); for (let pass = 0; pass < VULVA_OPEN.passEven; pass++) { for (let j2 = 0; j2 < M; j2++) tmp[j2] = Math.max(need[j2], 0.25 * want[(j2 + M - 1) % M] + 0.5 * want[j2] + 0.25 * want[(j2 + 1) % M]); want.set(tmp); } }
               let outMost = 0;
               for (let j2 = 0; j2 < M; j2++) { outMost = Math.max(outMost, want[j2]); e.copy(ways[j2]).multiplyScalar(want[j2]).add(Bc).addScaledVector(aN, alongs[j2]); e.toArray(hugAt, j2 * 3); }
+              // HER OPENING AT MOST AN OVAL `passMostAlong` LONG DOWN HER SLIT AND `passMostAcross` WIDE (Joshua, 2026-11-03:
+              // "Keep the 12cm as that's realistic... how about making the opening a 12cm by 10cm so the slit is 12cm
+              // tall?"): its shoulders pass one above the other, down her slit. Its top where a `passMostAcross` circle round
+              // her rim's middle would have it -- her pubic bone does not give -- and the extra length all toward her perineum
+              // (Joshua, 2026-11-03: "do the bottom (fixed top)")
+              if (slitUp.lengthSq() > 0.5) {
+                const A1 = slitUp, A2 = new THREE.Vector3().crossVectors(aN, A1), ra = (VULVA_OPEN.passMostAlong / 2) * perMetre, rb = (VULVA_OPEN.passMostAcross / 2) * perMetre;
+                const Co = C.clone().addScaledVector(A1, rb - ra);
+                for (let j2 = 0; j2 < M; j2++) {
+                  e.fromArray(hugAt, j2 * 3).sub(Co); const h2 = e.dot(aN); e.addScaledVector(aN, -h2);
+                  const x2 = e.dot(A1), y2 = e.dot(A2), k2 = Math.hypot(x2 / ra, y2 / rb);
+                  if (k2 > 1) { e.multiplyScalar(1 / k2); e.add(Co).addScaledVector(aN, h2); e.toArray(hugAt, j2 * 3); }
+                }
+                { let a1 = Infinity, a2 = -Infinity, b1 = Infinity, b2 = -Infinity; for (let j2 = 0; j2 < M; j2++) { e.fromArray(hugAt, j2 * 3).sub(C); a1 = Math.min(a1, e.dot(A1)); a2 = Math.max(a2, e.dot(A1)); b1 = Math.min(b1, e.dot(A2)); b2 = Math.max(b2, e.dot(A2)); }
+                  hugDbg = { ...hugDbg, rimAlongCm: +((a2 - a1) / perMetre * 100).toFixed(1), rimAcrossCm: +((b2 - b1) / perMetre * 100).toFixed(1), rimUpCm: +(a2 / perMetre * 100).toFixed(1), rimDownCm: +(-a1 / perMetre * 100).toFixed(1) }; }
+              }
               hugDbg = { ...hugDbg, outMostCm: +(outMost / perMetre * 100).toFixed(2) };
               hugDbg = { ...hugDbg, meanCm: +(mean / perMetre * 100).toFixed(2), shiftCm: +(Math.hypot(hugCx, hugCy) / perMetre * 100).toFixed(2), aCm: +(hugA / perMetre * 100).toFixed(2), bCm: +(hugB / perMetre * 100).toFixed(2), head: passCentre ? 1 : 0, points: th.length };
             }
@@ -1732,7 +1768,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
         const ease = 1 - smooth(0, 0.4, f); pt.x += startOf[j * 3] * ease; pt.y += startOf[j * 3 + 1] * ease; pt.z += startOf[j * 3 + 2] * ease;
         // (the bulge carries the mouth out, not the canal: deeper in it stays where it was, stretched -- carried out whole,
         // its top came out through her skin over the opening, SQUAT 100% with the bulge, 2026-11-02)
-        pt.addScaledVector(bulgeOff, -smooth(0, 0.6, f));
+        pt.addScaledVector(bulgeOff, -smooth(0, 0.6, f) * bulgeLeanW[j]);
         put(m, j, pt);
       }
     }

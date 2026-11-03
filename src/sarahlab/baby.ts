@@ -34,7 +34,7 @@ export const FETAL_CHART: readonly ChartWeek[] = Object.freeze([
 ]);
 
 /** The model's crown-rump as a share of its crown-heel (as re-proportioned): turns the chart's early crown-rump into a length. MEASURED on the model. */
-export const MODEL_CROWN_RUMP = 0.662;
+export const MODEL_CROWN_RUMP = 0.642;
 
 /** The week her belly stands for: 0% week 12, 100% week 40, on to 42 at 200%. */
 export function weekForBump(bumpPercent: number, babies = 1): number {
@@ -174,14 +174,16 @@ export function wombRadius(w: Pick<Womb, 'a' | 'b' | 'd' | 'egg'>, x: number, u:
 // --------------------------------------------------------------------------------------------------------- placement
 
 export const BABY_MODEL = 'models/sarah-baby.glb';
-/** The same newborn baked straight, in the pose it is born in (arms tucked to its chest, legs straight), bound to the same
- * bones: drawn while it is born so its belly is its own and not the curl's folds pulled straight (2026-11-03). Both are
- * baked from the Meshy newborn with its head made bigger (x1.1) and its body slimmer (width x0.75, depth x0.9), so its
- * head is its widest part (Joshua, 2026-11-03: "if the head is the biggest part of the body on a baby, why is the
- * shoulders wider?") -- `.scratch/baby/py/slim.py`, then `pose.py` with `pose3.json` (curled) and `straight-pose.json`. */
+/** The same newborn baked straight, in the pose it is born in (arms tucked across its chest, legs straight), bound to the
+ * same bones: drawn while it is born so its belly is its own and not the curl's folds pulled straight (2026-11-03). Both
+ * are baked at a real newborn's proportions (Joshua, 2026-11-03: "Keep the 12cm as that's realistic") -- at 50 cm long,
+ * its head 9.9 cm side to side (9.5 cm of skull, its scalp), its shoulders 12.4 (a newborn's biacromial 12.4 +/- 1.0),
+ * its chest 10.5 (from a 30-33 cm chest round) -- from the Meshy newborn: head x0.68 across and x0.9 tall, body width
+ * x0.8 and depth x0.92, shoulders drawn in a further x0.63 (`.scratch/baby/py/slim.py 0.68 0.8 0.92 0.9 0.63`), then
+ * `pose.py` with `pose3.json` (curled) and `straight-pose.json`. */
 export const BABY_STRAIGHT_MODEL = 'models/sarah-baby-straight.glb';
 /** The packed model's crown-heel length in its own units (re-proportioned and slimmed, before the curl). MEASURED on the model. */
-export const BABY_MODEL_LENGTH = 1.5888;
+export const BABY_MODEL_LENGTH = 1.5008;
 /** How far round from straight forward its back faces, toward her left: the commonest settling (left occiput anterior). GAME TUNING. */
 export const BACK_TO_LEFT_RAD = Math.PI / 4;
 
@@ -1437,7 +1439,7 @@ export function poseDescent(bones: ReadonlyMap<string, THREE.Bone>, k: number, f
 /** GAME TUNING: its body made long coming down -- how far its back straightens; its legs nearly together (how far out
  * from its length); its arms tucked to its chest -- each upper arm's aim (down, out, forward) and forearm's (up, in
  * across its chest, forward), as its straight body is baked (`.scratch/baby/straight-pose.json`) */
-export const DESCENT = Object.freeze({ straighten: 0.8, legOut: 0.08, upperDown: 0.85, upperOut: 0.22, upperFront: 0.48, foreUp: 0.5, foreIn: 0.62, foreFront: 0.6 });
+export const DESCENT = Object.freeze({ straighten: 0.8, legOut: 0.08, upperDown: 0.45, upperOut: -0.3, upperFront: 0.84, foreUp: 0.6, foreIn: 0.55, foreFront: 0.58 });
 
 /** GAME TUNING: the newborn on her -- how far its back straightens, its head's turn (radians), and each limb's aim (its
  * side, along it toward its head, and down onto her) */
