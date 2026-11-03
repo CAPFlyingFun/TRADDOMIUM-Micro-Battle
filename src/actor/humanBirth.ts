@@ -70,7 +70,11 @@ export const BIRTH_POSES: Readonly<Record<BirthStyle, BirthSpec>> = Object.freez
   // 112°... and widen how far apart the legs are at the hip joints". Past about 110 degrees the front of her knee folded
   // into a lip and from about 100 her calf sank into her thigh, up to 5 cm at 140: a squat sweep, birthContact.ts)
   squat: { spread: 62, spreadPerBump: 6, flex: 118, knee: 112, turnOut: 30, footFlat: true, spine: 4, chest: 2, neck: -6, leanBack: 0, swing: true },
-  recline: { spread: 80, spreadPerBump: 4, flex: 50, knee: 96, turnOut: 12, footFlat: false, spine: -2, chest: 10, neck: 26, leanBack: 40 },
+  // (as a bed birth is (Joshua chose it, 2026-11-03, of three side by side): her back raised about 35 degrees off the bed
+  // -- the semi-reclined position births are usually given in, not flat on her back -- her thighs drawn up first, about
+  // 90 degrees, then let fall open, about 50 each way, her knees bent about 95. It had her thighs swung 80 degrees out to
+  // her sides first and brought forward only 50, leaning back 40: flung sideways, not drawn up)
+  recline: { spread: 46, spreadPerBump: 4, flex: 90, knee: 95, turnOut: 12, footFlat: false, spine: -2, chest: 10, neck: 26, leanBack: 55, swing: true },
 });
 
 /** How many turns `poseBirth` writes. */
