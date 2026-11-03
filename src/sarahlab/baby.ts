@@ -1354,6 +1354,45 @@ export function poseMove(bones: ReadonlyMap<string, THREE.Bone>, rest: ReadonlyM
   return tipBone;
 }
 
+/**
+ * A NEWBORN LYING ON HER (Joshua, 2026-11-02: "the baby's arms and legs should naturally be over her belly, not still in
+ * a fetal position"): face down on her, its back and neck eased out of the womb's curl, its head turned to one side with
+ * its cheek on her, its arms out to its sides and bent up toward its head with its hands on her, its legs drawn up and
+ * out to its sides with its knees bent and its feet back under it (the "frog" a newborn lies in) -- each `k` of the way
+ * (0..1) from however it is posed now. `f.front` is the way to her (its face and belly toward her).
+ */
+export function poseOnHer(bones: ReadonlyMap<string, THREE.Bone>, k: number, f: MoveFrame): void {
+  if (!(k > 0)) return;
+  const root = bones.get('Bone_000'); root?.updateMatrixWorld(true);
+  const centre = root ? root.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3();
+  const L = ON_HER, v = new THREE.Vector3(), w = new THREE.Vector3();
+  // its back and neck out of the curl, toward its length
+  const spine = [...BABY_BONES.back, BABY_BONES.neck, 'Bone_017'];
+  for (let i = 0; i + 1 < spine.length; i++) { const a = bones.get(spine[i]), b = bones.get(spine[i + 1]); if (a && b) turnToward(a, b, f.long, L.straighten * k); }
+  // its head to one side, its cheek down on her
+  const neck = bones.get(BABY_BONES.neck);
+  if (neck) {
+    neck.getWorldQuaternion(tQ).premultiply(tR.setFromAxisAngle(f.long, L.headTurn * k));
+    if (neck.parent) neck.parent.getWorldQuaternion(tP).invert(); else tP.identity();
+    neck.quaternion.copy(tP.multiply(tQ)); neck.updateMatrixWorld(true);
+  }
+  // each limb to its own side (whichever side of its middle it is on), the upper part out, the lower part folded
+  const limb = (chain: readonly string[], upper: (s: THREE.Vector3) => THREE.Vector3, lower: (s: THREE.Vector3) => THREE.Vector3) => {
+    const [a, b, c] = chain.map((n) => bones.get(n));
+    if (!a || !b || !c) return;
+    const side = a.getWorldPosition(w).sub(centre).dot(f.left) >= 0 ? f.left.clone() : f.left.clone().negate();
+    turnToward(a, b, upper(side).normalize(), k);
+    turnToward(b, c, lower(side).normalize(), k);
+  };
+  for (const s of ['left', 'right'] as const) {
+    limb(BABY_BONES.arm[s], (sd) => v.copy(sd).multiplyScalar(L.armOut).addScaledVector(f.long, L.armUp).addScaledVector(f.front, L.onto), (sd) => v.copy(f.long).multiplyScalar(L.handUp).addScaledVector(f.front, L.onto).addScaledVector(sd, 0.15));
+    limb(BABY_BONES.leg[s], (sd) => v.copy(sd).multiplyScalar(L.legOut).addScaledVector(f.long, -L.legDown).addScaledVector(f.front, L.onto), (sd) => v.copy(f.long).multiplyScalar(-L.shinBack).addScaledVector(sd, -L.shinIn).addScaledVector(f.front, L.onto));
+  }
+}
+/** GAME TUNING: the newborn on her -- how far its back straightens, its head's turn (radians), and each limb's aim (its
+ * side, along it toward its head, and down onto her) */
+export const ON_HER = Object.freeze({ straighten: 0.75, headTurn: 1.0, armOut: 0.75, armUp: 0.4, handUp: 0.6, legOut: 0.7, legDown: 0.35, shinBack: 0.55, shinIn: 0.35, onto: 0.5 });
+
 /** How far toward its feet (of its length) a leg's aim always is, kicking or stretching. GAME TUNING. */
 export const KICK_AWAY = 0.45;
 /** An aim (any length) held at least `KICK_AWAY` toward the feet (against `long`, toward the head), as a unit vector. */

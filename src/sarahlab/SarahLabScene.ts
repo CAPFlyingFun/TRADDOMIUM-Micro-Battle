@@ -81,7 +81,7 @@ import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields,
 import { dropIdleMorphs } from '../view/morphPrune';
 import { BIRTH_CLEFT_FIELD, BIRTH_LIPS_FIELD, birthAreaCentre, birthAreaFields, LIPS_COVERED, patchBirthShade } from './birthArea';
 import { BIRTH_POSES, poseBirth, type BirthSpec } from '../actor/humanBirth';
-import { AUTO_LIES, BABIES_NAME, BABY_MODEL, BABY_MODEL_LENGTH, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, wombFromSkin, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
+import { AUTO_LIES, BABIES_NAME, BABY_MODEL, BABY_MODEL_LENGTH, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, poseOnHer, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, wombFromSkin, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { setPush, jiggleOf as jiggleOfMesh } from './softBody';
 import { createVulvaPatch, VULVA_OPEN, type VulvaPatch } from './vulvaMesh';
@@ -105,7 +105,7 @@ const BIRTH_POSES_OK: readonly string[] = ['recline', 'squat'];
 const BIRTH_AFTER_OPEN = 0.35;
 /** GAME TUNING: how much of her belly settles away after the birth (its womb shrinking back toward a five-month size) */
 const BIRTH_SHRINK = 0.45;
-const BIRTH_REST = Object.freeze({ from: 1.04, to: 1.18, across: 0.04, lean: 0.3, gap: -0.02 });
+const BIRTH_REST = Object.freeze({ from: 1.04, to: 1.18, across: 0.04, lean: 0.3, gap: -0.04 });
 const BIRTH_HEAD = Object.freeze({ radius: 0.0475, atLength: 0.51, lift: [0, 0.008, 0.007] as const, tangentSpan: 0.0125, bodyBehind: 0.1 });
 import { BIRTH_CONTACT_FIELD, createBirthContact, type BirthContact } from './birthContact';
 import { KNEE_TURN_FIELD, createKneeTurn, type KneeTurn } from './kneeTurn';
@@ -3255,13 +3255,15 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (i === 0 && birthPlace(r)) {
         r.updateMatrixWorld(true);
         // born, it stretches out of its curl (and back)
-        const mv = babyMoveOf(i, r), k2 = birthNow?.stretch ?? 0;
-        if (k2 > 0 || mv.posed) {
-          mv.posed = k2 > 0; mv.t = -1;
+        const mv = babyMoveOf(i, r), k2 = birthNow?.stretch ?? 0, k3 = birthNow?.onHer ?? 0;
+        if (k2 > 0 || k3 > 0 || mv.posed) {
+          mv.posed = k2 > 0 || k3 > 0; mv.t = -1;
           const q = r.getWorldQuaternion(moveRoll);
           moveFrame.long.copy(babyCurl.long).applyQuaternion(q); moveFrame.front.copy(babyCurl.back).negate().applyQuaternion(q); moveFrame.left.copy(babyCurl.side).applyQuaternion(q);
           moveFrame.out.copy(moveFrame.front).negate();
           poseMove(mv.bones, mv.rest, 'stretch', 'left', k2, moveFrame);
+          // and lifted onto her, out of its curl and lying over her
+          poseOnHer(mv.bones, k3, moveFrame);
         }
         return;
       }
