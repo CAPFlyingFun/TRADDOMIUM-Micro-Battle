@@ -146,6 +146,9 @@ export interface JiggleUniforms {
   readonly kickDir: { value: THREE.Vector4[] };
   readonly kickRest: { value: THREE.Matrix4 };
   readonly kickUnits: { value: THREE.Matrix3 };
+  /** HER BELLY'S SOFT SHAPE (`stepSoftBelly`): x its hang to her left, y its sag up, z its depth, each per metre it stands
+   * out of her (`softAt`); w where her front is without a bump (z, rest metres), what it stands out from */
+  readonly bellySoft: { value: THREE.Vector4 };
 }
 /** How many kicks her belly shows at once (one a baby). */
 export const KICKS = 3;
@@ -154,6 +157,7 @@ export const createJiggleUniforms = (): JiggleUniforms => ({
   thighL: { value: new THREE.Vector3() }, thighR: { value: new THREE.Vector3() }, calfL: { value: new THREE.Vector3() }, calfR: { value: new THREE.Vector3() },
   kickAt: { value: Array.from({ length: KICKS }, () => new THREE.Vector4()) }, kickDir: { value: Array.from({ length: KICKS }, () => new THREE.Vector4(0, 0, 1, 0.03)) },
   kickRest: { value: new THREE.Matrix4() }, kickUnits: { value: new THREE.Matrix3() },
+  bellySoft: { value: new THREE.Vector4(0, 0, 0, 0.1) },
 });
 
 /** A kick's move at a point of her (rest metres) for a belly follow weight, rest metres, into `out` (its xyz added). */
@@ -218,8 +222,9 @@ export function patchJiggle(material: THREE.Material, uniforms: JiggleUniforms):
     shader.uniforms.uKickDir = uniforms.kickDir;
     shader.uniforms.uKickRest = uniforms.kickRest;
     shader.uniforms.uKickUnits = uniforms.kickUnits;
+    shader.uniforms.uBellySoft = uniforms.bellySoft;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\nattribute vec3 jiggle;\nattribute vec3 babyPush;\nuniform vec3 uJiggleThighL;\nuniform vec3 uJiggleThighR;\nuniform vec3 uJiggleCalfL;\nuniform vec3 uJiggleCalfR;\nuniform vec3 uJiggleBelly;\nuniform vec3 uJiggleBreastL;\nuniform vec3 uJiggleBreastR;\nuniform vec4 uKickAt[${KICKS}];\nuniform vec4 uKickDir[${KICKS}];\nuniform mat4 uKickRest;\nuniform mat3 uKickUnits;`)
+      .replace('#include <common>', `#include <common>\nattribute vec3 jiggle;\nattribute vec3 babyPush;\nuniform vec3 uJiggleThighL;\nuniform vec3 uJiggleThighR;\nuniform vec3 uJiggleCalfL;\nuniform vec3 uJiggleCalfR;\nuniform vec3 uJiggleBelly;\nuniform vec3 uJiggleBreastL;\nuniform vec3 uJiggleBreastR;\nuniform vec4 uKickAt[${KICKS}];\nuniform vec4 uKickDir[${KICKS}];\nuniform mat4 uKickRest;\nuniform mat3 uKickUnits;\nuniform vec4 uBellySoft;`)
       .replace('#include <morphtarget_vertex>', `#include <morphtarget_vertex>
 vec3 kickMove = vec3(0.0);
 if (jiggle.x > 0.0) {
@@ -230,6 +235,8 @@ if (jiggle.x > 0.0) {
     kickMove += uKickDir[k].xyz * (uKickAt[k].w * exp(-dot(kd, kd) / (uKickDir[k].w * uKickDir[k].w)));
   }
   kickMove = clamp(jiggle.x * 0.9, 0.0, 1.0) * (uKickUnits * kickMove);
+  // her belly's soft shape: each point moved by how far it stands out of her, its edges held (softAt)
+  kickMove += clamp(jiggle.x * ${(1 / UNITS_PER_METRE).toFixed(8)}, 0.0, 1.0) * (uKickUnits * (uBellySoft.xyz * max(kickP.z - uBellySoft.w, 0.0)));
 }
 // (her legs ride the breasts' two weights, negative: thigh in y, calf in z, her right leg 10 further down -- the body is
 // at the most attributes a vertex may carry)
@@ -359,10 +366,131 @@ export function jiggleAt(j: Jiggle, v: number, out: { x: number; y: number; z: n
   }
   if (x === undefined || y === undefined || z === undefined || !(w[o] > 0)) return;
   const u = j.uniforms;
+  kickP.set(x, y, z).applyMatrix4(u.kickRest.value);
+  // (her belly's soft shape, as the shader moves it)
+  softAt(u, w[o], kickP, kickM).applyMatrix3(u.kickUnits.value);
+  out.x += kickM.x; out.y += kickM.y; out.z += kickM.z;
   const K = u.kickAt.value;
   let any = false; for (let k = 0; k < K.length; k++) if (K[k].w > 0) { any = true; break; }
   if (!any) return;
-  kickP.set(x, y, z).applyMatrix4(u.kickRest.value);
   kickAt(u, w[o], kickP.x, kickP.y, kickP.z, kickM).applyMatrix3(u.kickUnits.value);
   out.x += kickM.x; out.y += kickM.y; out.z += kickM.z;
+}
+
+// ------------------------------------------------------------------------------------------------- the soft belly
+
+/**
+ * HER BELLY AS A SOFT BODY (Joshua, 2026-11-03: "switching the belly to the soft body sim but with some rigidity to
+ * maintain the overall same shape but still allows more realistic movements, sags", by four rules of his):
+ *
+ *   1  gravity leaning her FORWARD (more) or BACK (less) changes her belly, mainly its DEPTH -- fully forward, as on hands
+ *      and knees, 15% deeper; fully back, flat on a bed, 50% shallower; in proportion between;
+ *   1a leaning to a SIDE, as lying on it to sleep, gravity tips her belly that way;
+ *   2  her BABY's place in it: lower, it sags; further forward, a little deeper;
+ *   3  how FULL it is holds its shape: the fuller, the less 1, 1a and 2 change it (as milk firms her breasts).
+ *
+ * Her belly's own shape is where it rests; three soft moves bend it, each a heavy, damped spring easing toward what the
+ * rules ask -- its HANG to a side, its SAG and its DEPTH -- and each moves a point by how far that point stands out of
+ * her (so the base of her belly holds and its front moves most), times its belly follow weight (its edges held). They
+ * are drawn in the vertex shader with the bounce (`patchJiggle`), so they cost nothing to change each frame, and her
+ * womb is moved the same (`patchWombSoft`), by the skin over it. Every number is GAME TUNING.
+ */
+export const BELLY_SOFT = Object.freeze({
+  /** rule 1: her depth changed fully forward / fully back (a share of how far her belly stands out) */
+  leanForward: 0.15, leanBack: 0.5,
+  /** rule 1a: her belly's hang fully on her side (per metre it stands out) */
+  side: 0.35,
+  /** rule 2: its sag for a baby lowest in it, and its depth for one furthest forward */
+  sagBaby: 0.25, depthBaby: 0.08,
+  /** rule 3: at full term these are as given; a womb `fullness` 0 changes `1 / (1 - fullSoft)` as much, 1.5 a half */
+  fullSoft: 0.5,
+  /** the springs: how quick (Hz, at full term: quicker the fuller) and how damped (1 settles without passing) */
+  hz: Object.freeze({ side: 0.7, sag: 0.7, depth: 0.5 }), damping: 0.85,
+});
+
+/** Where her belly's soft moves stand: each a spring's place and speed. */
+export interface SoftBelly { side: number; sag: number; depth: number; vSide: number; vSag: number; vDepth: number }
+export const restingSoftBelly = (): SoftBelly => ({ side: 0, sag: 0, depth: 0, vSide: 0, vSag: 0, vDepth: 0 });
+
+/** What her belly's soft moves ease toward, and the lean they read. */
+export interface SoftBellyWant { readonly side: number; readonly sag: number; readonly depth: number; readonly leanDeg: number; readonly sideDeg: number; readonly give: number }
+
+/**
+ * Rule 3's give: how much her belly gives to gravity and her baby, 1 at full term (`fullness` 1) and FIRMNESS 50.
+ * `fullness`: her womb against a full-term one (her belly's size, her babies and their fluid; less once her baby is born);
+ * `firmness`: her FIRMNESS control (0..100).
+ */
+export function softBellyGive(fullness: number, firmness = 50): number {
+  const F = clamp(Number.isFinite(fullness) ? fullness : 1, 0, 1.5), f = clamp(Number.isFinite(firmness) ? firmness : 50, 0, 100) / 100;
+  return ((1 - BELLY_SOFT.fullSoft * F) / (1 - BELLY_SOFT.fullSoft)) * (1.5 - f);
+}
+
+/**
+ * The rules' ask. `down`: the way down (gravity) in her body's frame (x her left, y up, z out of her front), a unit;
+ * `upright`: the same as she stands (her lean is measured from it); `baby`: its place in her womb -- `low` (0 its middle
+ * .. 1 the bottom of her womb) and `forward` (0 .. 1 its front) -- or null; `fullness` and `firmness` as `softBellyGive`.
+ */
+export function softBellyWant(down: { x: number; y: number; z: number }, upright: { x: number; y: number; z: number }, baby: { low: number; forward: number } | null, fullness: number, firmness = 50): SoftBellyWant {
+  const S = BELLY_SOFT, give = softBellyGive(fullness, firmness);
+  // her lean forward (+) or back (-) and to her left (+) or right (-), degrees from standing
+  // (how far gravity pulls out of her front, and toward her left: on her side the first is nothing, whatever her pitch)
+  const pitch = (g: { z: number }) => Math.asin(clamp(g.z, -1, 1)), roll = (g: { x: number }) => Math.asin(clamp(g.x, -1, 1));
+  const leanDeg = clamp(((pitch(down) - pitch(upright)) * 180) / Math.PI, -90, 90), sideDeg = clamp(((roll(down) - roll(upright)) * 180) / Math.PI, -90, 90);
+  let depth = (leanDeg >= 0 ? S.leanForward : -S.leanBack) * (Math.abs(leanDeg) / 90);
+  let sag = 0;
+  if (baby) { sag -= S.sagBaby * clamp(baby.low, 0, 1); depth += S.depthBaby * clamp(baby.forward, 0, 1); }
+  const side = S.side * Math.sin((sideDeg * Math.PI) / 180);
+  return { side: side * give, sag: sag * give, depth: Math.max(-0.9, depth * give), leanDeg, sideDeg, give };
+}
+
+/** Her belly's soft moves a step toward `want` (`dt` seconds); quicker the fuller. */
+export function stepSoftBelly(s: SoftBelly, dt: number, want: { side: number; sag: number; depth: number }, fullness: number): SoftBelly {
+  if (!(dt > 0)) return s;
+  const quick = 0.7 + 0.6 * clamp(Number.isFinite(fullness) ? fullness : 1, 0, 1.5), steps = Math.max(1, Math.ceil(dt / 0.01)), h = dt / steps;
+  const spring = (x: number, v: number, to: number, hz: number): [number, number] => {
+    const w = 2 * Math.PI * hz * quick;
+    for (let k = 0; k < steps; k++) { v += (w * w * (to - x) - 2 * BELLY_SOFT.damping * w * v) * h; x += v * h; }
+    return [x, v];
+  };
+  [s.side, s.vSide] = spring(s.side, s.vSide, want.side, BELLY_SOFT.hz.side);
+  [s.sag, s.vSag] = spring(s.sag, s.vSag, want.sag, BELLY_SOFT.hz.sag);
+  [s.depth, s.vDepth] = spring(s.depth, s.vDepth, want.depth, BELLY_SOFT.hz.depth);
+  return s;
+}
+
+/**
+ * Her belly's soft move at a point (rest metres) for its belly follow weight (geometry units per metre, as the jiggle
+ * attribute holds it), rest metres, into `out` -- what the shader adds.
+ */
+export function softAt(u: JiggleUniforms, bellyWeight: number, p: { x: number; y: number; z: number }, out: THREE.Vector3): THREE.Vector3 {
+  const share = clamp(bellyWeight / UNITS_PER_METRE, 0, 1), s = u.bellySoft.value, h = Math.max(p.z - s.w, 0) * share;
+  return out.set(s.x * h, s.y * h, s.z * h);
+}
+
+/**
+ * Her WOMB moved as her belly's soft shape and bounce move the skin over it (Joshua: "should also hopefully not show the
+ * womb anymore through the skin"): each of its points carries, in the `softRef` attribute, where the skin over it is
+ * (rest metres, xyz) and that skin's belly follow weight (w), and moves exactly as the shader moves that skin.
+ */
+export const SOFT_REF_ATTRIBUTE = 'softRef';
+const WOMB_PATCHED = new WeakSet<THREE.Material>();
+export function patchWombSoft(material: THREE.Material, uniforms: JiggleUniforms): void {
+  if (WOMB_PATCHED.has(material)) return;
+  WOMB_PATCHED.add(material);
+  const previous = material.onBeforeCompile, cacheKey = material.customProgramCacheKey;
+  material.onBeforeCompile = function (shader, renderer) {
+    previous?.call(this, shader, renderer);
+    shader.uniforms.uJiggleBelly = uniforms.belly;
+    shader.uniforms.uKickUnits = uniforms.kickUnits;
+    shader.uniforms.uBellySoft = uniforms.bellySoft;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\nattribute vec4 ${SOFT_REF_ATTRIBUTE};\nuniform vec3 uJiggleBelly;\nuniform mat3 uKickUnits;\nuniform vec4 uBellySoft;`)
+      .replace('#include <morphtarget_vertex>', `#include <morphtarget_vertex>
+if (${SOFT_REF_ATTRIBUTE}.w > 0.0) {
+  float softShare = clamp(${SOFT_REF_ATTRIBUTE}.w * ${(1 / UNITS_PER_METRE).toFixed(8)}, 0.0, 1.0);
+  transformed += ${SOFT_REF_ATTRIBUTE}.w * uJiggleBelly + softShare * (uKickUnits * (uBellySoft.xyz * max(${SOFT_REF_ATTRIBUTE}.z - uBellySoft.w, 0.0)));
+}`);
+  };
+  material.customProgramCacheKey = function () { return `${cacheKey ? cacheKey.call(this) : ''}|wombSoft`; };
+  material.needsUpdate = true;
 }

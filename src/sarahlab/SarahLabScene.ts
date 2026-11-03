@@ -83,7 +83,7 @@ import { BIRTH_CLEFT_FIELD, BIRTH_LIPS_FIELD, birthAreaCentre, birthAreaFields, 
 import { BIRTH_POSES, poseBirth, type BirthSpec } from '../actor/humanBirth';
 import { AUTO_LIES, BABIES_NAME, BABY_MODEL, BABY_MODEL_LENGTH, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, poseOnHer, poseDescent, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, wombFromSkin, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { setPush, jiggleOf as jiggleOfMesh } from './softBody';
+import { setPush, jiggleOf as jiggleOfMesh, restingSoftBelly, softAt, softBellyWant, stepSoftBelly, type SoftBellyWant } from './softBody';
 import { createVulvaPatch, VULVA_OPEN, type VulvaPatch } from './vulvaMesh';
 import { BIRTH_THIGHS_FIELD, birthThighsField } from './birthThighs';
 import { BIRTH_SEAT_FIELD, birthSeatField } from './birthSeat';
@@ -356,7 +356,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const BELLY_SETTLE = Object.freeze({ most: 0.5, grow: 0.15, flatDeg: 90, seconds: 5, step: 0.5 });
   /** how far her torso leans from upright standing as she stands (her own posture: she leans back a little), measured as she stands */
   let uprightTilt = 15;
-  let bellySettle = 0, bellySettleApplied = 0, bellySettleAt = 0, bellySettleOn = true;
+  // (off: her soft belly's depth does this now, smoothly -- Joshua, 2026-11-03: "we can remove the automatic belly rule...
+  // the soft body belly will simulate it more accurately"; a probe may still turn it on to compare)
+  let bellySettle = 0, bellySettleApplied = 0, bellySettleAt = 0, bellySettleOn = false;
   /** her belly's size as drawn now: her BELLY slider's, settled as she lies back */
   // (and after a birth, her belly settling smaller as her womb shrinks back -- birthSequence.ts)
   let birthBellyShare = 1;
@@ -376,6 +378,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const spring = restingBellySpring();
   const masses = { belly: restingMass(), breastL: restingMass(), breastR: restingMass() };
   const jiggle = createJiggleUniforms();
+  // HER SOFT BELLY (softBody.ts `BELLY_SOFT`): its three soft moves, the way down in her frame as she stands (her lean is
+  // measured from it), what they last eased toward, where her front is without a bump, and a probe's held lean
+  const softBelly = restingSoftBelly(), softUpright = new THREE.Vector3(0, -1, 0), softDown = new THREE.Vector3(0, -1, 0);
+  let softWant: SoftBellyWant | null = null, softBaseZ: number | null = null, softHeld: { lean: number; side: number } | null = null, softOn = true;
   /** Where each mass hangs from, in a bone's frame: what it feels move. The belly in front of her spine, each breast on her chest. */
   type Anchor = { bone: THREE.Bone; local: THREE.Vector3; bind: THREE.Quaternion; p: THREE.Vector3; v: THREE.Vector3; primed: number };
   let anchors: { belly: Anchor; breastL: Anchor; breastR: Anchor } | null = null;
@@ -2790,6 +2796,47 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * where it is frame to frame, plus a walk's own bounce, which this walk-on-the-spot leaves out, and gravity as her
    * body leans -- in her own frame, steps each mass, and hands the shaders what her skin shows of it.
    */
+  /**
+   * Her belly's soft moves a step (softBody.ts): the rules read her lean from the way down in her frame against standing,
+   * her baby's place in her womb, and how full her womb is; the springs ease there; the shaders read the result.
+   */
+  function stepBellySoft(dt: number): void {
+    if (babyFrame) { jiggle.kickRest.value.copy(babyFrame.meshToRest); jiggle.kickUnits.value.setFromMatrix4(babyFrame.meshToRest).invert(); }
+    if (softBaseZ === null) softBaseZ = bellyBaseZ();
+    // her lean from standing (learnt as she stands; a probe may hold one)
+    if (pose === 'stand') softUpright.lerp(softDown, Math.min(1, dt * 2)).normalize();
+    const down = softHeld ? heldDown(softHeld.lean, softHeld.side) : softDown;
+    // how full her womb is: her belly's size against full term, her babies' and their fluid's share, less once born
+    const fullness = (bump / 100) * birthBellyShare * (babyRoot ? carriedShare(bump, body.babyWeight, babyCount) : 1);
+    // her baby's place in her womb: lower sags her belly, further forward deepens it; settling into her pelvis in labour
+    // it drops (and once born, it is out of her)
+    let baby: { low: number; forward: number } | null = null;
+    const r0 = babyRoots()[0], mid = r0?.userData.mid as THREE.Vector3 | undefined;
+    if (babyWomb && mid && !(birthNow && birthNow.stage === 'after')) {
+      const half = Math.max(0.05, sacRadius(babyWomb, 0, -1, 0)), deep = Math.max(0.05, sacRadius(babyWomb, 0, 0, 1));
+      baby = { low: Math.max(0, (babyWomb.centre.y - mid.y) / half) + (birthNow ? 0.3 * birthNow.engage : 0), forward: Math.max(0, (mid.z - babyWomb.centre.z) / deep) };
+    }
+    softWant = softBellyWant(down, softUpright, baby, fullness, body.bellyFirmness);
+    const want = softOn ? softWant : { side: 0, sag: 0, depth: 0 };
+    stepSoftBelly(softBelly, dt, want, fullness);
+    // (no bump, nothing to move)
+    const k = Math.min(1, Math.max(0, bump / 30));
+    jiggle.bellySoft.value.set(softBelly.side * k, softBelly.sag * k, softBelly.depth * k, softBaseZ ?? 0.1);
+  }
+  /** a probe's held lean: the way down in her frame `lean` degrees forward of standing and `side` to her left */
+  function heldDown(lean: number, side: number): THREE.Vector3 {
+    const p0 = Math.asin(Math.max(-1, Math.min(1, softUpright.z))), r0 = Math.asin(Math.max(-1, Math.min(1, softUpright.x)));
+    const p = p0 + (lean * Math.PI) / 180, r = r0 + (side * Math.PI) / 180;
+    return new THREE.Vector3(Math.sin(r), -Math.cos(r) * Math.cos(p), Math.cos(r) * Math.sin(p));
+  }
+  /** where her front is without a bump (z, rest metres): the middle of her skin her belly's follow weight carries most */
+  function bellyBaseZ(): number | null {
+    const b = bodyOf(), j = b ? jiggleOfMesh(b.mesh) : null, sb = b ? shaped.find((x) => x.mesh === b.mesh) : undefined;
+    if (!b || !j || !sb || !babyFrame) return null;
+    const v = new THREE.Vector3(); let z = 0, w = 0;
+    for (let i = 0; i < j.weights.length / 3; i++) { const wi = j.weights[i * 3]; if (wi < 0.5) continue; v.fromArray(sb.fields.basePos, i * 3).applyMatrix4(babyFrame.meshToRest); z += v.z * wi; w += wi; }
+    return w > 0 ? z / w : null;
+  }
   function feelMotion(dt: number): void {
     seated = sitMoving ? seatShare() : stepSeated(seated, pose === 'sit' ? 1 : 0, dt);
     applyMotion();
@@ -2827,8 +2874,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       stepMass(m, dt, felt.x, felt.y, felt.z, t);
       // the shaders get metres in her frame; the follow weights turn them into each mesh's units
       jiggle[key].value.set(m.x, m.y, m.z).multiplyScalar(t.gain);
-      if (key === 'belly') feltBelly.copy(felt);
+      if (key === 'belly') { feltBelly.copy(felt); softDown.set(0, -1, 0).applyQuaternion(toBody).normalize(); }
     }
+    stepBellySoft(dt);
     // her legs' tissue: each thigh and calf feels what its bone does there and lags it, as the belly does
     if (legAnchors) for (const key of ['thighL', 'thighR', 'calfL', 'calfR'] as const) {
       const a = legAnchors[key], t = key.startsWith('thigh') ? LEG_TUNE.thigh : LEG_TUNE.calf;
@@ -3437,11 +3485,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * below her breasts, its head toward hers; worked out once a birth, from her skin as drawn. */
   let birthRest: { position: THREE.Vector3; quaternion: THREE.Quaternion } | null = null, birthRestAt: THREE.Vector3 | null = null, birthRestKey = '', birthPushWas: boolean | null = null;
   function birthRestPlace(scale: number): { position: THREE.Vector3; quaternion: THREE.Quaternion } | null {
-    const key = `${shownBump().toFixed(1)}|${pose}`;
+    const sv = jiggle.bellySoft.value, key = `${shownBump().toFixed(1)}|${pose}|${sv.x.toFixed(2)}|${sv.y.toFixed(2)}|${sv.z.toFixed(2)}`;
     if (birthRest && birthRestKey === key) return birthRest;
     birthRestKey = key;
     const skin = bellySkin();
     if (!skin || !babyCurl) return null;
+    // (as her belly's soft shape has it: the shaders move her skin so, and the baby lies on what is drawn)
+    { const b = bodyOf(), jw = b ? jiggleOfMesh(b.mesh)?.weights : null, at = babySkinAt, p = new THREE.Vector3(), m = new THREE.Vector3();
+      if (jw && at) for (let k = 0; k < at.length; k++) { softAt(jiggle, jw[at[k] * 3], p.fromArray(skin, k * 3), m); skin[k * 3] += m.x; skin[k * 3 + 1] += m.y; skin[k * 3 + 2] += m.z; } }
     // HER FRONT DOWN HER MIDDLE (2026-11-02, Joshua: its legs "aren't resting fully on her and floating"): her skin's
     // furthest forward at each height, so it lies along her as she is curved there, not at a set lean
     const R = BIRTH_REST, step = 0.01, lo = 0.78, n = Math.round((R.top - lo) / step) + 1, front = new Float32Array(n).fill(-Infinity);
@@ -4256,6 +4307,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           })() } : null;
           return { rest: rp, headPastMouthCm: along, headFromPathCm: offAxis, headR: r0 ? +(headRadiusOf(r0.scale.x) * 100).toFixed(2) : null, open: vulva?.drawnOpen, clock: birthClock, running: birthRunning, pace: birthPace, now: birthNow, path: birthPath ? { length: +birthPath.length.toFixed(4), points: birthPath.points.length } : null, head: birthHeadModel?.toArray().map((x) => +x.toFixed(3)) ?? null, line: birthLine(birthNow) };
         },
+        softBelly: (o?: { on?: boolean; held?: { lean: number; side: number } | null }) => { if (o?.on !== undefined) softOn = o.on; if (o && 'held' in o) softHeld = o.held ?? null; const v = jiggle.bellySoft.value; return { on: softOn, held: softHeld, want: softWant, now: { side: +softBelly.side.toFixed(3), sag: +softBelly.sag.toFixed(3), depth: +softBelly.depth.toFixed(3) }, shader: [v.x, v.y, v.z, v.w].map((x) => +x.toFixed(3)), upright: softUpright.toArray().map((x) => +x.toFixed(3)), down: softDown.toArray().map((x) => +x.toFixed(3)) }; },
         hipTurn: (on?: boolean) => { if (on !== undefined && on !== hipTurnOn) { hipTurnOn = on; birthRoomFor = ''; applyLook(); } return { on: hipTurnOn, here: hipTurnHere(), stats: hipTurn?.stats ?? null }; },
         kneeTurn: (on?: boolean) => { if (on !== undefined && on !== kneeTurnOn) { kneeTurnOn = on; birthRoomFor = ''; applyLook(); } return { on: kneeTurnOn, stats: kneeTurn?.stats ?? null }; },
         birthContact: (on?: boolean) => { if (on !== undefined && on !== birthContactOn) { birthContactOn = on; birthRoomFor = ''; applyLook(); } return { on: birthContactOn, valve: +contactValve.x.toFixed(3), stats: birthContact?.stats ?? null, legMeshes: skinned.filter((m) => { const a = (m.geometry as THREE.BufferGeometry).getAttribute('jiggle'); if (!a) return false; for (let i = 0; i < a.count; i++) if (a.getY(i) < 0) return true; return false; }).length, legs: Object.fromEntries(Object.entries(legMasses).map(([k, m]) => [k, +(Math.hypot(m.x, m.y, m.z) * 1000).toFixed(2)])) }; },

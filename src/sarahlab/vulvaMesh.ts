@@ -6,7 +6,7 @@
  */
 import * as THREE from 'three';
 import { bakeVulva, type VulvaBake } from './vulvaPatch';
-import { JIGGLE_ATTRIBUTE, PUSH_ATTRIBUTE, patchJiggle } from './softBody';
+import { JIGGLE_ATTRIBUTE, PUSH_ATTRIBUTE, SOFT_REF_ATTRIBUTE, patchJiggle, patchWombSoft } from './softBody';
 import { birthAreaCentre } from './birthArea';
 import { sacRadius, type WombShape } from './baby';
 
@@ -473,6 +473,9 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       for (let j = 0; j < M; j++) { const o = (m * M + j) * 3; col[o] = c3.r; col[o + 1] = c3.g; col[o + 2] = c3.b; }
     }
     tubeGeom.setAttribute('color', new THREE.BufferAttribute(col, 3)); }
+  // (her womb's points: the skin over each and how her belly moves it -- laid with the womb, `patchWombSoft`)
+  const softRef = new Float32Array(TV * 4);
+  tubeGeom.setAttribute(SOFT_REF_ATTRIBUTE, new THREE.BufferAttribute(softRef, 4));
   {
     const pi = geom.getAttribute('skinIndex') as THREE.BufferAttribute | undefined, pw = geom.getAttribute('skinWeight') as THREE.BufferAttribute | undefined;
     if (pi && pw) {
@@ -497,6 +500,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   }
   const tubeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.82, metalness: 0, side: THREE.DoubleSide, vertexColors: true, envMapIntensity: 0.35 });
   const wombMat = tubeMat.clone();
+  // (her womb moved as her belly's soft shape and bounce move the skin over it)
+  if (jigU) { patchWombSoft(wombMat, jigU); patchWombSoft(tubeMat, jigU); }
   const rimMat = patchMat.clone();
   rimMat.customProgramCacheKey = () => 'vulvaRim';
   rimMat.side = THREE.DoubleSide; rimMat.vertexColors = true;
@@ -1651,6 +1656,25 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
         }
       }
       wombFloor = F.toArray().map((x) => +x.toFixed(3));
+      // each womb point's skin and that skin's belly follow weight, for the shader to move it as that skin moves
+      { const bw = (body.userData as { jiggle?: { weights?: Float32Array } }).jiggle?.weights;
+        softRef.fill(0);
+        if (bw) for (let k = 0; k < KW; k++) for (let j = 0; j < M; j++) {
+          const q = (KB + KC + KX + k) * M + j, near = wombNear[k * M + j]; if (near < 0) continue;
+          softRef[q * 4] = torsoNow[near * 3]; softRef[q * 4 + 1] = torsoNow[near * 3 + 1]; softRef[q * 4 + 2] = torsoNow[near * 3 + 2]; softRef[q * 4 + 3] = Math.max(0, bw[near * 3]);
+        }
+        // (and her cervix and the top of her canal with it, less and less down her canal to none halfway: as her womb
+        // drops in labour the skin over them moved and they did not, and showed -- 2026-11-03; her opening stays put)
+        if (bw) { const pr = new THREE.Vector3(), from = KB + Math.floor(KC / 2), to = KB + KC + KX;
+          for (let m = from; m < to; m++) {
+            const f = smooth(from, to - 1, m); if (f <= 0) continue;
+            for (let j = 0; j < M; j++) {
+              const q = m * M + j; pr.set(tubeWant[q * 3], tubeWant[q * 3 + 1], tubeWant[q * 3 + 2]).applyMatrix4(meshToRest);
+              const near = nearestSkin(pr); if (near < 0) continue;
+              softRef[q * 4] = torsoNow[near * 3]; softRef[q * 4 + 1] = torsoNow[near * 3 + 1]; softRef[q * 4 + 2] = torsoNow[near * 3 + 2]; softRef[q * 4 + 3] = Math.max(0, bw[near * 3]) * f;
+            }
+          } }
+        (tubeGeom.getAttribute(SOFT_REF_ATTRIBUTE) as THREE.BufferAttribute).needsUpdate = true; }
     } else {
     const cxStep = (L.cervix * perMetre) / KX;
     for (let k = 0; k < KX; k++) {
