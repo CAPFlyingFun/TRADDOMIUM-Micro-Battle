@@ -123,7 +123,7 @@ export const SARAH_LAB_ACTION = Object.freeze({
   babyLie: 'sarahlab:baby-lie',
   /** KICK: the next move now, a kick (baby.ts `MOVES`) */
   babyKick: 'sarahlab:baby-kick',
-  /** `${birth}head`: the BIRTH panel's test head on or off */
+  /** `${birth}<run|pace|reset>`: her baby's BIRTH started or paused, FAST or REALISTIC, and taken back to the start */
   birth: 'sarahlab:birth-',
   outfit: 'sarahlab:outfit',
   model: 'sarahlab:model',
@@ -197,6 +197,8 @@ export const SARAH_LAB_FIELD = Object.freeze({
   /** her birth opening (vulvaMesh.ts): closed to the full 10 cm, for looking at it in the room */
   birthOpen: 'sarahlab-birth-open',
   birthBulge: 'sarahlab-birth-bulge',
+  /** the BIRTH line: where her baby's birth is (birthSequence.ts) */
+  birthLine: 'sarahlab-birth-line',
   arms: 'sarahlab-arms',
   /** `${body}<control>`: a body control's line; its slider follows it */
   body: 'sarahlab-body-',

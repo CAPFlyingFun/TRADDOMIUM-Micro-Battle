@@ -81,7 +81,7 @@ import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields,
 import { dropIdleMorphs } from '../view/morphPrune';
 import { BIRTH_CLEFT_FIELD, BIRTH_LIPS_FIELD, birthAreaCentre, birthAreaFields, LIPS_COVERED, patchBirthShade } from './birthArea';
 import { BIRTH_POSES, poseBirth, type BirthSpec } from '../actor/humanBirth';
-import { AUTO_LIES, BABIES_NAME, BABY_MODEL, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, wombFromSkin, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
+import { AUTO_LIES, BABIES_NAME, BABY_MODEL, BABY_MODEL_LENGTH, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, wombFromSkin, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { setPush, jiggleOf as jiggleOfMesh } from './softBody';
 import { createVulvaPatch, VULVA_OPEN, type VulvaPatch } from './vulvaMesh';
@@ -94,8 +94,14 @@ import { BIRTH_NORMALS_FIELD, createBirthNormals, type BirthNormals } from './bi
 /** HER KNEES SMOOTHED AS POSED in a birth pose (Joshua, 2026-10-31: "the upper and lower legs at the knee... should remain
  * separated, but appear merged"): her groin's smoothing (birthNormals.ts) run round each knee */
 const BIRTH_KNEES_FIELD = 'shape:birthKnees';
+/** BIOLOGICAL SHAPE: a baby's head at term is about 9.5 cm across (its biparietal diameter) on a 51 cm baby; a smaller
+ * baby's in proportion. And a contraction lifts her womb up and forward a little (metres at the peak; GAME TUNING). */
+/** The poses a birth may run in (Joshua, 2026-11-02). */
+const BIRTH_POSES_OK: readonly string[] = ['recline', 'squat'];
+const BIRTH_HEAD = Object.freeze({ radius: 0.0475, atLength: 0.51, lift: [0, 0.008, 0.007] as const, tangentSpan: 0.0125, bodyBehind: 0.1 });
 import { BIRTH_CONTACT_FIELD, createBirthContact, type BirthContact } from './birthContact';
 import { KNEE_TURN_FIELD, createKneeTurn, type KneeTurn } from './kneeTurn';
+import { birthAt, birthLine, type BirthMoment, type BirthPace } from './birthSequence';
 /** GAME TUNING: all of it within `near` of a knee, none past `far` (metres); `passes` of `lambda` each */
 const KNEE_SMOOTH = Object.freeze({ near: 0.06, far: 0.12, passes: 60, lambda: 0.6, restore: 0 });
 import { DEFAULT_VULVA_KEEP } from './detailMaterials';
@@ -435,6 +441,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const DEPTH_FIELD = 'shape:bellyDepth';
   let babyRoot: THREE.Object3D | null = null, babyHolder: THREE.Object3D | null = null, babySac: THREE.Mesh | null = null;
   let babyShown = false, babyLoading = false, babyKey = '';
+  // HER BABY'S BIRTH (birthSequence.ts): its clock (null: not begun), whether it runs, its pace, where it is now, her
+  // canal as drawn this frame, and her baby's head's middle (its model's units)
+  let birthClock: number | null = null, birthRunning = false, birthPace: BirthPace = 'fast', birthNow: BirthMoment | null = null;
+  let birthPath: { points: THREE.Vector3[]; down: number[]; length: number } | null = null, birthHeadModel: THREE.Vector3 | null = null, birthLineAt = 0, birthLen: number | null = null;
   let babyCurl: CurlFrame | null = null, babyPoints: Float32Array | null = null, babyAll: Float32Array | null = null;
   /** the baby's body as a solid (baby.ts `babySolid`), found once from its points: how babies are kept out of one another */
   let babySolidOf: BabySolid | null = null;
@@ -1906,6 +1916,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // and how far the area round it is pushed out, on its own (in a birth it opens first, and bulges once her baby's head
     // is low in the canal)
     birthBulgeInput = slider(SARAH_LAB_FIELD.birthBulge, birthBulgePct, (v) => { birthBulgePct = v; vulva?.setBulge(v / 100); }, 100, 'pose');
+    // HER BABY'S BIRTH: begin, pause, FAST or REALISTIC, and back to the start (birthSequence.ts)
+    { const line = document.createElement('div'); line.dataset.tab = 'pose'; line.dataset.field = SARAH_LAB_FIELD.birthLine; line.style.cssText = 'font-size:12px;letter-spacing:.05em'; line.textContent = birthLine(null); fields[SARAH_LAB_FIELD.birthLine] = line; right.appendChild(line);
+      const row = document.createElement('div'); row.dataset.tab = 'pose'; row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
+      const run = btn('BIRTH ▶', SARAH_LAB_ACTION.birth + 'run', () => { birthControl('run'); run.textContent = birthRunning ? 'BIRTH ❚❚' : 'BIRTH ▶'; });
+      const pace = btn('FAST', SARAH_LAB_ACTION.birth + 'pace', () => { birthControl('pace'); pace.textContent = birthPace === 'fast' ? 'FAST' : 'REALISTIC'; });
+      const reset = btn('RESET', SARAH_LAB_ACTION.birth + 'reset', () => { birthControl('reset'); run.textContent = 'BIRTH ▶'; });
+      row.append(run, pace, reset); right.appendChild(row); }
     // a painted shirt's length, for every painted shirt she puts on (its drape follows: tunicDrape.ts)
     shirtLengthInput = slider(SARAH_LAB_FIELD.shirtLength, Math.round(DEFAULT_SHIRT_LENGTH * 100), (v) => { fabric?.setShirtLength(v / 100); }, 100, 'outfit');
     // THE CLOTH EXPERIMENT: the light tee as cloth, and its length to mid-thigh (Joshua, 2026-10-23)
@@ -2813,6 +2830,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       else { const w = 2 * Math.PI * CONTACT_VALVE.hz, h = Math.min(dt, 0.05); contactValve.v += (w * w * (want - contactValve.x) - 2 * CONTACT_VALVE.damping * w * contactValve.v) * h; contactValve.x += contactValve.v * h; }
       contactValve.at += dt;
       if (Math.abs(contactValve.x - contactValve.applied) > (want ? CONTACT_VALVE.step : 1e-6) && contactValve.at > 0.08) { contactValve.at = 0; contactValve.applied = contactValve.x; applyLook(); } }
+    // a contraction: her womb drawn up and forward, and eased back
+    if (birthNow && birthNow.contraction > 0) jiggle.belly.value.add(tmp.set(BIRTH_HEAD.lift[0], BIRTH_HEAD.lift[1], BIRTH_HEAD.lift[2]).multiplyScalar(birthNow.contraction));
     // her babies in their fluid: each lags what her body does a little, within the room it has (baby.ts `FLUID`)
     babyClock += dt; babyStepDt = dt;
     babyFloats.forEach((f, i) => { const t = floatTune(babyRooms[i] ?? 0, body.babyFloat); stepMass(f, dt, feltBelly.x * t.gain, feltBelly.y * t.gain, feltBelly.z * t.gain, t); });
@@ -2886,6 +2905,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         root.traverse((n) => { const m = n as THREE.Mesh; if (!m.isMesh) return; const a = m.geometry.getAttribute('position'); for (let i = 0; i < a.count; i++) { m.getVertexPosition(i, v).applyMatrix4(m.matrixWorld); pts.push(v.x, v.y, v.z); } });
         root.getObjectByName('Bone_017')?.getWorldPosition(head);
         babyCurl = curlFrame(pts, head); babySolidOf = null; babyMoves = [];
+        // its head's middle (model units): the cap of it furthest along its curl, a head's radius in from its crown
+        { const c = babyCurl, hr = BIRTH_HEAD.radius * BABY_MODEL_LENGTH / BIRTH_HEAD.atLength, q = new THREE.Vector3();
+          let top = -Infinity; for (let i = 0; i < pts.length; i += 3) top = Math.max(top, q.set(pts[i], pts[i + 1], pts[i + 2]).sub(c.centre).dot(c.long));
+          const m = new THREE.Vector3(); let k = 0;
+          for (let i = 0; i < pts.length; i += 3) { q.set(pts[i], pts[i + 1], pts[i + 2]); if (q.clone().sub(c.centre).dot(c.long) > top - 2 * hr) { m.add(q); k++; } }
+          m.divideScalar(Math.max(1, k));
+          birthHeadModel = m.addScaledVector(c.long, top - hr - m.clone().sub(c.centre).dot(c.long)); }
         // the bones a move turns, as the curl has them
         babyCurlRest = new Map();
         for (const n of [...BABY_BONES.leg.left, ...BABY_BONES.leg.right, ...BABY_BONES.arm.left, ...BABY_BONES.arm.right, ...BABY_BONES.back, BABY_BONES.neck]) { const b = root.getObjectByName(n); if (b) babyCurlRest.set(n, b.quaternion.clone()); }
@@ -3208,6 +3234,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       r.position.copy(at).sub(mid).applyQuaternion(floatTurn).add(mid).add(floatMove).add(jiggle.belly.value);
       if (f) r.position.add(floatAt.set(f.x, f.y, f.z));
       (r.userData.drift ??= new THREE.Vector3()).copy(floatMove);
+      // being born: down her canal, where the birth has it now (its moves wait)
+      if (i === 0 && birthPlace(r)) { r.updateMatrixWorld(true); return; }
       r.updateMatrixWorld(true);
       // its limbs: posed while it moves, back to its curl once after
       if (!(k > 0) && !m.posed) return;
@@ -3248,6 +3276,88 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         const F = babyFloats[j]; F.vx += moveAxis.x * deep * 4; F.vy += moveAxis.y * deep * 4; F.vz += moveAxis.z * deep * 4;
       });
     });
+  }
+  /** Her baby's head's radius (rest metres) at the size it is drawn (`scale`: rest metres a model unit). */
+  const headRadiusOf = (scale: number): number => BIRTH_HEAD.radius * (scale * BABY_MODEL_LENGTH) / BIRTH_HEAD.atLength;
+  /** How far down her canal her baby's head's middle is (metres from the top of her cervix; past `length`, out of her). */
+  const headDownOf = (m: BirthMoment, length: number, scale: number): number => (m.down <= 1 ? m.down * length : length + (m.down - 1) * scale * BABY_MODEL_LENGTH);
+  /**
+   * The birth stepped: its clock on, her cervix, her canal round her baby's head, her opening and the skin round it, as
+   * it has them now (her baby itself is laid by `birthPlace`, as her babies are placed).
+   */
+  function stepBirth(dt: number): void {
+    if (birthClock === null || !vulva) { birthNow = null; birthPath = null; return; }
+    // (out of a birth pose it waits where it is)
+    if (birthRunning && BIRTH_POSES_OK.includes(pose)) birthClock += dt;
+    birthNow = birthAt(birthClock, birthPace);
+    // her baby drawn through it even without SEE BABY: hidden inside her by her own body until it comes out of her (only
+    // the baby: its sac, her womb's wall, its placenta and cord stay as SEE BABY has them)
+    if (!babyRoot) loadBaby();
+    else if (!babyHolder && babyFrame) { const was = babyShown; showBaby(true); if (!was) showBaby(false); }
+    if (babyHolder && !babyShown) { babyHolder.visible = true; for (const m of [babySac, babyWall, ...babyOwnSacs, ...placentaMeshes, ...cordMeshes]) if (m) m.visible = false; }
+    const r = babyRoots()[0], scale = r?.scale.x ?? 0.33, R = headRadiusOf(scale);
+    birthPath = vulva.canalPath();
+    // (her canal's length as the birth began: laid again as her opening widens, its rings move a little, and a head placed
+    // by the new length jumped)
+    if (birthPath) { birthLen ??= birthPath.length; birthPath.length = birthLen; }
+    const L = birthPath?.length ?? 0.105, d = headDownOf(birthNow, L, scale);
+    // its head stretches her canal while it is in her
+    vulva.setHead(birthNow.engage > 0.5 && d < L + R ? d : null, R);
+    vulva.stepCanal(dt);
+    // her opening: as wide as the head is where her opening is (a sphere's slice), its neck and shoulders after it, and
+    // closing once all of it is out; the skin round it bulging as the head comes near and while it crowns
+    const x = L - d;
+    let across = Math.abs(x) < R ? 2 * Math.sqrt(R * R - x * x) : 0;
+    if (x <= -R) across = 2 * R * 0.9 * (1 - (birthNow.down >= 1.9 ? Math.min(1, (birthNow.down - 1.9) / 0.1) : 0));
+    const open = across > 0 ? Math.min(1, (across + 0.006) / 0.1) : 0;
+    const bulge = 0.6 * (d > L - 0.07 ? Math.min(1, (d - (L - 0.07)) / (0.07 - 0.5 * R)) : 0) * (d > L ? Math.max(0, 1 - (d - L) / R) : 1);
+    vulva.setBirthDrive({ open, bulge: Math.max(0, bulge), cervix: birthNow.cervix });
+    birthLineAt += dt;
+    if (birthLineAt > 0.25) { birthLineAt = 0; const f = fields[SARAH_LAB_FIELD.birthLine]; if (f) f.textContent = birthLine(birthNow, (vulva?.drawnOpen ?? 0) * 10) + (birthRunning ? '' : ' · paused'); }
+  }
+  /** Her baby laid where its birth has it (true), in her rest frame under the holder; false while no birth holds it. */
+  const bpA = new THREE.Vector3(), bpB = new THREE.Vector3(), bpT = new THREE.Vector3(), bpQ = new THREE.Quaternion(), bpM = new THREE.Matrix4(), bpOwn = new THREE.Matrix4();
+  function birthPlace(r: THREE.Object3D): boolean {
+    if (!birthNow || !birthPath || !babyHolder || !babyCurl || !birthHeadModel || birthPath.points.length < 2) return false;
+    const m = birthNow, scale = r.scale.x, L = birthPath.length, d = Math.max(0, headDownOf(m, L, scale));
+    babyHolder.updateMatrixWorld(true);
+    // (each point's distance down, measured on her canal as it is now and stretched to the length the birth began with)
+    const pts = birthPath.points.map((p) => babyHolder!.worldToLocal(p.clone())), n = pts.length, k0 = L / Math.max(1e-6, birthPath.down[n - 1]), down = birthPath.down.map((x) => x * k0);
+    // the point d down her canal, and the way on (past her opening, straight on out the way it leaves her)
+    const at = (dd: number, out: THREE.Vector3) => {
+      // (above the top of her cervix, on up the way her canal comes from)
+      if (dd < 0) return out.copy(pts[0]).sub(pts[1]).normalize().multiplyScalar(-dd).add(pts[0]);
+      let k = 0; while (k < n - 2 && down[k + 1] < dd) k++;
+      const f = Math.min(1, Math.max(0, (dd - down[k]) / Math.max(1e-6, down[k + 1] - down[k])));
+      return out.copy(pts[k]).lerp(pts[k + 1], f);
+    };
+    // (the way along, over a span either side: its rings at the mouth are too close together to say it alone; past her
+    // opening, the way the last 2.5 cm of her canal points)
+    const end = down[n - 1], span = BIRTH_HEAD.tangentSpan;
+    if (d <= end) at(d, bpA);
+    else { at(end - 2 * span, bpB); at(end, bpA); bpT.copy(bpA).sub(bpB).normalize(); bpA.addScaledVector(bpT, d - end); }
+    // its length along the line from its body, up her canal behind its head, to its head: its body follows the curve
+    // rather than going straight back through her (2026-11-02: its toes came out under her opening as it crowned)
+    at(d - BIRTH_HEAD.bodyBehind, bpB); bpT.copy(bpA).sub(bpB).normalize();
+    // its head first, along the way on; the back of its head turned from her front toward her left by `turnDeg`
+    const long = bpT, front = bpB.set(0, 0, 1).addScaledVector(long, -long.z).normalize(), left = new THREE.Vector3(1, 0, 0).addScaledVector(long, -long.x).normalize();
+    const th = (m.turnDeg * Math.PI) / 180, back = front.clone().multiplyScalar(Math.cos(th)).addScaledVector(left, Math.sin(th)).normalize();
+    const side = new THREE.Vector3().crossVectors(long, back).normalize(); back.crossVectors(side, long).normalize();
+    bpM.makeBasis(side, long, back); bpOwn.makeBasis(babyCurl.side, babyCurl.long, babyCurl.back).transpose();
+    bpQ.setFromRotationMatrix(bpM.multiply(bpOwn));
+    const pos = bpA.clone().sub(birthHeadModel.clone().multiplyScalar(scale).applyQuaternion(bpQ));
+    // from where it lies in her womb onto her cervix as its head settles
+    if (m.engage < 1) { pos.lerpVectors(r.position, pos, m.engage); bpQ.slerpQuaternions(r.quaternion, bpQ.clone(), m.engage); }
+    r.position.copy(pos); r.quaternion.copy(bpQ);
+    return true;
+  }
+  /** BIRTH: begun (from the start) or paused and on again; reset takes it back to before it began. */
+  function birthControl(cmd: 'run' | 'reset' | 'pace'): void {
+    if (cmd === 'reset') { if (babyHolder && !babyShown) { babyHolder.visible = false; for (const m of [...placentaMeshes, ...cordMeshes]) m.visible = true; if (babySac) babySac.visible = babyCount === 1; } birthLen = null; birthClock = null; birthRunning = false; birthNow = null; birthPath = null; vulva?.setBirthDrive(null); vulva?.setHead(null, 0); const f = fields[SARAH_LAB_FIELD.birthLine]; if (f) f.textContent = birthLine(null); return; }
+    if (cmd === 'pace') { const was = birthPace; birthPace = was === 'fast' ? 'realistic' : 'fast'; if (birthClock !== null) birthClock *= was === 'fast' ? 5 : 1 / 5; return; }
+    // (a birth from RECLINE or SQUAT only -- Joshua, 2026-11-02: LEGS APART is her pre-labour stance)
+    if (birthClock === null) { if (!BIRTH_POSES_OK.includes(pose)) { const f = fields[SARAH_LAB_FIELD.birthLine]; if (f) f.textContent = 'BIRTH · from RECLINE or SQUAT'; return; } birthClock = 0; birthRunning = true; return; }
+    birthRunning = !birthRunning;
   }
   /** Each baby's placenta on her womb's lining, and its cord to its navel, stepped and drawn (SEE BABY). */
   function layCords(): void {
@@ -3582,6 +3692,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       // VULVA DETAIL through clothes, as the fabric panel has it now (nothing is done unless it changed)
       vulva?.setDressedLips(fabric?.vulvaKeep() ?? DEFAULT_VULVA_KEEP);
       vulva?.sync();
+      stepBirth(dt);
       garmentRoom?.applyPose();
       place();
       feelMotion(dt);
@@ -3983,6 +4094,16 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         },
         birthNormals: (on: boolean) => { birthNormalsOn = on; birthRoomFor = ''; applyLook(); return { watched: birthNormals?.watched ?? null, pierced: birthNormals?.pierced ?? null }; },
         vulvaOpen: (o: number) => { if (!vulva) return null; vulva.setOpen(o); return vulva.open; },
+        birth: (cmd?: { t?: number; pace?: BirthPace; run?: boolean; reset?: boolean }) => {
+          if (cmd?.reset) birthControl('reset');
+          if (cmd?.pace) birthPace = cmd.pace;
+          if (cmd?.t !== undefined) { birthClock = cmd.t; birthRunning = cmd.run ?? false; }
+          else if (cmd?.run !== undefined) { if (birthClock === null) birthClock = 0; birthRunning = cmd.run; }
+          const r0 = babyRoots()[0], headW = r0 && birthHeadModel ? birthHeadModel.clone().applyMatrix4(r0.matrixWorld) : null, pts = birthPath?.points;
+          const along = headW && pts && pts.length > 1 ? (() => { const mouth = pts[pts.length - 1], t = mouth.clone().sub(pts[pts.length - 2]).normalize(); return +((headW.clone().sub(mouth).dot(t)) / M * 100).toFixed(1); })() : null;
+          const offAxis = headW && pts ? +((Math.min(...pts.map((p) => p.distanceTo(headW)))) / M * 100).toFixed(1) : null;
+          return { headPastMouthCm: along, headFromPathCm: offAxis, headR: r0 ? +(headRadiusOf(r0.scale.x) * 100).toFixed(2) : null, open: vulva?.drawnOpen, clock: birthClock, running: birthRunning, pace: birthPace, now: birthNow, path: birthPath ? { length: +birthPath.length.toFixed(4), points: birthPath.points.length } : null, head: birthHeadModel?.toArray().map((x) => +x.toFixed(3)) ?? null, line: birthLine(birthNow) };
+        },
         kneeTurn: (on?: boolean) => { if (on !== undefined && on !== kneeTurnOn) { kneeTurnOn = on; birthRoomFor = ''; applyLook(); } return { on: kneeTurnOn, stats: kneeTurn?.stats ?? null }; },
         birthContact: (on?: boolean) => { if (on !== undefined && on !== birthContactOn) { birthContactOn = on; birthRoomFor = ''; applyLook(); } return { on: birthContactOn, valve: +contactValve.x.toFixed(3), stats: birthContact?.stats ?? null, legMeshes: skinned.filter((m) => { const a = (m.geometry as THREE.BufferGeometry).getAttribute('jiggle'); if (!a) return false; for (let i = 0; i < a.count; i++) if (a.getY(i) < 0) return true; return false; }).length, legs: Object.fromEntries(Object.entries(legMasses).map(([k, m]) => [k, +(Math.hypot(m.x, m.y, m.z) * 1000).toFixed(2)])) }; },
         vulvaBulge: (b: number) => { if (!vulva) return null; vulva.setBulge(b); return vulva.bulge; },

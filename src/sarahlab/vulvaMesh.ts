@@ -59,7 +59,7 @@ export const VULVA_OPEN = Object.freeze({
   bead: 0.004, lipWall: 0.008,
   /** GAME TUNING: the balloon's rolled rim round the opening -- how round (metres, at full size), how far its middle stands
    * out of her (a share of that), and how many Taubin passes even the edge it is laid round */
-  rimBead: 0.0036, rimLift: 0.3, rimTuck: 0.002, rimReach: 0.004, openForward: 0.01, backMargin: 0.02, backInset: 0, edgeTrim: 0.015, edgeKeep: 0.03, rimSmooth: 30, rimWeightReach: 6,
+  rimBead: 0.0036, rimLift: 0.3, rimTuck: 0.002, rimReach: 0.004, openForward: 0.01, backMargin: 0.02, canalWall: 0.004, canalEase: 1.2, backInset: 0, edgeTrim: 0.015, edgeKeep: 0.03, rimSmooth: 30, rimWeightReach: 6,
   /** GAME TUNING: the outer skin ring -- how round (metres), how far out from the rim, how far its middle stands out of
    * her skin (a share of that), and how many Taubin passes even its loop */
   outerRound: 0.005, outerGap: 0.012, outerLift: 0.2, outerSmooth: 30,
@@ -146,6 +146,16 @@ export interface VulvaPatch {
    * (Joshua, 2026-11-02 -- it opens first; it bulges once her baby's head is low, past her cervix in the canal) */
   setBulge(bulge: number): void;
   readonly bulge: number;
+  /** A BIRTH's hold on her (birthSequence.ts), null to let go: the opening and bulge at least `open` and `bulge` (0..1, as
+   * their sliders), and her cervix dilated to `cervix` (0 shut .. 1 ten centimetres) on its own */
+  setBirthDrive(d: { open: number; bulge: number; cervix: number } | null): void;
+  /** her baby's head in her canal: its middle `at` metres down from the top of her cervix (null: none), `radius` round */
+  setHead(at: number | null, radius: number): void;
+  /** the canal's rings eased back toward rest after the head (once a frame while a birth runs) */
+  stepCanal(dt: number): void;
+  /** the canal's middle as drawn now (world), from the top of her cervix to the mouth, and each point's distance down it
+   * (metres, as laid); `length` the whole way */
+  canalPath(): { points: THREE.Vector3[]; down: number[]; length: number } | null;
   /** how far open she is drawn now (the larger of the slider's and her pose's) */
   readonly drawnOpen: number;
   readonly open: number;
@@ -413,6 +423,10 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   const perMetre = new THREE.Vector3(1, 0, 0).applyMatrix3(inv).length();
   const restPos = new Float32Array(P * 3), restNrm = new Float32Array(P * 3);
   let open = 0, openApplied = -1, wantOpen = 0, naturalOpen = 0, dressed = false, dressedLips = 0, bulgeAmt = 0;
+  // A BIRTH drives her (birthSequence.ts): the opening and bulge at least what her baby's head makes them, and her cervix
+  // dilated on its own; nothing while no birth runs
+  let driveOpen = 0, driveBulge = 0, cervixDrive: number | null = null;
+  const openNow = () => (dressed ? 0 : Math.max(wantOpen, naturalOpen, driveOpen)), bulgeNow2 = () => (dressed ? 0 : Math.max(bulgeAmt, driveBulge));
 
   // CARRIED BY HER PELVIS as it opens. Her skin there is weighted to her pelvis and both thighs, so a move laid on it in
   // her rest shape is turned by her thighs as well as her pelvis once she is posed -- every birth pose turns her thighs
@@ -993,6 +1007,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     // canal whatever its width: one smooth funnel, never a ledge where a ring was clipped and the next was not)
     for (let m = KB; m < KB + n; m++) {
       const share = 1 - smooth(0.7, 1, (m - KB) / n);
+      // (a ring her baby stretches is not held in: her skin goes out over it -- the bulge -- rather than it being cut)
+      if (ringNow[m] > 1.02) continue;
       for (let j = 0; j < M; j++) {
         if (fac[j] >= 1) continue;
         const q = m * M + j;
@@ -1374,7 +1390,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     // of it: midwives' "perineal bulging", the perineum stretching from about 3.7 to 6.1 cm (MDedge's report of the
     // UNM study). Every point of the area moves out the way the opening faces, most at the opening's edge and none at
     // the area's own edge, by `bulge` metres at the full opening.
-    const bAmt = dressed ? 0 : bulgeAmt;
+    const bAmt = bulgeNow2();
     if (bAmt > 0 && VULVA_OPEN.bulge > 0) {
       const H = VULVA_OPEN.bulge * Math.pow(bAmt, VULVA_OPEN.bulgeEase), out = nO;
       // A DOME ROUND THE OPENING, smooth over her skin (2026-11-02: laid column by column, each scaled to its own
@@ -1582,7 +1598,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     }
     ctr.sub(bulgeOff);
     // 3. THE CERVIX: a neck, its own opening dilating with hers (shut, a few millimetres; at 100%, the opening's width)
-    const rCx = Math.max(L.cervixShut * perMetre / 2, 0.05 * perMetre * open);
+    const rCx = Math.max(L.cervixShut * perMetre / 2, 0.05 * perMetre * (cervixDrive ?? open));
     if (womb) {
       // 3 and 4 WITH HER WOMB (Joshua, 2026-11-01: "make it 8cm and curve it so it all works like it's supposed to be"):
       // the canal (section 2) runs its own `canal` length on its curve from the opening; the cervix goes on from its end
@@ -1638,12 +1654,66 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     }
     }
     if (!dressed) layOuter(pos, nrm); else outerLaid = false;
+    layCanalRings();
     openApplied = open;
+  }
+  // ---- THE SOFT CANAL (Joshua, 2026-11-02: "can we make the birth canal (and vagina opening) a hybrid soft body like
+  // in real life so it doesn't cut through the skin, but it can actually change shape for a moment?"). Her baby's head,
+  // a ball `headR` round at `headAt` metres down the canal from the top of her cervix, stretches each ring it is in to its
+  // own size and a wall's thickness more -- the ring ahead of it to the head's cross-section there, every ring behind it
+  // (its body follows) to the full width -- at once, and each eases back on its own (`stepCanal`) once it has passed.
+  /** the canal's and cervix's rings from the top of her cervix to the mouth (indices), their middles and sizes as laid
+   * (her rest geometry), and each one's distance down from the top (metres) */
+  const CANAL_RINGS = (() => { const r: number[] = []; for (let m = KB + KC + KX - 1; m >= KB; m--) r.push(m); r.push(0); return r; })();
+  const ringMid = new Float32Array(K * 3), ringR = new Float32Array(K), ringDown = new Float32Array(K), ringNow = new Float32Array(K).fill(1), ringWant = new Float32Array(K).fill(1);
+  let headAt: number | null = null, headR = 0, canalLen = 0, stretchDirty = false;
+  function layCanalRings(): void {
+    for (const m of CANAL_RINGS) {
+      let x = 0, y = 0, z = 0; for (let j = 0; j < M; j++) { const o = (m * M + j) * 3; x += tubeWant[o]; y += tubeWant[o + 1]; z += tubeWant[o + 2]; }
+      x /= M; y /= M; z /= M; ringMid[m * 3] = x; ringMid[m * 3 + 1] = y; ringMid[m * 3 + 2] = z;
+      let r = 0; for (let j = 0; j < M; j++) { const o = (m * M + j) * 3; r += Math.hypot(tubeWant[o] - x, tubeWant[o + 1] - y, tubeWant[o + 2] - z); }
+      ringR[m] = r / M;
+    }
+    let d = 0;
+    CANAL_RINGS.forEach((m, k) => { if (k > 0) { const a = CANAL_RINGS[k - 1]; d += Math.hypot(ringMid[m * 3] - ringMid[a * 3], ringMid[m * 3 + 1] - ringMid[a * 3 + 1], ringMid[m * 3 + 2] - ringMid[a * 3 + 2]) / perMetre; } ringDown[m] = d; });
+    canalLen = d;
+    wantStretch();
+  }
+  /** what each ring is stretched to by the head where it is now (a share of its own size: 1 untouched) */
+  function wantStretch(): void {
+    const wall = VULVA_OPEN.canalWall;
+    for (const m of CANAL_RINGS) {
+      let want = 1;
+      if (headAt !== null && headR > 0 && ringR[m] > 0) {
+        // (x: how far the ring is ahead of the head's middle, toward the mouth; behind it the body keeps it full)
+        const x = ringDown[m] - headAt, half = x > 0 ? (x < headR ? Math.sqrt(headR * headR - x * x) : 0) : headR;
+        if (half > 0) want = Math.max(1, ((half + wall) * perMetre) / ringR[m]);
+      }
+      ringWant[m] = want;
+    }
+  }
+  /** each ring toward what the head wants of it: out at once, back over `canalEase` seconds */
+  function stepCanalRings(dt: number): void {
+    const k = 1 - Math.exp(-Math.max(0, dt) / VULVA_OPEN.canalEase);
+    for (const m of CANAL_RINGS) {
+      const was = ringNow[m], want = ringWant[m];
+      const now = want >= was ? want : was + (want - was) * k;
+      if (Math.abs(now - was) > 1e-4) { ringNow[m] = now; stretchDirty = true; } else ringNow[m] = want < was ? now : was;
+    }
+  }
+  /** the rings stretched, about their own middles, into the tube as it is handed to the GPU */
+  function stretchRings(): void {
+    for (const m of CANAL_RINGS) {
+      const s2 = ringNow[m]; if (s2 <= 1.0001) continue;
+      const cx = ringMid[m * 3], cy = ringMid[m * 3 + 1], cz = ringMid[m * 3 + 2];
+      for (let j = 0; j < M; j++) { const o = (m * M + j) * 3; tubePos[o] = cx + (tubePos[o] - cx) * s2; tubePos[o + 1] = cy + (tubePos[o + 1] - cy) * s2; tubePos[o + 2] = cz + (tubePos[o + 2] - cz) * s2; }
+    }
   }
   /** the opening (as laid on her rest shape) handed to the GPU, and the tube's bones */
   function poseOpen(): void {
     // the area lies on her skin, carried as her skin is there: nothing to turn
     pos.set(want); nrm.set(wantNrm); tubePos.set(tubeWant);
+    stretchRings();
     if (skI) skI.needsUpdate = true;
     if (skW) skW.needsUpdate = true;
     // the tube's mouth carried as the lips' edge it hangs from, deeper in more and more by her pelvis alone
@@ -1742,12 +1812,12 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     const bp = g.getAttribute('position') as THREE.BufferAttribute, bn = g.getAttribute('normal') as THREE.BufferAttribute | undefined;
     // opened, the opening's size is measured on her as she is posed: a new pose lays it out again
     let sig = 0;
-    if (open > 0 || bulgeAmt > 0) {
+    if (open > 0 || bulgeNow2() > 0) {
       for (const b of body.skeleton.bones) sig = sig * 1.0001 + b.quaternion.x * 3 + b.quaternion.y * 5 + b.quaternion.z * 7 + b.quaternion.w;
       // (and her belly: the slider is a morph)
       const inf = body.morphTargetInfluences; if (inf) for (let m = 0; m < inf.length; m++) sig += inf[m] * (m + 11);
     }
-    if ((open > 0 || bulgeAmt > 0) && Math.abs(sig - poseSig) > 1e-6) { poseSig = sig; openApplied = -1; }
+    if ((open > 0 || bulgeNow2() > 0) && Math.abs(sig - poseSig) > 1e-6) { poseSig = sig; openApplied = -1; }
     // (her weights handed new values -- her birth poses paint her own: 2026-11-02, Joshua: on a fresh load her womb showed
     // through her belly and her shirt until a pose was pressed, carried by the weights her skin had before they were painted)
     if (sw && bodyI && sw.version !== bodySkinVersion) openApplied = -1;
@@ -1761,6 +1831,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       layOpen();
       changed = true;
     }
+    if (stretchDirty) { stretchDirty = false; changed = true; }
     if (changed) {
       poseOpen();
       (geom.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
@@ -1842,14 +1913,40 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       return { wombDbg, rimSize, uScale, sScale, pelvisBoneGiven: pelvisBone, pelvis: body.skeleton.bones[pelvis]?.name, pelvisIndex: pelvis, restPos: bad(restPos), restNrm: bad(restNrm), rim: bad(rim), pos: bad(pos), tau: bad(tau), colQ: bad(colQ), body: bad((g.getAttribute('position') as THREE.BufferAttribute).array), O: O.toArray(), tA: tA.toArray(), nO: nO.toArray(), across: across.toArray(), perMetre, open };
     },
     get open() { return wantOpen; },
-    setOpen(o: number) { wantOpen = Number.isFinite(o) ? Math.max(0, Math.min(1, o)) : 0; open = dressed ? 0 : Math.max(wantOpen, naturalOpen); sync(); },
+    setOpen(o: number) { wantOpen = Number.isFinite(o) ? Math.max(0, Math.min(1, o)) : 0; open = openNow(); sync(); },
     setNatural(o: number) {
       const n = Number.isFinite(o) ? Math.max(0, Math.min(1, o)) : 0;
       if (Math.abs(n - naturalOpen) < 0.004 && !(n === 0 && naturalOpen !== 0)) return;
-      naturalOpen = n; const was = open; open = dressed ? 0 : Math.max(wantOpen, naturalOpen); if (open !== was) sync();
+      naturalOpen = n; const was = open; open = openNow(); if (open !== was) sync();
     },
     get drawnOpen() { return open; },
     get bulge() { return bulgeAmt; },
+    setBirthDrive(d) {
+      const o = d ? Math.max(0, Math.min(1, Math.round(d.open * 100) / 100)) : 0, b = d ? Math.max(0, Math.min(1, Math.round(d.bulge * 100) / 100)) : 0;
+      const c = d ? Math.max(0, Math.min(1, Math.round(d.cervix * 50) / 50)) : null;
+      if (o === driveOpen && b === driveBulge && c === cervixDrive) return;
+      const relay = b !== driveBulge || c !== cervixDrive;
+      driveOpen = o; driveBulge = b; cervixDrive = c; open = openNow();
+      if (relay) openApplied = -1;
+      sync();
+    },
+    setHead(at, radius) {
+      const a = at === null || !Number.isFinite(at) ? null : at, r = Math.max(0, radius || 0);
+      if (a === headAt && r === headR) return;
+      headAt = a; headR = r; wantStretch();
+    },
+    stepCanal(dt) { stepCanalRings(dt); if (stretchDirty) sync(); },
+    canalPath() {
+      if (!canalLen) return null;
+      tube.updateMatrixWorld(true); body.skeleton.update();
+      const pts: THREE.Vector3[] = [], down: number[] = [], v = new THREE.Vector3(), step = Math.max(1, Math.floor(M / 8));
+      for (const m of CANAL_RINGS) {
+        const c = new THREE.Vector3(); let k = 0;
+        for (let j = 0; j < M; j += step) { tube.getVertexPosition(m * M + j, v); c.add(v); k++; }
+        pts.push(c.divideScalar(k).applyMatrix4(tube.matrixWorld)); down.push(ringDown[m]);
+      }
+      return { points: pts, down, length: canalLen };
+    },
     setBulge(b: number) {
       const v = Number.isFinite(b) ? Math.max(0, Math.min(1, b)) : 0;
       if (v === bulgeAmt) return;
@@ -1873,7 +1970,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     setDressed(on: boolean) {
       if (on === dressed) return;
       // dressed: drawn with her own material, lying as her skin does, closed (her clothes are over it)
-      dressed = on; mesh.material = on ? dressedMat : patchMat; open = on ? 0 : Math.max(wantOpen, naturalOpen); openApplied = -1; sync();
+      dressed = on; mesh.material = on ? dressedMat : patchMat; open = openNow(); openApplied = -1; sync();
     },
     show(on: boolean) {
       shown = on;
