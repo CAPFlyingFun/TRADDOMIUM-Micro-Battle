@@ -98,14 +98,17 @@ const BIRTH_KNEES_FIELD = 'shape:birthKnees';
  * baby's in proportion. And a contraction lifts her womb up and forward a little (metres at the peak; GAME TUNING). */
 /** The poses a birth may run in (Joshua, 2026-11-02). */
 const BIRTH_POSES_OK: readonly string[] = ['recline', 'squat'];
-/** GAME TUNING: where her baby lies on her once born (her rest metres): its front against her skin `gap` out, its middle
- * on her front (a negative gap: sunk into her a little, both soft) between heights `from` and `to` (the furthest forward there, within `across` of her middle), its head up
- * her leaning `lean` back along her */
+/** GAME TUNING: where her baby lies on her once born (her rest metres): along her front down her middle (within `across`
+ * of it), its head end where she is at height `top` (under her breasts) and its bottom `span` below; its middle out from
+ * that line by `depth` of its own curled depth (it lies flatter once out of the curl) and `over` of how far her belly
+ * rounds up between the two, and `gap` more */
 /** GAME TUNING: how open she is as her baby's body leaves her, easing back from there */
 const BIRTH_AFTER_OPEN = 0.35;
 /** GAME TUNING: how much of her belly settles away after the birth (its womb shrinking back toward a five-month size) */
 const BIRTH_SHRINK = 0.45;
-const BIRTH_REST = Object.freeze({ from: 1.04, to: 1.18, across: 0.04, lean: 0.3, gap: -0.04 });
+/** GAME TUNING: how far further in than her skin her womb is held as it settles (metres, once settled) */
+const BIRTH_WOMB_IN = 0.015;
+const BIRTH_REST = Object.freeze({ top: 1.2, span: 0.3, across: 0.05, depth: 0.32, over: 0.7, gap: 0 });
 const BIRTH_HEAD = Object.freeze({ radius: 0.0475, atLength: 0.51, lift: [0, 0.008, 0.007] as const, tangentSpan: 0.0125, bodyBehind: 0.1 });
 import { BIRTH_CONTACT_FIELD, createBirthContact, type BirthContact } from './birthContact';
 import { KNEE_TURN_FIELD, createKneeTurn, type KneeTurn } from './kneeTurn';
@@ -3010,17 +3013,22 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function layBalloonWomb(): void {
     if (!vulva || !babyFrame) return;
     const sk = bodyOf()?.mesh.skeleton, bone = sk ? sk.bones.indexOf(babyFrame.bone) : -1;
-    if (babyWomb) { balloonWombKey = 'baby'; vulva.setWomb(babyWomb, bone); return; }
+    // (once her baby is born her womb shrinks back with her belly: laid round her belly as it now is, not round the baby
+    // it held -- 2026-11-02, Joshua saw it through her skin in a few spots as her belly settled)
+    const settled = birthBellyShare < 1;
+    if (babyWomb && !settled) { balloonWombKey = 'baby'; vulva.setWomb(babyWomb, bone); return; }
     // (keyed on her belly's skin as it is drawn, not only on the sliders: 2026-11-02, Joshua -- on a fresh load her womb
     // showed through her belly and her shirt until a pose was pressed: it had been laid round her belly as it was while
     // the room was still putting her shape on, and the sliders had not moved since)
     const skin = bellySkin();
     if (!skin) return;
     let sig = 0; for (let i = 0; i < skin.length; i += 3) sig += skin[i] * 1.3 + skin[i + 1] * 3.7 + skin[i + 2] * 7.1;
-    const key = `${bump.toFixed(3)}|${babyCount}|${body.babyWeight.toFixed(2)}|${sig.toFixed(4)}`;
+    const key = `${bump.toFixed(3)}|${birthBellyShare.toFixed(3)}|${babyCount}|${body.babyWeight.toFixed(2)}|${sig.toFixed(4)}`;
     if (key === balloonWombKey) return;
     balloonWombKey = key;
-    try { vulva.setWomb(wombFromSkin(skin, weekForBump(bump, babyCount)), bone); } catch (error) { console.error('[sarahlab] her womb for the balloon could not be laid', error); vulva.setWomb(null); }
+    // (and, settling, held further inside her than her skin, as a womb shrinking back is: not right under her belly)
+    if (settled) for (let i = 0; i < skin.length; i += 3) skin[i + 2] -= BIRTH_WOMB_IN * (1 - birthBellyShare) / BIRTH_SHRINK;
+    try { vulva.setWomb(wombFromSkin(skin, weekForBump(bump * birthBellyShare, babyCount)), bone); } catch (error) { console.error('[sarahlab] her womb for the balloon could not be laid', error); vulva.setWomb(null); }
   }
   function bellySkin(): Float32Array | null {
     const b = bodyOf(), f = babyFrame;
@@ -3348,7 +3356,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     vulva.setBirthDrive({ open, bulge: Math.max(0, bulge), cervix: birthNow.cervix });
     // her belly settling smaller once her baby is born (a step at a time: her shape is laid again each step)
     { const want = 1 - BIRTH_SHRINK * (birthNow.stage === 'after' ? birthNow.closing : 0);
-      if (Math.abs(want - birthBellyShare) > 0.01 || (want === 1 && birthBellyShare !== 1)) { birthBellyShare = want; applyLook(); } }
+      if (Math.abs(want - birthBellyShare) > 0.01 || (want === 1 && birthBellyShare !== 1)) {
+        birthBellyShare = want;
+        // (and the room her belly made for her baby taken off: it is out of her now)
+        if (want < 1 && birthPushWas === null) { birthPushWas = babyPushOff; babyPushOff = true; if (babyPushField) layPush(babyPushField); }
+        applyLook();
+      } }
     birthLineAt += dt;
     if (birthLineAt > 0.25) { birthLineAt = 0; const f = fields[SARAH_LAB_FIELD.birthLine]; if (f) f.textContent = birthLine(birthNow, (vulva?.drawnOpen ?? 0) * 10) + (birthRunning ? '' : ' · paused');
       const len = birthLength(birthPace), tl = fields[SARAH_LAB_FIELD.birthTime];
@@ -3393,7 +3406,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const rest = birthRestPlace(scale);
       if (rest) {
         const u = m.onHer;
-        pos.lerp(rest.position, u).add(bpB.set(0, 0.04, 0.12).multiplyScalar(Math.sin(u * Math.PI)));
+        // (and riding her belly as it moves: its soft body's swing)
+        pos.lerp(rest.position, u).add(bpB.set(0, 0.04, 0.12).multiplyScalar(Math.sin(u * Math.PI))).addScaledVector(jiggle.belly.value, u);
         bpQ.slerp(rest.quaternion, u);
       }
     }
@@ -3402,36 +3416,42 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
   /** Where her baby lies on her once born (her rest frame): face down on her, centred on the front of her belly a little
    * below her breasts, its head toward hers; worked out once a birth, from her skin as drawn. */
-  let birthRest: { position: THREE.Vector3; quaternion: THREE.Quaternion } | null = null, birthRestAt: THREE.Vector3 | null = null, birthRestKey = '';
+  let birthRest: { position: THREE.Vector3; quaternion: THREE.Quaternion } | null = null, birthRestAt: THREE.Vector3 | null = null, birthRestKey = '', birthPushWas: boolean | null = null;
   function birthRestPlace(scale: number): { position: THREE.Vector3; quaternion: THREE.Quaternion } | null {
-    const key = shownBump().toFixed(1);
+    const key = `${shownBump().toFixed(1)}|${pose}`;
     if (birthRest && birthRestKey === key) return birthRest;
     birthRestKey = key;
     const skin = bellySkin();
     if (!skin || !babyCurl) return null;
-    // the front of her, down her middle, at the height it lies: her skin's furthest forward there
-    const R = BIRTH_REST;
-    let best = -Infinity; const at = new THREE.Vector3();
+    // HER FRONT DOWN HER MIDDLE (2026-11-02, Joshua: its legs "aren't resting fully on her and floating"): her skin's
+    // furthest forward at each height, so it lies along her as she is curved there, not at a set lean
+    const R = BIRTH_REST, step = 0.01, lo = 0.78, n = Math.round((R.top - lo) / step) + 1, front = new Float32Array(n).fill(-Infinity);
     for (let i = 0; i < skin.length; i += 3) {
-      const x = skin[i], y = skin[i + 1], z = skin[i + 2];
-      if (Math.abs(x) > R.across || y < R.from || y > R.to) continue;
-      if (z > best) { best = z; at.set(0, y, z); }
+      if (Math.abs(skin[i]) > R.across) continue;
+      const k = Math.round((skin[i + 1] - lo) / step);
+      if (k >= 0 && k < n && skin[i + 2] > front[k]) front[k] = skin[i + 2];
     }
-    if (!Number.isFinite(best)) return null;
-    birthRestAt = at.clone();
-    // its head up her toward her face, its front against her
-    const long = new THREE.Vector3(0, 1, -R.lean).normalize(), back = new THREE.Vector3(0, R.lean, 1).normalize();
-    const side = new THREE.Vector3().crossVectors(long, back).normalize(); back.crossVectors(side, long).normalize();
+    const zAt = (y: number): number => { let k = Math.max(0, Math.min(n - 1, Math.round((y - lo) / step))); for (let d = 0; d < n && !Number.isFinite(front[k]); d++) k = Math.max(0, Math.min(n - 1, k + (d % 2 ? d : -d))); return front[k]; };
+    const yTop = R.top, yBot = R.top - R.span;
+    if (!Number.isFinite(zAt(yTop)) || !Number.isFinite(zAt(yBot))) return null;
+    const top = new THREE.Vector3(0, yTop, zAt(yTop)), bot = new THREE.Vector3(0, yBot, zAt(yBot));
+    birthRestAt = top.clone().add(bot).multiplyScalar(0.5);
+    // its length along the line from where its bottom rests to where its head does; its back out from her
+    const long = top.clone().sub(bot).normalize(), back = new THREE.Vector3(0, -long.z, long.y).normalize();
+    // (her belly rounds up between the two: it lies over that, its middle eased up most of the way over it)
+    let bulge = 0;
+    for (let y = yBot; y <= yTop; y += step) bulge = Math.max(bulge, new THREE.Vector3(0, y, zAt(y)).sub(bot).dot(back));
+    const side = new THREE.Vector3().crossVectors(long, back).normalize();
     const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(side, long, back).multiply(new THREE.Matrix4().makeBasis(babyCurl.side, babyCurl.long, babyCurl.back).transpose()));
-    // its middle a half its depth out from her skin
-    const centre = at.clone().addScaledVector(back, 0.5 * babyCurl.size.z * scale + R.gap);
+    const centre = birthRestAt.clone().addScaledVector(back, R.depth * babyCurl.size.z * scale + R.over * bulge + R.gap);
+    // (its head end at the top: its curl's middle on the middle of the line)
     const position = centre.sub(babyCurl.centre.clone().multiplyScalar(scale).applyQuaternion(q));
     birthRest = { position, quaternion: q };
     return birthRest;
   }
   /** BIRTH: begun (from the start) or paused and on again; reset takes it back to before it began. */
   function birthControl(cmd: 'run' | 'reset' | 'pace'): void {
-    if (cmd === 'reset') { birthRest = null; if (birthBellyShare !== 1) { birthBellyShare = 1; applyLook(); } if (birthTimeInput) birthTimeInput.value = '0'; if (babyHolder && !babyShown) { babyHolder.visible = false; for (const m of [...placentaMeshes, ...cordMeshes]) m.visible = true; if (babySac) babySac.visible = babyCount === 1; } birthLen = null; birthClock = null; birthRunning = false; birthNow = null; birthPath = null; vulva?.setBirthDrive(null); vulva?.setHead(null, 0); const f = fields[SARAH_LAB_FIELD.birthLine]; if (f) f.textContent = birthLine(null); return; }
+    if (cmd === 'reset') { birthRest = null; if (birthPushWas !== null) { babyPushOff = birthPushWas; birthPushWas = null; babyDirty = true; } if (birthBellyShare !== 1) { birthBellyShare = 1; applyLook(); } if (birthTimeInput) birthTimeInput.value = '0'; if (babyHolder && !babyShown) { babyHolder.visible = false; for (const m of [...placentaMeshes, ...cordMeshes]) m.visible = true; if (babySac) babySac.visible = babyCount === 1; } birthLen = null; birthClock = null; birthRunning = false; birthNow = null; birthPath = null; vulva?.setBirthDrive(null); vulva?.setHead(null, 0); const f = fields[SARAH_LAB_FIELD.birthLine]; if (f) f.textContent = birthLine(null); return; }
     if (cmd === 'pace') { const was = birthPace; birthPace = was === 'fast' ? 'realistic' : 'fast'; if (birthClock !== null) birthClock *= was === 'fast' ? 5 : 1 / 5; return; }
     // (a birth from RECLINE or SQUAT only -- Joshua, 2026-11-02: LEGS APART is her pre-labour stance)
     if (birthClock === null) { if (!BIRTH_POSES_OK.includes(pose)) { const f = fields[SARAH_LAB_FIELD.birthLine]; if (f) f.textContent = 'BIRTH · from RECLINE or SQUAT'; return; } birthClock = 0; birthRunning = true; return; }
