@@ -83,7 +83,7 @@ import { BIRTH_CLEFT_FIELD, BIRTH_LIPS_FIELD, birthAreaCentre, birthAreaFields, 
 import { BIRTH_POSES, poseBirth, type BirthSpec } from '../actor/humanBirth';
 import { AUTO_LIES, BABIES_NAME, BABY_MODEL, BABY_MODEL_LENGTH, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, poseOnHer, poseDescent, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, wombFromSkin, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { PUBIC_PRESS, pubicPressWant, setPush, jiggleOf as jiggleOfMesh, navelPressPercent, restingSoftBelly, softAt, softBellyWant, stepSoftBelly, type SoftBellyWant } from './softBody';
+import { PUBIC_PRESS, pubicPressWant, setPush, jiggleOf as jiggleOfMesh, navelAfterBirth, navelPressure, restingSoftBelly, softAt, softBellyWant, stepSoftBelly, type SoftBellyWant } from './softBody';
 import { createVulvaPatch, VULVA_OPEN, type VulvaPatch } from './vulvaMesh';
 import { BIRTH_THIGHS_FIELD, birthThighsField } from './birthThighs';
 import { BIRTH_SEAT_FIELD, birthSeatField } from './birthSeat';
@@ -120,11 +120,12 @@ import { DEFAULT_VULVA_KEEP } from './detailMaterials';
 import { attachJiggle, bellyTune, breastTune, createJiggleUniforms, feltAcceleration, GRAVITY, GRAVITY_SHARE, LEG_TUNE, restingMass, stepMass, type LegBones, type Mass } from './softBody';
 import { applyMilk, applyWomb, applyZeroRefine, babyAnchors, babyWeightState, chestAnchors, chestFieldWeights, groinAnchors, groinFieldWeights, loadMilk, milkAnchors, milkBalanceState, milkFieldWeights, milkState, MILK_PATH, babyFieldWeights, loadWomb, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, WOMB_PATH, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
 import { NAVEL_MORPHS, type NavelPiece } from './navelPiece';
+import { createNavelSoft, type NavelSoft } from './navelSoft';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
   SARAH_V2_HAIR_MODEL, BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, birthOpenLine, birthBulgeLine, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, teeLengthParts, sleevesLine, necklineLine, neckShapeLine, CLOTH_NECKLINE_DEFAULT, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, CLOTH_TEE_LENGTH_DEFAULT, clothTuning, clothRestScale, type ClothTune,
-  labTitle, CLOTH_SEATED_LINE, bellyMotionWeights, bellyWeights, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatFor, navelState, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, walkBounceAccel, walkSwayAccel,
+  labTitle, CLOTH_SEATED_LINE, bellyMotionWeights, bellyWeights, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatFor, NAVEL_INNIE_EXTRA, NAVEL_OUTIE_EXTRA, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, walkBounceAccel, walkSwayAccel,
   offeredOutfits, outfitThumbPath,
   type Garment, type SarahLabPose, isBirthPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, SARAH_DEFAULT_OUTFIT, SIM_TEE_OUTFIT, RECOVERED_GARMENTS,
 } from './sarahLabTool';
@@ -388,8 +389,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const pubicPress = { x: 0, v: 0 };
   let pubicOn = true;
   let pubicCentre: THREE.Vector3 | null = null;
-  // the pressure behind her navel (a belly size, softBody.ts `navelPressPercent`), and the in/out number last laid from it
-  let navelPress: number | null = null, navelLaidX = NaN, navelLaidAt = 0;
+  // HER NAVEL IN HER SOFT BELLY (navelSoft.ts): what presses it (0..1, softBody.ts `navelPressure`), the spring that
+  // carries her navel to it, its most before her baby was born and how long since (for NAVEL AFTER BIRTH)
+  let navelSoft: NavelSoft | null = null, navelPress = 0, navelPeak = 0, navelBornFor = 0;
+  const navelSpring = { x: 0, v: 0, primed: false };
   /** Where each mass hangs from, in a bone's frame: what it feels move. The belly in front of her spine, each breast on her chest. */
   type Anchor = { bone: THREE.Bone; local: THREE.Vector3; bind: THREE.Quaternion; p: THREE.Vector3; v: THREE.Vector3; primed: number };
   let anchors: { belly: Anchor; breastL: Anchor; breastR: Anchor } | null = null;
@@ -1098,7 +1101,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     for (const c of BODY_CONTROLS) {
       const line = fields[`${SARAH_LAB_FIELD.body}${c.key}`];
       // seated, the tilt in use is not the one chosen: say both, so a sitting body never reads as the slider's
-      if (line) line.textContent = controlLine(c.key, body[c.key]) + (c.key === 'bellyTilt' && pose === 'sit' ? ` · seated ${effectiveTiltDeg(body.bellyTilt, 1).toFixed(1)}°` : '') + (c.key === 'breastSize' ? ` · bust ${bustVolume(bump, body.breastSize).toFixed(2)}×` : '') + (c.key === 'navel' ? ` · ${navelState(navelPress ?? bump, body.navel)}` : '') + (c.key === 'babyWeight' ? ` · ${babyWeightState(body.babyWeight, babyAt.length > 0, bellyCurve)}` : '') + (c.key === 'milk' ? ` · ${milkState(body.milk, body.milkBalance, milkAt.length > 0, bellyCurve)}` : '') + (c.key === 'milkBalance' ? ` · ${milkBalanceState(body.milkBalance)}` : '') + buildNote(c.key);
+      if (line) line.textContent = controlLine(c.key, body[c.key]) + (c.key === 'bellyTilt' && pose === 'sit' ? ` · seated ${effectiveTiltDeg(body.bellyTilt, 1).toFixed(1)}°` : '') + (c.key === 'breastSize' ? ` · bust ${bustVolume(bump, body.breastSize).toFixed(2)}×` : '') + (c.key === 'navel' ? ` · ${navelLine()}` : '') + (c.key === 'navelAfter' ? ` · ${['goes back in', 'stays out a while', 'stays out at half'][Math.round(body.navelAfter)] ?? ''}` : '') + (c.key === 'babyWeight' ? ` · ${babyWeightState(body.babyWeight, babyAt.length > 0, bellyCurve)}` : '') + (c.key === 'milk' ? ` · ${milkState(body.milk, body.milkBalance, milkAt.length > 0, bellyCurve)}` : '') + (c.key === 'milkBalance' ? ` · ${milkBalanceState(body.milkBalance)}` : '') + buildNote(c.key);
       const input = bodyInputs.get(c.key);
       if (input && Number(input.value) !== body[c.key]) input.value = String(body[c.key]);
     }
@@ -1426,17 +1429,29 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * A mesh's morph target weights for her look at bump `b` (applyLook's): her belly and bust at that size, her navel, the
    * refinement, the seat's correctives and her raised arms.
    */
-  /** Her navel's in/out number at bump `b`: what navelFlat takes on her body (the automatic sync, NAVEL, and fabric). */
-  function navelX(b: number): number {
-    // (pushed out by what is behind it once that is known: her womb's fullness and her baby; else by her size)
-    return Math.max(navelFlatFor(navelPress ?? b, body.navel), fabric?.navelFlatten() ?? 0, clothFlatten());
+  /**
+   * How far out her navel is for pressure `o` (0..1): all of it out at all of it, in at none, in a straight line -- and
+   * her NAVEL control on top (below 0 deeper in, above 0 further out, as it always was), as the in/out number navelFlat
+   * takes (0 her outie, 1 an ordinary navel); her fabric's settling keeps it from standing past what she wears.
+   */
+  function navelXAt(o: number): number {
+    const n = Math.min(100, Math.max(-100, Number.isFinite(body.navel) ? body.navel : 0)) / 100;
+    const outie = n < 0 ? o + n * (o + NAVEL_INNIE_EXTRA) : o + n * (1 + NAVEL_OUTIE_EXTRA - o);
+    return Math.max(1 - outie, fabric?.navelFlatten() ?? 0, clothFlatten());
   }
-  /** Lay her navel (navelPiece.ts) on her body as shaped for bump `b`; after her shape fields and morphs are set. */
+  /** The NAVEL line's: what presses her navel and how far out it is now. */
+  function navelLine(): string {
+    const out = 1 - navelX(0);
+    return `pressure ${Math.round(navelPress * 100)}% · ${out < 0.05 ? (out < -0.02 ? 'deeper innie' : 'innie') : `outie ${Math.round(Math.min(1, out) * 100)}%`}`;
+  }
+  /** Her navel's in/out number as she is now (what her clothes' navels take). */
+  function navelX(_b: number): number { return navelXAt(navelSoft ? navelSpring.x : navelPress); }
+  /** Lay her navel (navelPiece.ts) on her body as shaped for bump `b`: in, and all the way out for the shaders to blend. */
   function layNavel(b: number): void {
     if (!navel) return;
     const lw = lookWeights(navel.mesh, b);
-    navelLaidX = navelX(b);
-    navel.piece.apply(navel.mesh, lw, navelLaidX);
+    if (navelSoft) navelSoft.lay(lw, navelXAt(0), navelXAt(1));
+    else navel.piece.apply(navel.mesh, lw, navelX(b));
   }
 
   function lookWeights(mesh: THREE.SkinnedMesh, b: number): Record<string, number> {
@@ -1460,7 +1475,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     if (!s || !mesh) { measure(); return; }
     const opts = { normalizeNormals: true, post: buildPost(mesh, s.fields, currentBuild()) };
     applyShapeFields(mesh, s.fields, fieldWeightsAt(0), opts);
-    if (navel && navel.mesh === mesh) navel.piece.apply(mesh, { belly: 1 }, navelX(0));
+    if (navel && navel.mesh === mesh) navel.piece.apply(mesh, { belly: 1 }, navelXAt(0));
     try { measure(); } finally {
       applyShapeFields(mesh, s.fields, fieldWeightsAt(bump), opts);
       if (navel && navel.mesh === mesh) layNavel(bump);
@@ -2829,9 +2844,16 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     softWant = softBellyWant(down, softUpright, baby, fullness, body.bellyFirmness, bellyFed);
     // her navel: pushed out by what is behind it, laid again as that moves (a few times a second at most)
     // (for her navel, a baby settled into her pelvis in labour counts as dropped all the way)
-    navelPress = navelPressPercent(fullness, baby && birthNow ? { low: baby.low + 0.7 * birthNow.engage, forward: baby.forward } : baby);
-    navelLaidAt += dt;
-    if (navel && navelLaidAt > 0.25 && Math.abs(navelX(shownBump()) - navelLaidX) > 0.02) { navelLaidAt = 0; layNavel(shownBump()); }
+    // HER NAVEL: pressed by her pregnancy -- its weeks, her babies, her baby's place (for her navel a baby settled into her
+    // pelvis in labour counts as dropped all the way), a contraction -- and once her baby is born, by what her womb left
+    // (NAVEL AFTER BIRTH); a spring carries it there, a little past and back
+    const born = !!birthNow && birthNow.stage === 'after';
+    if (!born) { navelPress = navelPressure(body.pregnancyWeeks, babyRoot ? carriedShare(bump, body.babyWeight, babyCount) : 1, baby && birthNow ? { low: baby.low + 0.7 * birthNow.engage, forward: baby.forward } : baby, birthNow?.contraction ?? 0); navelPeak = birthNow ? Math.max(navelPeak, navelPress) : navelPress; navelBornFor = 0; }
+    else { navelBornFor += dt; navelPress = navelAfterBirth(body.navelAfter, navelPeak, navelBornFor); }
+    if (!navelSpring.primed) { navelSpring.x = navelPress; navelSpring.primed = true; }
+    { const w = 2 * Math.PI * 1.4, steps = Math.max(1, Math.ceil(dt / 0.01)), h = dt / steps;
+      for (let i = 0; i < steps; i++) { navelSpring.v += (w * w * (navelPress - navelSpring.x) - 2 * 0.65 * w * navelSpring.v) * h; navelSpring.x += navelSpring.v * h; } }
+    if (navelSoft) navelSoft.out.value = Math.max(-0.1, Math.min(1.3, navelSpring.x));
     const want = softOn ? softWant : { side: 0, sag: 0, depth: 0 };
     stepSoftBelly(softBelly, dt, want, fullness);
     // her pubic area: pressed as her baby's head comes under her pubic arch, a spring easing to it
@@ -3699,7 +3721,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         if (!zero || disposed || model !== loadedModel || !b || !s) return;
         const z = applyZeroRefine(s.mesh, s.fields, zero);
         if (!z) return;
-        s.fields = z.fields; navel = { mesh: b.mesh, piece: z.navel }; sidesAt = sidesAnchors(z.fields); chestAt = chestAnchors(z.fields); groinAt = groinAnchors(z.fields);
+        s.fields = z.fields; navel = { mesh: b.mesh, piece: z.navel };
+        // (her navel drawn as part of her soft belly: laid in and out, blended by the shaders)
+        try { navelSoft?.dispose(); navelSoft = createNavelSoft(b.mesh, z.navel); for (const m of (Array.isArray(b.mesh.material) ? b.mesh.material : [b.mesh.material])) navelSoft.patch(m); } catch (error) { console.error('[sarahlab] her navel could not be made soft; laid as it was', error); navelSoft = null; } sidesAt = sidesAnchors(z.fields); chestAt = chestAnchors(z.fields); groinAt = groinAnchors(z.fields);
         applyLook();
         // then her baby-weight shapes, in the background: at 0 she is her approved belly, so nothing waits for them
         void loadWomb(assets.assetUrl(WOMB_PATH)).then((womb) => {
@@ -4340,7 +4364,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         },
         canalPathSoft: (on: boolean) => { if (vulva) vulva.pathSoft = on; return true; },
         pubicPress: (on?: boolean) => ({ ...(on !== undefined ? ((pubicOn = on), {}) : {}), mm: +(pubicPress.x * 1000).toFixed(2), at: jiggle.pubicAt.value.toArray().map((x) => +x.toFixed(3)) }),
-        navelPress: () => ({ press: navelPress === null ? null : +navelPress.toFixed(1), x: +navelX(shownBump()).toFixed(3), laid: +navelLaidX.toFixed(3), line: navelState(navelPress ?? bump, body.navel) }),
+        navelPress: () => ({ press: +navelPress.toFixed(3), out: +navelSpring.x.toFixed(3), peak: +navelPeak.toFixed(3), bornFor: +navelBornFor.toFixed(1), soft: !!navelSoft, line: navelLine() }),
         softBelly: (o?: { on?: boolean; held?: { lean: number; side: number } | null; fed?: number }) => { if (o?.on !== undefined) softOn = o.on; if (o && 'held' in o) softHeld = o.held ?? null; if (o?.fed !== undefined) bellyFed = Math.max(0, Math.min(1, o.fed)); const v = jiggle.bellySoft.value; return { on: softOn, held: softHeld, want: softWant, now: { side: +softBelly.side.toFixed(3), sag: +softBelly.sag.toFixed(3), depth: +softBelly.depth.toFixed(3) }, shader: [v.x, v.y, v.z, v.w].map((x) => +x.toFixed(3)), upright: softUpright.toArray().map((x) => +x.toFixed(3)), down: softDown.toArray().map((x) => +x.toFixed(3)) }; },
         hipTurn: (on?: boolean) => { if (on !== undefined && on !== hipTurnOn) { hipTurnOn = on; birthRoomFor = ''; applyLook(); } return { on: hipTurnOn, here: hipTurnHere(), stats: hipTurn?.stats ?? null }; },
         kneeTurn: (on?: boolean) => { if (on !== undefined && on !== kneeTurnOn) { kneeTurnOn = on; birthRoomFor = ''; applyLook(); } return { on: kneeTurnOn, stats: kneeTurn?.stats ?? null }; },

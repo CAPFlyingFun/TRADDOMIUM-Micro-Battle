@@ -525,19 +525,39 @@ if (uPubicAt.w != 0.0) {
 }
 
 /**
- * HER NAVEL PUSHED OUT BY WHAT IS BEHIND IT (Joshua, 2026-11-03: "the bellybutton outie could be based on the baby's
- * location or how full the womb is and how it pushes against the bellybutton"): the pressure behind her navel, as the
- * belly size her navel's automatic outie reads (`navelFlatFor`: an innie to 75%, its outie out by 100%) -- her womb's
- * fullness (her size, her babies and their fluid; less once her baby is born, so her navel goes back in as her womb
- * settles), and her baby pressing it: further forward more, dropped low into her pelvis less. GAME TUNING.
+ * THE PRESSURE BEHIND HER NAVEL (Joshua, 2026-11-03), 0 none .. 1 all of it (a little past for twins and triplets),
+ * which is how far out her navel is (navelSoft.ts): "max belly pressure = max navel %... when there is no pressure like
+ * not pregnant, the navel moves in". It is her PREGNANCY, not her belly's size ("a character with a small belly around
+ * 30% and not be pregnant"): how many WEEKS (low early, a navel commonly starting to change in the second trimester and
+ * out in the third), more for more babies and their fluid, and her baby pressing it -- further forward more, dropped low
+ * into her pelvis in labour less; a contraction pushes it a little more for its while. GAME TUNING.
  */
-export const NAVEL_PRESS = Object.freeze({ forward: 20, dropped: 20 });
-export function navelPressPercent(fullness: number, baby: { low: number; forward: number } | null): number {
-  const F = clamp(Number.isFinite(fullness) ? fullness : 1, 0, 2);
-  let p = 100 * F;
-  // (a baby low in her womb -- most of all dropped into her pelvis in labour -- presses below her navel, not behind it)
-  if (baby) p += NAVEL_PRESS.forward * clamp(baby.forward, 0, 1) * clamp(1 - baby.low, 0, 1) - NAVEL_PRESS.dropped * clamp((baby.low - 0.3) / 0.7, 0, 1);
-  return Math.max(0, p);
+export const NAVEL_PRESS = Object.freeze({ fromWeeks: 14, fullWeeks: 38, multiples: 0.25, most: 1.2, forward: 0.2, dropped: 0.25, squeeze: 0.1 });
+export function navelPressure(weeks: number, carried: number, baby: { low: number; forward: number } | null, contraction = 0): number {
+  const N = NAVEL_PRESS, w = Number.isFinite(weeks) ? weeks : 0;
+  if (!(w > 0)) return 0;
+  const t = clamp((w - N.fromWeeks) / (N.fullWeeks - N.fromWeeks), 0, 1);
+  let p = t * t * (3 - 2 * t) * (1 + N.multiples * clamp((Number.isFinite(carried) ? carried : 1) - 1, 0, 2));
+  if (baby && p > 0) p += p * (N.forward * clamp(baby.forward, 0, 1) * clamp(1 - baby.low, 0, 1) - N.dropped * clamp((baby.low - 0.3) / 0.7, 0, 1));
+  p += N.squeeze * clamp(contraction, 0, 1) * Math.min(1, p);
+  return clamp(p, 0, N.most);
+}
+
+/**
+ * HER NAVEL AFTER THE BIRTH (Joshua, 2026-11-03: research says most go back within months, some stay out -- "a random
+ * variable from 0-3; 0 = goes back in, 1 = stays out for a while before fading back, 2 = stays out permanently at maybe
+ * -50% less depth"): how far out her navel stays (0..1) `seconds` after her baby is born, for its `peak` before, by her
+ * NAVEL AFTER BIRTH `kind`. Held at its shape a while, then faded slowly; never less than the pressure still there
+ * (the caller takes the larger). GAME TUNING (game seconds, not months).
+ */
+export const NAVEL_AFTER = Object.freeze({ backIn: { hold: 6, fade: 10 }, aWhile: { hold: 45, fade: 60 }, stays: 0.5 });
+export function navelAfterBirth(kind: number, peak: number, seconds: number): number {
+  const p = clamp(Number.isFinite(peak) ? peak : 0, 0, NAVEL_PRESS.most), t = Math.max(0, Number.isFinite(seconds) ? seconds : 0), k = Math.round(clamp(kind, 0, 2));
+  const fadeOf = (hold: number, fade: number) => t <= hold ? 1 : Math.exp(-(t - hold) / fade);
+  if (k === 0) return p * fadeOf(NAVEL_AFTER.backIn.hold, NAVEL_AFTER.backIn.fade);
+  if (k === 1) return p * fadeOf(NAVEL_AFTER.aWhile.hold, NAVEL_AFTER.aWhile.fade);
+  // (out for good at half, after the same while)
+  return p * (NAVEL_AFTER.stays + (1 - NAVEL_AFTER.stays) * fadeOf(NAVEL_AFTER.aWhile.hold, NAVEL_AFTER.aWhile.fade));
 }
 
 /**

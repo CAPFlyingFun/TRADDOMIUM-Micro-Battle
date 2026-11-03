@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { BELLY_SOFT, createJiggleUniforms, navelPressPercent, NAVEL_PRESS, PUBIC_PRESS, pubicPressWant, restingSoftBelly, softAt, softBellyGive, softBellyWant, stepSoftBelly, UNITS_PER_METRE } from '../src/sarahlab/softBody';
+import { BELLY_SOFT, createJiggleUniforms, navelPressure, NAVEL_PRESS, navelAfterBirth, NAVEL_AFTER, PUBIC_PRESS, pubicPressWant, restingSoftBelly, softAt, softBellyGive, softBellyWant, stepSoftBelly, UNITS_PER_METRE } from '../src/sarahlab/softBody';
 
 // the way down in her frame (x her left, y up, z out of her front), `lean` degrees forward and `side` to her left
 const down = (lean: number, side = 0) => { const p = (lean * Math.PI) / 180, r = (side * Math.PI) / 180; return { x: Math.sin(r), y: -Math.cos(r) * Math.cos(p), z: Math.cos(r) * Math.sin(p) }; };
@@ -67,12 +67,25 @@ describe('her soft belly (Joshua, 2026-11-03: four rules)', () => {
     softAt(u, 0, { x: 0, y: 1, z: 0.3 }, out);
     expect(out.length()).toBe(0);
   });
-  it('her navel is pushed out by her womb and her baby: fuller more, a baby forward more, dropped low less', () => {
-    expect(navelPressPercent(1, null)).toBeCloseTo(100, 6);
-    expect(navelPressPercent(0.5, null)).toBeCloseTo(50, 6);
-    expect(navelPressPercent(1, { low: 0, forward: 1 })).toBeCloseTo(100 + NAVEL_PRESS.forward, 6);
-    expect(navelPressPercent(1, { low: 1.0, forward: 0 })).toBeCloseTo(100 - NAVEL_PRESS.dropped, 6);
-    expect(navelPressPercent(1, { low: 0.2, forward: 0 })).toBeCloseTo(100, 6);
+  it('her navel: pressure from her pregnancy, not her belly size -- none, in; full term, all the way out; half, half', () => {
+    expect(navelPressure(0, 1, null)).toBe(0);
+    expect(navelPressure(NAVEL_PRESS.fromWeeks, 1, null)).toBe(0);
+    expect(navelPressure(NAVEL_PRESS.fullWeeks, 1, null)).toBeCloseTo(1, 6);
+    expect(navelPressure((NAVEL_PRESS.fromWeeks + NAVEL_PRESS.fullWeeks) / 2, 1, null)).toBeCloseTo(0.5, 6);
+    expect(navelPressure(40, 2, null)).toBeGreaterThan(navelPressure(40, 1, null));
+    expect(navelPressure(40, 3, null)).toBeLessThanOrEqual(NAVEL_PRESS.most);
+    // her baby forward pushes it more; dropped low in labour less; a contraction a little more
+    expect(navelPressure(30, 1, { low: 0, forward: 1 })).toBeGreaterThan(navelPressure(30, 1, null));
+    expect(navelPressure(40, 1, { low: 1, forward: 0 })).toBeLessThan(navelPressure(40, 1, null));
+    expect(navelPressure(30, 1, null, 1)).toBeGreaterThan(navelPressure(30, 1, null, 0));
+  });
+  it('her navel after the birth: back in, out a while, or out for good at half', () => {
+    expect(navelAfterBirth(0, 1, 0)).toBeCloseTo(1, 6);
+    expect(navelAfterBirth(0, 1, 60)).toBeLessThan(0.05);
+    expect(navelAfterBirth(1, 1, NAVEL_AFTER.aWhile.hold)).toBeCloseTo(1, 6);
+    expect(navelAfterBirth(1, 1, 600)).toBeLessThan(0.05);
+    expect(navelAfterBirth(2, 1, 6000)).toBeCloseTo(NAVEL_AFTER.stays, 3);
+    expect(navelAfterBirth(1, 1, 30)).toBeGreaterThan(navelAfterBirth(0, 1, 30));
   });
   it('her pubic area is pressed as the head comes under her pubic arch, a little more in a contraction, gone once out', () => {
     expect(pubicPressWant(0.2, 0)).toBe(0);
