@@ -37,6 +37,9 @@ export const BIRTH_TIMING = Object.freeze({
   crowning: 9,
   /** the head born over `headOut` seconds; then its turn back over `restitution`; then the body over `bodyOut` */
   headOut: 3, restitution: 3, bodyOut: 3,
+  /** after: its first stretch as it is born (`firstStretch` seconds long), lifted onto her over `toHer`, settled on her
+   * by `settle`; her opening easing back over `close` */
+  firstStretch: 3.5, toHer: 4, settle: 10, close: 14,
 });
 /** REALISTIC is the same birth this many times slower. GAME TUNING. */
 export const REALISTIC_STRETCH = 5;
@@ -61,6 +64,12 @@ export interface BirthMoment {
   readonly turnDeg: number;
   /** the whole birth, 0 .. 1 */
   readonly progress: number;
+  /** once it is out: lifted from where it was born onto her (0 .. 1) */
+  readonly onHer: number;
+  /** a newborn's stretch, arms and legs out of its curl (0 .. 1) */
+  readonly stretch: number;
+  /** after the birth, how far her opening has eased back (0 as the body is born .. 1 settled) */
+  readonly closing: number;
 }
 
 const smooth = (a: number, b: number, v: number): number => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -71,7 +80,7 @@ export function birthPlan(): { labour: number; pushing: number; crowning: number
   const T = BIRTH_TIMING;
   const labour = 0, pushing = T.labourCount * T.labourEvery, crowning = pushing + T.pushCount * T.pushEvery;
   const birth = crowning + T.crowning, after = birth + T.headOut + T.restitution + T.bodyOut;
-  return { labour, pushing, crowning, birth, after, total: after };
+  return { labour, pushing, crowning, birth, after, total: after + T.settle };
 }
 
 /** A contraction's strength at `phase` (0..1 of its cycle): a rise and fall over the first `long` of it, then rest. */
@@ -84,7 +93,7 @@ export function squeeze(phase: number, long: number): number {
 export function birthAt(seconds: number, pace: BirthPace = 'fast'): BirthMoment {
   const T = BIRTH_TIMING, P = birthPlan(), stretch = pace === 'realistic' ? REALISTIC_STRETCH : 1;
   const real = Math.max(0, Number.isFinite(seconds) ? seconds : 0), t = real / stretch;
-  let stage: BirthStage, contraction = 0, cervix = 1, engage = 1, down = 0, turnDeg: number = TURN_DEG.inWomb;
+  let stage: BirthStage, contraction = 0, cervix = 1, engage = 1, down = 0, turnDeg: number = TURN_DEG.inWomb, onHer = 0, stretchK = 0, closing = 0;
   if (t < P.pushing) {
     stage = 'labour';
     const i = Math.floor(t / T.labourEvery), ph = (t - i * T.labourEvery) / T.labourEvery;
@@ -115,11 +124,16 @@ export function birthAt(seconds: number, pace: BirthPace = 'fast'): BirthMoment 
   } else {
     stage = 'after';
     down = 2;
+    const u = t - P.after;
+    // lifted onto her; a stretch as it meets the air, and smaller ones as it settles
+    onHer = smooth(0.5, 0.5 + T.toHer, u);
+    stretchK = u < T.firstStretch ? Math.sin((u / T.firstStretch) * Math.PI) : 0.25 * Math.max(0, Math.sin(((u - T.firstStretch) / 3) * Math.PI)) * (1 - smooth(T.settle - 2, T.settle, u));
+    closing = smooth(0, T.close, u);
   }
   // the turn: round to her front as the head comes down her pelvis; back to her left and on to her side once it is born
   if (stage === 'pushing' || stage === 'crowning') turnDeg = TURN_DEG.inWomb + (TURN_DEG.born - TURN_DEG.inWomb) * smooth(0.2, 0.75, down);
   else if (stage === 'birth' || stage === 'after') { const u = t - P.birth; turnDeg = TURN_DEG.born + (TURN_DEG.restituted - TURN_DEG.born) * smooth(T.headOut, T.headOut + T.restitution, u); }
-  return { stage, seconds: real, contraction: clamp01(contraction), cervix: clamp01(cervix), engage: clamp01(engage), down, turnDeg, progress: clamp01(t / P.total) };
+  return { stage, seconds: real, contraction: clamp01(contraction), cervix: clamp01(cervix), engage: clamp01(engage), down, turnDeg, progress: clamp01(t / P.total), onHer, stretch: clamp01(stretchK), closing };
 }
 
 /** The birth's whole length in seconds at `pace`. */

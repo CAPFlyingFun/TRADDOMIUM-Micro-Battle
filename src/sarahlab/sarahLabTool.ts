@@ -199,6 +199,8 @@ export const SARAH_LAB_FIELD = Object.freeze({
   birthBulge: 'sarahlab-birth-bulge',
   /** the BIRTH line: where her baby's birth is (birthSequence.ts) */
   birthLine: 'sarahlab-birth-line',
+  /** the BIRTH timeline: where in it she is, to jump to any moment */
+  birthTime: 'sarahlab-birth-time',
   arms: 'sarahlab-arms',
   /** `${body}<control>`: a body control's line; its slider follows it */
   body: 'sarahlab-body-',
