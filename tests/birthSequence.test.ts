@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BIRTH_TIMING, birthAt, birthLength, birthLine, birthPlan, cervixLine, REALISTIC_STRETCH } from '../src/sarahlab/birthSequence';
+import { BIRTH_TIMING, birthAt, birthLength, birthLine, birthPlan, cervixLine, REALISTIC_STRETCH, TURN_DEG } from '../src/sarahlab/birthSequence';
 
 describe('birth timeline', () => {
   const P = birthPlan();
@@ -26,12 +26,12 @@ describe('birth timeline', () => {
     expect(peak).toBeLessThanOrEqual(BIRTH_TIMING.pushReach + 1e-6);
     expect(birthAt(P.birth - 0.01).down).toBeGreaterThan(0.99);
   });
-  it('turns the head round to her front coming down, all of it before her opening, and not at all once out', () => {
+  it('turns the head round to her side coming down, all of it before her opening, and not at all once out', () => {
     expect(birthAt(P.pushing).turnDeg).toBeCloseTo(45, 3);
     for (let t = P.pushing; t <= P.total; t += 0.05) {
       const m = birthAt(t);
       // (inside her, still short of her opening -- its middle three quarters of the way -- the turn is done)
-      if (m.down >= 0.75) expect(Math.abs(m.turnDeg)).toBeLessThan(1e-6);
+      if (m.down >= 0.75) expect(Math.abs(m.turnDeg - TURN_DEG.born)).toBeLessThan(1e-6);
     }
   });
   it('REALISTIC is the same birth, slower', () => {

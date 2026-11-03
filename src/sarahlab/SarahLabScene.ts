@@ -3447,7 +3447,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     else if (!babyHolder && babyFrame) { const was = babyShown; showBaby(true); if (!was) showBaby(false); }
     if (babyHolder && !babyShown) { babyHolder.visible = true; for (const m of [babySac, babyWall, ...babyOwnSacs, ...placentaMeshes, ...cordMeshes]) if (m) m.visible = false; }
     const r = babyRoots()[0], scale = r?.scale.x ?? 0.33, R = headRadiusOf(scale);
+    // what of her baby is passing through her opening: her rim hugs its outline (the head, then its shoulders and body)
     birthPath = vulva.canalPath();
+    // (and the way it travels there: her canal's own way out at her opening)
+    { const pp = birthPath?.points, k = pp ? pp.length - 1 : -1, axis = pp && k >= 3 ? pp[k].clone().sub(pp[k - 3]) : undefined;
+      // (its middle: the head's own while the head passes)
+      const headW = r && birthHeadModel && birthNow.down < 1.3 ? birthHeadModel.clone().applyMatrix4(r.matrixWorld) : null;
+      vulva.setPassing(birthNow.down > 0.7 && birthNow.down < 1.98 && r ? babyPassing(r) : null, axis, headW, R); }
     // (her canal's length as the birth began: laid again as her opening widens, its rings move a little, and a head placed
     // by the new length jumped)
     if (birthPath) { birthLen ??= birthPath.length; birthPath.length = birthLen; }
@@ -3482,6 +3488,20 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
   /** Her baby laid where its birth has it (true), in her rest frame under the holder; false while no birth holds it. */
   const bpA = new THREE.Vector3(), bpB = new THREE.Vector3(), bpT = new THREE.Vector3(), bpQ = new THREE.Quaternion(), bpM = new THREE.Matrix4(), bpOwn = new THREE.Matrix4();
+  /** her baby's body as points (world), a few hundred over it (its own skinned meshes, every so many vertices) */
+  const passPick = new WeakMap<THREE.SkinnedMesh, Uint32Array>();
+  function babyPassing(root: THREE.Object3D): Float32Array | null {
+    const pts: number[] = [], v = new THREE.Vector3();
+    root.updateMatrixWorld(true);
+    root.traverse((o) => {
+      const m = o as THREE.SkinnedMesh; if (!m.isSkinnedMesh || !m.visible) return;
+      let pick = passPick.get(m);
+      if (!pick) { const n = m.geometry.getAttribute('position').count, step = Math.max(1, Math.floor(n / 4000)), a: number[] = []; for (let i = 0; i < n; i += step) a.push(i); pick = Uint32Array.from(a); passPick.set(m, pick); }
+      m.skeleton.update();
+      for (const i of pick) { m.getVertexPosition(i, v); m.localToWorld(v); pts.push(v.x, v.y, v.z); }
+    });
+    return pts.length ? Float32Array.from(pts) : null;
+  }
   function birthPlace(r: THREE.Object3D): boolean {
     if (!birthNow || !birthPath || !babyHolder || !babyCurl || !birthHeadModel || birthPath.points.length < 2) return false;
     const m = birthNow, scale = r.scale.x, L = birthPath.length, d = Math.max(0, headDownOf(m, L, scale));

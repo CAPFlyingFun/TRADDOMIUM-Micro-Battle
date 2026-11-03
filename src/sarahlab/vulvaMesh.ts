@@ -79,7 +79,11 @@ export const VULVA_OPEN = Object.freeze({
   /** BIOLOGICAL SHAPE (Joshua's estimate, to tune): how far the area bulges out at the full opening (metres; a half sphere,
    * its last `bulgeFoot` share easing onto her skin), and how it
    * grows with the opening (power of the open share: 1 straight, more later) */
-  bulge: 0.05, bulgeEase: 1.3, bulgeFoot: 0.6, bulgeReach: 0.06, bulgeFootM: 0.02,
+  bulge: 0.05, bulgeEase: 1.3, bulgeFoot: 0.6, bulgeReach: 0.06,
+  /** her baby passing (`setPassing`): what of it within `passSlab` of her opening's plane is its outline there; each rim
+   * point takes the farthest of it within `passSpanDeg` of its own way out, `passWall` outside it, evened round
+   * `passEven` times (metres; GAME TUNING) */
+  passSlab: 0.012, passSpanDeg: 14, passWall: 0.003, passEven: 3, passStray: 1.6, passMouth: 0.03, passShift: 0.035, passHeadReach: 1.2, passLeast: 0.015, bulgeFootM: 0.02,
   /** GAME TUNING: passes evening the opening's edge round its outline */
   edgeSmooth: 6,
   /** GAME TUNING: how much the bear trap's corners at its hinges are rounded (0 a sharp lens, 1 an oval) */
@@ -151,6 +155,9 @@ export interface VulvaPatch {
   setBirthDrive(d: { open: number; bulge: number; cervix: number } | null): void;
   /** her baby's head in her canal: its middle `at` metres down from the top of her cervix (null: none), `radius` round */
   setHead(at: number | null, radius: number): void;
+  /** what of her baby is passing through her opening now (world points, xyz), or null: her rim hugs its outline; the way
+   * it travels (world), and while its head passes the head's middle (world) and its radius (METRES) */
+  setPassing(points: Float32Array | null, axis?: THREE.Vector3, centre?: THREE.Vector3 | null, radius?: number): void;
   /** the canal's rings eased back toward rest after the head (once a frame while a birth runs) */
   stepCanal(dt: number): void;
   /** the canal's middle as drawn now (world), from the top of her cervix to the mouth, and each point's distance down it
@@ -1428,7 +1435,12 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     roundDbg = [];
     // (not where her legs hold it narrower than it would be: rounded there, its ends were drawn in so far its skin crowded
     // and tore -- LEGS APART, 2026-11-01 -- so held, it keeps the shape her legs allow)
-    if (open > 0) { const round = VULVA_OPEN.rimRound * smooth(0.3, 1, open), held = heldTo !== null;
+    if (open > 0) { const round = passing ? 1 : VULVA_OPEN.rimRound * smooth(0.3, 1, open), held = heldTo !== null && !passing;
+        // (her baby passing, in her mesh's own frame, as her rim is posed in it)
+        const passLocal = passing ? new Float32Array(passing.length) : null;
+        // (all of it in her mesh's own frame and units: her body is scaled in the world)
+        const passInv = new THREE.Matrix4().copy(body.matrixWorld).invert(), headLocal = passCentre ? passCentre.clone().applyMatrix4(passInv) : null, headR = passRadius * perMetre;
+        if (passing && passLocal) { const q = new THREE.Vector3(); for (let i = 0; i < passing.length; i += 3) { q.set(passing[i], passing[i + 1], passing[i + 2]).applyMatrix4(passInv); passLocal[i] = NaN; if (headLocal && headR > 0 && q.distanceTo(headLocal) > headR * VULVA_OPEN.passHeadReach) continue; passLocal[i] = q.x; passLocal[i + 1] = q.y; passLocal[i + 2] = q.z; } }
         if (round > 0 && patchI && patchW) for (let iter = 0; iter < 6; iter++) {
           // (round as she is POSED: each rim point carried by its own bones, as the GPU will carry it -- a circle laid in
           // her rest shape came out a rounded square once her thighs had turned their side of it -- the circle fitted
@@ -1456,13 +1468,77 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
           for (let j2 = 0; j2 < M; j2++) { d.fromArray(Pp, j2 * 3).sub(C); d.addScaledVector(nP, -d.dot(nP)); rr[j2] = d.length(); mean += rr[j2] / M; }
           // (the target: a circle; held by her legs, its own outline evened round -- an oval with no notches)
           const target = new Float32Array(M).fill(mean);
+          let hugAt: Float32Array | null = null;
+          // HER BABY PASSING THROUGH (Joshua, 2026-11-03: "in real birth, it shapes with the baby as it comes out... to
+          // deform a little from the perfect circle... and allow it to stretch"; "follow the baby's body as it passes after
+          // the head... a hybrid soft body"): what of the baby lies within `passSlab` of her opening's plane is its
+          // outline there -- its head, then its shoulders and body -- and each rim point is laid on that outline in its
+          // own way out from the middle, `passWall` outside it (her skin's thickness), evened round a little as skin is
+          if (passLocal) {
+            // (cut square to the way it travels -- its true cross-section -- not along her rim's own plane, which lies at a
+            // slant to it and cut the head and body together into a long oval)
+            const aN = passAxis ? passAxis.clone().transformDirection(new THREE.Matrix4().copy(body.matrixWorld).invert()) : nP.clone();
+            if (aN.dot(nP) < 0) aN.negate();
+            const u = new THREE.Vector3().fromArray(Pp, 0).sub(C), w3 = new THREE.Vector3();
+            u.addScaledVector(aN, -u.dot(aN)).normalize(); w3.crossVectors(aN, u);
+            const slab = VULVA_OPEN.passSlab * perMetre, th: number[] = [], rd: number[] = [], v = new THREE.Vector3();
+            for (let i = 0; i < passLocal.length; i += 3) {
+              if (!Number.isFinite(passLocal[i])) continue;
+              v.set(passLocal[i] - C.x, passLocal[i + 1] - C.y, passLocal[i + 2] - C.z);
+              const hN = v.dot(aN); if (Math.abs(hN) > slab) continue;
+              v.addScaledVector(aN, -hN); th.push(Math.atan2(v.dot(w3), v.dot(u))); rd.push(v.length());
+            }
+            // (strays -- a hand or a foot beside the head -- left out: points further from the middle of what passes than
+            // `passStray` times their own typical distance from it)
+            if (th.length >= 6) {
+              let cx2 = 0, cy2 = 0; for (let i = 0; i < th.length; i++) { cx2 += rd[i] * Math.cos(th[i]); cy2 += rd[i] * Math.sin(th[i]); } cx2 /= th.length; cy2 /= th.length;
+              const dm = th.map((t2, i) => Math.hypot(rd[i] * Math.cos(t2) - cx2, rd[i] * Math.sin(t2) - cy2)), sorted = [...dm].sort((a, b) => a - b), typ = sorted[Math.floor(sorted.length / 2)] || 1;
+              for (let i = th.length - 1; i >= 0; i--) if (dm[i] > VULVA_OPEN.passStray * typ) { th.splice(i, 1); rd.splice(i, 1); }
+            }
+            passingHugged = th.length;
+            { const hs: number[] = []; for (let i = 0; i < passLocal.length; i += 3) { if (!Number.isFinite(passLocal[i])) continue; v.set(passLocal[i] - C.x, passLocal[i + 1] - C.y, passLocal[i + 2] - C.z); hs.push(v.dot(aN) / perMetre * 100); }
+              hs.sort((a, b) => a - b); const near = hs.filter((x) => Math.abs(x) < 5).length;
+              hugDbg = { ...hugDbg, planeMinCm: +hs[0].toFixed(1), planeMaxCm: +hs[hs.length - 1].toFixed(1), within5cm: near, q10: +hs[Math.floor(hs.length * 0.1)].toFixed(1), q50: +hs[Math.floor(hs.length * 0.5)].toFixed(1), q90: +hs[Math.floor(hs.length * 0.9)].toFixed(1) }; }
+            // HER OPENING ROUND THE BABY (Joshua, 2026-11-03: "the opening should start circle and stay that shape while
+            // adjusting size until the shoulders start to pass the change to an oval... until the end of the birth before
+            // closing back up"): while its head passes, a CIRCLE round the head's own middle as wide as the head is where it
+            // crosses her opening; after it, an OVAL fitted to what of it crosses there (its shoulders, its body) -- each rim
+            // point laid on it in its own way round, `passWall` outside it (her skin's thickness). Her opening is drawn the
+            // few centimetres the baby sits off its own middle (at most `passShift`), as tissue is.
+            let hugCx = 0, hugCy = 0, hugA = 0, hugB = 0, ex = 1, ey = 0, hugOk = false;
+            if (headLocal && headR > 0) {
+              const hc = headLocal.clone().sub(C), h = hc.dot(aN);
+              hugCx = hc.dot(u); hugCy = hc.dot(w3);
+              const sec = Math.sqrt(Math.max(headR * headR - h * h, 0)) + VULVA_OPEN.passWall * perMetre;
+              hugA = hugB = Math.max(sec, VULVA_OPEN.passLeast * perMetre); hugOk = true;
+            } else if (th.length >= 6) {
+              let mx = 0, my = 0; for (let i = 0; i < th.length; i++) { mx += rd[i] * Math.cos(th[i]); my += rd[i] * Math.sin(th[i]); } mx /= th.length; my /= th.length;
+              let sxx = 0, syy = 0, sxy = 0; for (let i = 0; i < th.length; i++) { const x = rd[i] * Math.cos(th[i]) - mx, y = rd[i] * Math.sin(th[i]) - my; sxx += x * x; syy += y * y; sxy += x * y; }
+              const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy); ex = Math.cos(ang); ey = Math.sin(ang);
+              let ma = 0, mb = 0; for (let i = 0; i < th.length; i++) { const x = rd[i] * Math.cos(th[i]) - mx, y = rd[i] * Math.sin(th[i]) - my; ma = Math.max(ma, Math.abs(x * ex + y * ey)); mb = Math.max(mb, Math.abs(-x * ey + y * ex)); }
+              hugCx = mx; hugCy = my; hugA = ma + VULVA_OPEN.passWall * perMetre; hugB = mb + VULVA_OPEN.passWall * perMetre; hugOk = hugA > 0 && hugB > 0;
+            }
+            if (hugOk) {
+              const shift = Math.hypot(hugCx, hugCy), most = VULVA_OPEN.passShift * perMetre; if (shift > most) { hugCx *= most / shift; hugCy *= most / shift; }
+              const Bc = C.clone().addScaledVector(u, hugCx).addScaledVector(w3, hugCy), e = new THREE.Vector3(), E1 = u.clone().multiplyScalar(ex).addScaledVector(w3, ey), E2 = new THREE.Vector3().crossVectors(aN, E1);
+              hugAt = new Float32Array(M * 3);
+              for (let j2 = 0; j2 < M; j2++) {
+                e.fromArray(Pp, j2 * 3); const along = e.clone().sub(Bc).dot(aN);
+                e.sub(Bc).addScaledVector(aN, -along); if (e.lengthSq() < 1e-18) e.copy(E1); e.normalize();
+                const c1 = e.dot(E1), c2 = e.dot(E2), r = (hugA * hugB) / Math.sqrt((hugB * c1) ** 2 + (hugA * c2) ** 2);
+                e.multiplyScalar(r).add(Bc).addScaledVector(aN, along); e.toArray(hugAt, j2 * 3);
+              }
+              hugDbg = { ...hugDbg, meanCm: +(mean / perMetre * 100).toFixed(2), shiftCm: +(Math.hypot(hugCx, hugCy) / perMetre * 100).toFixed(2), aCm: +(hugA / perMetre * 100).toFixed(2), bCm: +(hugB / perMetre * 100).toFixed(2), head: passCentre ? 1 : 0, points: th.length };
+            }
+          }
           if (held) { const tmp = Float32Array.from(rr), nx2 = new Float32Array(M); for (let pass = 0; pass < 40; pass++) { for (let j2 = 0; j2 < M; j2++) nx2[j2] = 0.25 * tmp[(j2 + M - 1) % M] + 0.5 * tmp[j2] + 0.25 * tmp[(j2 + 1) % M]; tmp.set(nx2); } target.set(tmp); }
           roundDbg.push(+(Math.min(...rr) / perMetre * 100).toFixed(2), +(Math.max(...rr) / perMetre * 100).toFixed(2));
           const RR = Math.max(1, Math.round(R * VULVA_OPEN.rimRings)), dv = new THREE.Vector3(), inv3 = new THREE.Matrix3();
           for (let j2 = 0; j2 < M; j2++) {
             if (rr[j2] < 1e-9) continue;
             d.fromArray(Pp, j2 * 3).sub(C); d.addScaledVector(nP, -d.dot(nP));
-            dv.copy(d).multiplyScalar((target[j2] / rr[j2] - 1) * round);
+            if (hugAt) dv.set(hugAt[j2 * 3] - Pp[j2 * 3], hugAt[j2 * 3 + 1] - Pp[j2 * 3 + 1], hugAt[j2 * 3 + 2] - Pp[j2 * 3 + 2]).multiplyScalar(round);
+            else dv.copy(d).multiplyScalar((target[j2] / rr[j2] - 1) * round);
             inv3.setFromMatrix4(T[j2]); if (Math.abs(inv3.determinant()) < 1e-12) continue; inv3.invert(); dv.applyMatrix3(inv3);
             for (let p2 = 0; p2 < P; p2++) { if (bake.column[p2] !== j2) continue; const r = bake.ring[p2]; if (r >= RR) continue; const f = (1 - r / RR) ** 2 * moved[p2]; pos[p2 * 3] += dv.x * f; pos[p2 * 3 + 1] += dv.y * f; pos[p2 * 3 + 2] += dv.z * f; }
           }
@@ -1527,7 +1603,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     // size) and standing a little out of her: it starts tucked under her skin just outside the edge, rolls over the edge
     // and down inside, where the canal goes on. Wherever the skin's own edge wanders, the roll is smooth over it.
     // (none shut: her lips meet over it, and a roll there drew a beaded line down her closed split)
-    const rr = L.rimBead * perMetre * smooth(0.01, 0.25, open);
+    // (flat while her baby passes: skin stretched round a head has no roll at its edge)
+    const rr = passing ? 0 : L.rimBead * perMetre * smooth(0.01, 0.25, open);
     { const auvT = geom.getAttribute('uv') as THREE.BufferAttribute | undefined;
       if (auvT) {
         let jm2 = 0; for (let j = 0; j < M; j++) if (Math.abs(colQ[j]) < Math.abs(colQ[jm2])) jm2 = j;
@@ -1730,6 +1807,9 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     const wall = VULVA_OPEN.canalWall;
     for (const m of CANAL_RINGS) {
       let want = 1;
+      // (while her baby passes, the canal's last `passMouth` metres already follow its outline from her rim: not stretched
+      // again round their own middle, which flared them out past her skin on the side the head sits from her middle)
+      if (passing && ringDown[m] > canalLen - VULVA_OPEN.passMouth) { ringWant[m] = 1; continue; }
       if (headAt !== null && headR > 0 && ringR[m] > 0) {
         // (x: how far the ring is ahead of the head's middle, toward the mouth; behind it the body keeps it full)
         const x = ringDown[m] - headAt, half = x > 0 ? (x < headR ? Math.sqrt(headR * headR - x * x) : 0) : headR;
@@ -1824,6 +1904,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   let posVersion = -1, pushVersion = -1, shown = true, poseSig = NaN;
   /** her womb (setWomb) and the bone that carries it */
   let womb: WombShape | null = null, wombBone = -1, wombFloor: number[] = [], roundDbg: number[] = [];
+  /** her baby passing through her opening (world points), and how many of them her rim last hugged */
+  let passing: Float32Array | null = null, passAxis: THREE.Vector3 | null = null, passCentre: THREE.Vector3 | null = null, passRadius = 0, passingHugged = 0, hugDbg: Record<string, number> = {};
   /** each point of the womb's wall carried as the nearest of her skin is (her belly moves her womb with it, so the wall
    * stays under her skin as she bends -- 2026-11-01, carried by one bone it showed through her belly) */
   const wombNear = new Int32Array(KW * M).fill(-1);
@@ -2009,7 +2091,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       let pfar = 0, pfarI = -1; { const c1 = new THREE.Vector3(), v1 = new THREE.Vector3(); for (let j = 0; j < M; j++) { mesh.getVertexPosition(base[j], v1); c1.addScaledVector(v1, 1 / M); } for (let i = 0; i < SV; i++) { sheet.getVertexPosition(i, v1); const d = v1.distanceTo(c1) / perMetre; if (d > pfar) { pfar = d; pfarI = i; } } }
       const sheetDbg = { pfar: +pfar.toFixed(3), prow: Math.floor(pfarI / NS), pa: pfarI % NS, pbones: Array.from(sheetI.slice(pfarI * 4, pfarI * 4 + 4)), pw: Array.from(sheetW.slice(pfarI * 4, pfarI * 4 + 4)).map((x) => +x.toFixed(2)), from: sheetFrom[pfarI], to: sheetTo[pfarI], f: +sheetF[pfarI].toFixed(2), far: +far.toFixed(3), row: Math.floor(farI / NS), a: farI % NS, bones: Array.from(sheetI.slice(farI * 4, farI * 4 + 4)), w: Array.from(sheetW.slice(farI * 4, farI * 4 + 4)).map((x) => +x.toFixed(2)) };
       const wombDbg = { backCount, trimmed, tubePushed, lipsLifted, sheet: sheetDbg, floor: wombFloor, centre: womb?.centre.toArray().map((x) => +x.toFixed(3)), axis: womb?.axis.toArray().map((x) => +x.toFixed(3)), rimRest: rimRest.toArray().map((x) => +x.toFixed(3)), wombRing0: cx0.toArray().map((x) => +x.toFixed(3)), top: lastW.toArray().map((x) => +x.toFixed(3)), bone: wombBone };
-      return { wombDbg, rimSize, uScale, sScale, pelvisBoneGiven: pelvisBone, pelvis: body.skeleton.bones[pelvis]?.name, pelvisIndex: pelvis, restPos: bad(restPos), restNrm: bad(restNrm), rim: bad(rim), pos: bad(pos), tau: bad(tau), colQ: bad(colQ), body: bad((g.getAttribute('position') as THREE.BufferAttribute).array), O: O.toArray(), tA: tA.toArray(), nO: nO.toArray(), across: across.toArray(), perMetre, open };
+      return { passingHugged, hugDbg, passing: passing ? passing.length / 3 : 0, wombDbg, rimSize, uScale, sScale, pelvisBoneGiven: pelvisBone, pelvis: body.skeleton.bones[pelvis]?.name, pelvisIndex: pelvis, restPos: bad(restPos), restNrm: bad(restNrm), rim: bad(rim), pos: bad(pos), tau: bad(tau), colQ: bad(colQ), body: bad((g.getAttribute('position') as THREE.BufferAttribute).array), O: O.toArray(), tA: tA.toArray(), nO: nO.toArray(), across: across.toArray(), perMetre, open };
     },
     get open() { return wantOpen; },
     setOpen(o: number) { wantOpen = Number.isFinite(o) ? Math.max(0, Math.min(1, o)) : 0; open = openNow(); sync(); },
@@ -2028,6 +2110,11 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       driveOpen = o; driveBulge = b; cervixDrive = c; open = openNow();
       if (relay) openApplied = -1;
       sync();
+    },
+    setPassing(points, axis, centre, radius) {
+      passRadius = Number.isFinite(radius) && (radius ?? 0) > 0 ? radius! : 0;
+      passing = points && points.length >= 9 ? points : null; passAxis = passing && axis ? axis.clone().normalize() : null; passCentre = passing && centre ? centre.clone() : null; openApplied = -1;
+      wantStretch();
     },
     setHead(at, radius) {
       const a = at === null || !Number.isFinite(at) ? null : at, r = Math.max(0, radius || 0);

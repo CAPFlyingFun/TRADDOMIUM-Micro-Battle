@@ -45,8 +45,12 @@ export const BIRTH_TIMING = Object.freeze({
 /** REALISTIC is the same birth this many times slower. GAME TUNING. */
 export const REALISTIC_STRETCH = 5;
 /** How far the back of the baby's head turns, in degrees: from its place in her womb (its back to her front and LEFT,
- * 45 degrees) round to her front as it comes down, all of it inside her; it is born facing that way and turns no more. */
-export const TURN_DEG = Object.freeze({ inWomb: 45, born: 0 });
+ * 45 degrees) round to her side (90) as it comes down, all of it inside her: born facing her thigh, its shoulders one
+ * above the other -- where a real birth's head turns to once it is out (restitution and external rotation, so its
+ * shoulders come one under her pubic bone and one over her perineum), turned here before her opening instead (Joshua,
+ * 2026-11-03: "either have it rotated before it gets to the opening, or not at all"; "to the sides with the shoulders
+ * up/down"). It turns no more once out. */
+export const TURN_DEG = Object.freeze({ inWomb: 45, born: 90 });
 
 export interface BirthMoment {
   readonly stage: BirthStage;
