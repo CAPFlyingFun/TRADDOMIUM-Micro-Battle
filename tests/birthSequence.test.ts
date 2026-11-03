@@ -26,10 +26,13 @@ describe('birth timeline', () => {
     expect(peak).toBeLessThanOrEqual(BIRTH_TIMING.pushReach + 1e-6);
     expect(birthAt(P.birth - 0.01).down).toBeGreaterThan(0.99);
   });
-  it('turns the head round to her front coming down and to her side once born', () => {
+  it('turns the head round to her front coming down, all of it before her opening, and not at all once out', () => {
     expect(birthAt(P.pushing).turnDeg).toBeCloseTo(45, 3);
-    expect(Math.abs(birthAt(P.birth - 0.01).turnDeg)).toBeLessThan(1);
-    expect(birthAt(P.total).turnDeg).toBeCloseTo(90, 3);
+    for (let t = P.pushing; t <= P.total; t += 0.05) {
+      const m = birthAt(t);
+      // (inside her, still short of her opening -- its middle three quarters of the way -- the turn is done)
+      if (m.down >= 0.75) expect(Math.abs(m.turnDeg)).toBeLessThan(1e-6);
+    }
   });
   it('REALISTIC is the same birth, slower', () => {
     expect(birthLength('realistic')).toBeCloseTo(birthLength('fast') * REALISTIC_STRETCH, 6);

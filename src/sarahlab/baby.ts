@@ -1389,6 +1389,38 @@ export function poseOnHer(bones: ReadonlyMap<string, THREE.Bone>, k: number, f: 
     limb(BABY_BONES.leg[s], (sd) => v.copy(sd).multiplyScalar(L.legOut).addScaledVector(f.long, -L.legDown).addScaledVector(f.front, L.onto), (sd) => v.copy(f.long).multiplyScalar(-L.shinBack).addScaledVector(sd, -L.shinIn).addScaledVector(f.front, L.onto));
   }
 }
+/**
+ * Coming down her canal, out of its curl and made long (Joshua, 2026-11-02: "once the baby is in active labor and moving
+ * down, don't keep the baby in the fetal position, the arms are straight down and legs are straight for more of a
+ * streamlined process"): as obstetrics describes it, its curled body is straightened into a cylinder as it descends, its
+ * back losing its curve and its arms and legs pressed close along it. Its head stays tucked (its neck is left as it is:
+ * the chin on the chest is how the head comes through). `k` 0 its curl .. 1 all of it; its legs by `legK`, straightening
+ * as it comes down and there is room for them (straight at once, its feet stood out of the top of her womb).
+ */
+export function poseDescent(bones: ReadonlyMap<string, THREE.Bone>, k: number, f: MoveFrame, legK = k): void {
+  if (!(k > 0)) return;
+  const root = bones.get('Bone_000'); root?.updateMatrixWorld(true);
+  const centre = root ? root.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3();
+  const L = DESCENT, v = new THREE.Vector3(), w = new THREE.Vector3();
+  // its back out of the curl, along its length (not its neck)
+  const back = BABY_BONES.back;
+  for (let i = 0; i + 1 < back.length; i++) { const a = bones.get(back[i]), b = bones.get(back[i + 1]); if (a && b) turnToward(a, b, f.long, L.straighten * k); }
+  if (back.length) { const a = bones.get(back[back.length - 1]), b = bones.get(BABY_BONES.neck); if (a && b) turnToward(a, b, f.long, L.straighten * k); }
+  // each limb down along its side toward its feet, the joint below in line with it
+  const limb = (chain: readonly string[], hug: number, k: number) => {
+    const [a, b, c] = chain.map((n) => bones.get(n));
+    if (!a || !b || !c || !(k > 0)) return;
+    const side = a.getWorldPosition(w).sub(centre).dot(f.left) >= 0 ? f.left.clone() : f.left.clone().negate();
+    v.copy(f.long).negate().addScaledVector(side, hug).normalize();
+    turnToward(a, b, v, k);
+    turnToward(b, c, v, k);
+  };
+  for (const s of ['left', 'right'] as const) { limb(BABY_BONES.arm[s], L.armOut, k); limb(BABY_BONES.leg[s], L.legOut, legK); }
+}
+/** GAME TUNING: its body made long coming down -- how far its back straightens, and how far each limb lies out from its
+ * length to its side (arms along its sides, legs nearly together) */
+export const DESCENT = Object.freeze({ straighten: 0.8, armOut: 0.18, legOut: 0.08 });
+
 /** GAME TUNING: the newborn on her -- how far its back straightens, its head's turn (radians), and each limb's aim (its
  * side, along it toward its head, and down onto her) */
 export const ON_HER = Object.freeze({ straighten: 0.75, headTurn: 1.0, armOut: 0.75, armUp: 0.4, handUp: 0.6, legOut: 0.7, legDown: 0.35, shinBack: 0.55, shinIn: 0.35, onto: 0.5 });

@@ -11,7 +11,7 @@
  *              at her opening) and slips back a little between them, turning as it goes so the back of its head comes
  *              round to her front (`turn`);
  *   CROWNING   the head's widest part at her opening, staying there between contractions now;
- *   BIRTH      the head out, then it turns back to her side (`restitution`); a last push and the shoulders and body follow;
+ *   BIRTH      the head out, a pause (`restitution`: nothing turns -- Joshua, 2026-11-02); a last push and the body follows;
  *   AFTER      her baby out and resting; her womb settling (later checkpoints lay the placenta and the rest).
  *
  * The shape of it is from how midwives describe labour (contractions every few minutes, about a minute long; the head
@@ -35,7 +35,8 @@ export const BIRTH_TIMING = Object.freeze({
   pushCount: 6, pushEvery: 7, pushLong: 0.6, slip: 0.35, pushReach: 0.82,
   /** crowning: so long, the head's middle eased the rest of the way to her opening, held there */
   crowning: 9,
-  /** the head born over `headOut` seconds; then its turn back over `restitution`; then the body over `bodyOut` */
+  /** the head born over `headOut` seconds; a pause of `restitution` (no turn: the game turns it inside her); then the
+   * body over `bodyOut` */
   headOut: 3, restitution: 3, bodyOut: 3,
   /** after: its first stretch as it is born (`firstStretch` seconds long), lifted onto her over `toHer`, settled on her
    * by `settle`; her opening easing back over `close` */
@@ -44,8 +45,8 @@ export const BIRTH_TIMING = Object.freeze({
 /** REALISTIC is the same birth this many times slower. GAME TUNING. */
 export const REALISTIC_STRETCH = 5;
 /** How far the back of the baby's head turns, in degrees: from its place in her womb (its back to her front and LEFT,
- * 45 degrees) round to her front as it comes down; once its head is born back to her left, and on round to her side. */
-export const TURN_DEG = Object.freeze({ inWomb: 45, born: 0, restituted: 90 });
+ * 45 degrees) round to her front as it comes down, all of it inside her; it is born facing that way and turns no more. */
+export const TURN_DEG = Object.freeze({ inWomb: 45, born: 0 });
 
 export interface BirthMoment {
   readonly stage: BirthStage;
@@ -60,7 +61,7 @@ export interface BirthMoment {
   /** her baby's head down her canal: 0 its middle at the top of her cervix, 1 at her opening; past 1 out of her, in
    * lengths of the baby (2 all of it out) */
   readonly down: number;
-  /** the back of its head turned round from her left (degrees: 45 as it lies in her womb, 0 to her front, 90 her side) */
+  /** the back of its head turned round from her left (degrees: 45 as it lies in her womb, 0 to her front) */
   readonly turnDeg: number;
   /** the whole birth, 0 .. 1 */
   readonly progress: number;
@@ -130,9 +131,11 @@ export function birthAt(seconds: number, pace: BirthPace = 'fast'): BirthMoment 
     stretchK = u < T.firstStretch ? Math.sin((u / T.firstStretch) * Math.PI) : 0.25 * Math.max(0, Math.sin(((u - T.firstStretch) / 3) * Math.PI)) * (1 - smooth(T.settle - 2, T.settle, u));
     closing = smooth(0, T.close, u);
   }
-  // the turn: round to her front as the head comes down her pelvis; back to her left and on to her side once it is born
+  // the turn: round to her front as the head comes down her pelvis, all of it done before it reaches her opening; none
+  // once it is out (2026-11-02, Joshua: "the baby is rotating halfway out of her body... either have it rotated before it
+  // gets to the opening, or not at all as it looks weird"): the pause after the head is a pause, nothing turning
   if (stage === 'pushing' || stage === 'crowning') turnDeg = TURN_DEG.inWomb + (TURN_DEG.born - TURN_DEG.inWomb) * smooth(0.2, 0.75, down);
-  else if (stage === 'birth' || stage === 'after') { const u = t - P.birth; turnDeg = TURN_DEG.born + (TURN_DEG.restituted - TURN_DEG.born) * smooth(T.headOut, T.headOut + T.restitution, u); }
+  else if (stage === 'birth' || stage === 'after') turnDeg = TURN_DEG.born;
   return { stage, seconds: real, contraction: clamp01(contraction), cervix: clamp01(cervix), engage: clamp01(engage), down, turnDeg, progress: clamp01(t / P.total), onHer, stretch: clamp01(stretchK), closing };
 }
 

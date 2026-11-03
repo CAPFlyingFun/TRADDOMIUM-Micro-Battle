@@ -81,7 +81,7 @@ import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields,
 import { dropIdleMorphs } from '../view/morphPrune';
 import { BIRTH_CLEFT_FIELD, BIRTH_LIPS_FIELD, birthAreaCentre, birthAreaFields, LIPS_COVERED, patchBirthShade } from './birthArea';
 import { BIRTH_POSES, poseBirth, type BirthSpec } from '../actor/humanBirth';
-import { AUTO_LIES, BABIES_NAME, BABY_MODEL, BABY_MODEL_LENGTH, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, poseOnHer, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, wombFromSkin, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
+import { AUTO_LIES, BABIES_NAME, BABY_MODEL, BABY_MODEL_LENGTH, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, poseOnHer, poseDescent, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, wombFromSkin, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { setPush, jiggleOf as jiggleOfMesh } from './softBody';
 import { createVulvaPatch, VULVA_OPEN, type VulvaPatch } from './vulvaMesh';
@@ -3264,12 +3264,15 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         r.updateMatrixWorld(true);
         // born, it stretches out of its curl (and back)
         const mv = babyMoveOf(i, r), k2 = birthNow?.stretch ?? 0, k3 = birthNow?.onHer ?? 0;
-        if (k2 > 0 || k3 > 0 || mv.posed) {
-          mv.posed = k2 > 0 || k3 > 0; mv.t = -1;
+        // (made long as it settles into her pelvis and comes down, until it is born and stretches, lifted onto her)
+        const e1 = birthNow ? Math.min(1, Math.max(0, (birthNow.engage - 0.3) / 0.6)) : 0, k1 = e1 * e1 * (3 - 2 * e1) * (1 - k3) * (1 - k2);
+        if (k1 > 0 || k2 > 0 || k3 > 0 || mv.posed) {
+          mv.posed = k1 > 0 || k2 > 0 || k3 > 0; mv.t = -1;
           const q = r.getWorldQuaternion(moveRoll);
           moveFrame.long.copy(babyCurl.long).applyQuaternion(q); moveFrame.front.copy(babyCurl.back).negate().applyQuaternion(q); moveFrame.left.copy(babyCurl.side).applyQuaternion(q);
           moveFrame.out.copy(moveFrame.front).negate();
           poseMove(mv.bones, mv.rest, 'stretch', 'left', k2, moveFrame);
+          { const dn = Math.min(1, Math.max(0, ((birthNow?.down ?? 0) - 0.2) / 0.8)); poseDescent(mv.bones, k1, moveFrame, k1 * dn * dn * (3 - 2 * dn)); }
           // and lifted onto her, out of its curl and lying over her
           poseOnHer(mv.bones, k3, moveFrame);
         }
@@ -3745,6 +3748,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function settleBelly(dt: number): void {
     const tilt = torsoTilt();
     if (pose === 'stand') uprightTilt = tilt;
+    // (held as it is while her baby is being born: 2026-11-02, Joshua -- her belly shrank before her baby was born; it
+    // settles on once her baby is out)
+    if (birthNow && birthNow.stage !== 'after') return;
     const want = !bellySettleOn ? 0 : Math.max(-1, Math.min(1, (tilt - uprightTilt) / BELLY_SETTLE.flatDeg)), rate = dt / BELLY_SETTLE.seconds;
     bellySettle += Math.max(-rate, Math.min(rate, want - bellySettle));
     bellySettleAt += dt;
@@ -3978,6 +3984,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         },
         // her body's draw emptied (the rebuilt area and its tube left on their own), or back
         vulvaSolo: (on: boolean) => { const b = bodyOf(); if (!b) return false; b.mesh.visible = !on; if (vulva) { vulva.solo = on; vulva.sync(); } const m = vulva?.mesh; let root: THREE.Object3D | null = m ?? null; while (root?.parent) root = root.parent; return { patch: !!m, visible: m?.visible, parent: m?.parent?.name ?? m?.parent?.type, inScene: root?.type, drawRange: [m?.geometry.drawRange.start, m?.geometry.drawRange.count], count: m?.geometry.getAttribute('position').count, idx: m?.geometry.index?.count, bodyIsPatchGeom: m?.geometry === b.mesh.geometry }; },
+        wombOutside: () => vulva?.wombOutside() ?? null,
         vulvaNoTube: (on: boolean) => { if (vulva) { vulva.noTube = on; vulva.sync(); } return true; },
         vulvaBacking: (on: boolean, trim = true) => { if (vulva) { vulva.backing = on; if (vulva.trim !== trim) { vulva.trim = trim; vulva.relayOut(); } vulva.sync(); } return true; },
         vulvaPatchDrawn: (on: boolean) => { if (vulva) vulva.mesh.geometry.setDrawRange(0, on ? Infinity : 0); return true; },

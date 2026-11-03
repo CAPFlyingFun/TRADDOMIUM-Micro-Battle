@@ -75,7 +75,7 @@ export const VULVA_OPEN = Object.freeze({
    * (a few rings made a step in it where her thighs carry the edge -- RECLINE 100%, 2026-11-02) */
   pelvisReach: 0.3,
   /** GAME TUNING: how much of the way the skin between the two rings is laid on the smooth band between them */
-  bridge: 0.9, wombWall: 0.003, wombMeet: 35, wallSkin: 0xa87060, wallPink: 0xc0646e, pleats: 4, pleatDepth: 0.22, cervix: 0.025, cervixShut: 0.006, womb: 0.13, wombRadius: 0.065,
+  bridge: 0.9, wombWall: 0.003, wombMeet: 35, wallSkin: 0xa87060, wallPink: 0xc0646e, pleats: 4, pleatDepth: 0.22, cervix: 0.025, cervixShut: 0.006, womb: 0.13, wombRadius: 0.065, wombInside: 0.015,
   /** BIOLOGICAL SHAPE (Joshua's estimate, to tune): how far the area bulges out at the full opening (metres; a half sphere,
    * its last `bulgeFoot` share easing onto her skin), and how it
    * grows with the opening (power of the open share: 1 straight, more later) */
@@ -170,6 +170,9 @@ export interface VulvaPatch {
   trim: boolean;
   relayOut(): void;
   debug(): Record<string, unknown>;
+  /** a probe's check: the womb's wall as drawn now against her skin as drawn now -- how many of its points stand out of
+   * her (and how far), and the bones the worst are carried by */
+  wombOutside(): Record<string, unknown>;
   /** where her split is now (world) and the way it faces (a camera's yaw and pitch to look straight at it) */
   facing(): { at: THREE.Vector3; yaw: number; pitch: number };
   /** the way the opening faces and the way its long axis runs, in the world, as she is posed now */
@@ -1628,8 +1631,23 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
         for (let j = 0; j < M; j++) {
           const ph = (2 * Math.PI * j) / M;
           dirW.copy(down).multiplyScalar(ct).addScaledVector(U, st * Math.cos(ph)).addScaledVector(V, st * Math.sin(ph)).normalize();
-          pW.copy(womb.centre).addScaledVector(dirW, rAt(dirW)); wombNear[k * M + j] = nearestSkin(pW);
-          pW.applyMatrix4(toGeomM); put(m, j, pW);
+          let rW = rAt(dirW);
+          pW.copy(womb.centre).addScaledVector(dirW, rW); const near = nearestSkin(pW);
+          // (held inside her skin over it as she is shaped now, by `wombInside` -- not where it meets her cervix: 2026-11-02,
+          // a womb fit round her belly stood out at its low sides, where her belly narrows into her hips, as her labour
+          // went on; and where her skin moves with her as she is posed differently from it, the room keeps it under)
+          if (near >= 0 && Math.acos(Math.max(-1, Math.min(1, dirW.dot(down)))) > meet) {
+            const sAlong = (torsoNow[near * 3] - womb.centre.x) * dirW.x + (torsoNow[near * 3 + 1] - womb.centre.y) * dirW.y + (torsoNow[near * 3 + 2] - womb.centre.z) * dirW.z;
+            const most = sAlong - L.wombInside;
+            if (sAlong > 0 && rW > most) { rW = Math.max(rW * 0.6, most); pW.copy(womb.centre).addScaledVector(dirW, rW); }
+          }
+          wombNear[k * M + j] = near;
+          pW.applyMatrix4(toGeomM);
+          // (and moved as that skin has moved since this womb was laid: her belly changing size -- settling as she lies
+          // back, smaller after the birth -- carries it at once, not when her baby is next fitted. 2026-11-02, Joshua: her
+          // womb showed through her belly as she reclined, laid round her belly as it was before it settled)
+          if (near >= 0) { skinNow(near, wombHere); let was = wombFitSkin.get(near); if (!was) { was = wombHere.clone(); wombFitSkin.set(near, was); } pW.add(wombHere).sub(was); }
+          put(m, j, pW);
         }
       }
       wombFloor = F.toArray().map((x) => +x.toFixed(3));
@@ -1781,14 +1799,39 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   /** each point of the womb's wall carried as the nearest of her skin is (her belly moves her womb with it, so the wall
    * stays under her skin as she bends -- 2026-11-01, carried by one bone it showed through her belly) */
   const wombNear = new Int32Array(KW * M).fill(-1);
-  let torsoGrid: Map<string, number[]> | null = null;
+  /** the skin each point of the womb's wall is carried by, where it was when this womb was laid (geometry units) */
+  const wombFitSkin = new Map<number, THREE.Vector3>(), wombHere = new THREE.Vector3();
+  /** a point of her skin as she is shaped now, before her bones (geometry units: her shaped points and her motion targets) */
+  const skinNow = (i: number, out: THREE.Vector3): THREE.Vector3 => {
+    const bp = g.getAttribute('position') as THREE.BufferAttribute, mInf = body.morphTargetInfluences, mPos = g.morphAttributes.position;
+    out.fromBufferAttribute(bp, i);
+    if (mInf && mPos) for (let m = 0; m < mPos.length; m++) { const w = mInf[m]; if (!w) continue; const ma = mPos[m]; if (g.morphTargetsRelative) { out.x += w * ma.getX(i); out.y += w * ma.getY(i); out.z += w * ma.getZ(i); } else { out.x += w * (ma.getX(i) - bp.getX(i)); out.y += w * (ma.getY(i) - bp.getY(i)); out.z += w * (ma.getZ(i) - bp.getZ(i)); } }
+    return out;
+  };
+  let torsoGrid: Map<string, number[]> | null = null, torsoKey = '';
   const GRID = 0.03;
+  /** GAME TUNING: skin her legs carry this much of or more is not skin her womb is carried by */
+  const WOMB_LEG_MOST = 0.5;
+  const legShare = (i: number): number => { if (!bodyI || !bodyW) return 0; let w = 0; for (let c = 0; c < 4; c++) if (thighBones.includes(bodyI[i * 4 + c])) w += bodyW[i * 4 + c]; return w; };
+  /** her torso's skin as she is shaped now (rest metres): the womb's wall is carried by the skin over it on her as she is,
+   * not on her unshaped body -- 2026-11-02, found on her in SQUAT and RECLINE: searched on her unshaped (flat) body, the
+   * skin nearest the low points of a full womb was the top of her thighs, 89% a thigh's, and her thighs folding swung
+   * them 5 cm out through her belly */
+  const torsoNow = new Float32Array(n * 3);
   const nearestSkin = (p: THREE.Vector3): number => {
-    if (!torsoGrid) {
-      torsoGrid = new Map();
+    const bp = g.getAttribute('position') as THREE.BufferAttribute, inf = body.morphTargetInfluences;
+    readBodySkin();
+    let key = `${bp.version}|${bodySkinVersion}`; if (inf) { let q = 0; for (let m = 0; m < inf.length; m++) q += inf[m] * (m + 1.37); key += `|${q.toFixed(6)}`; }
+    if (!torsoGrid || key !== torsoKey) {
+      torsoKey = key; torsoGrid = new Map();
+      const sv = new THREE.Vector3();
       for (let i = 0; i < n; i++) {
-        const x = rest[i * 3], y = rest[i * 3 + 1], z = rest[i * 3 + 2];
-        if (Math.abs(x) > 0.18 || y < 0.68 || y > 1.4) continue;
+        if (Math.abs(rest[i * 3]) > 0.2 || rest[i * 3 + 1] < 0.6 || rest[i * 3 + 1] > 1.4) continue;
+        // (and never skin her legs mostly carry: her womb is in her, and her thighs fold in her birth positions -- the
+        // lowest points of a full womb, carried by the top of her thigh, were swung out through her belly)
+        if (legShare(i) >= WOMB_LEG_MOST) continue;
+        skinNow(i, sv).applyMatrix4(meshToRest);
+        const x = sv.x, y = sv.y, z = sv.z; torsoNow[i * 3] = x; torsoNow[i * 3 + 1] = y; torsoNow[i * 3 + 2] = z;
         const k = `${Math.floor(x / GRID)},${Math.floor(y / GRID)},${Math.floor(z / GRID)}`;
         (torsoGrid.get(k) ?? torsoGrid.set(k, []).get(k)!).push(i);
       }
@@ -1798,7 +1841,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       let best = -1, bd = Infinity;
       for (let a = -reach; a <= reach; a++) for (let b = -reach; b <= reach; b++) for (let c = -reach; c <= reach; c++) {
         const l = torsoGrid.get(`${cx + a},${cy + b},${cz + c}`); if (!l) continue;
-        for (const i of l) { const d = (rest[i * 3] - p.x) ** 2 + (rest[i * 3 + 1] - p.y) ** 2 + (rest[i * 3 + 2] - p.z) ** 2; if (d < bd) { bd = d; best = i; } }
+        for (const i of l) { const d = (torsoNow[i * 3] - p.x) ** 2 + (torsoNow[i * 3 + 1] - p.y) ** 2 + (torsoNow[i * 3 + 2] - p.z) ** 2; if (d < bd) { bd = d; best = i; } }
       }
       if (best >= 0) return best;
     }
@@ -1889,6 +1932,33 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       if (nn.dot(nw) < 0) nn.negate();
       return { at, yaw: Math.atan2(nn.x, nn.z), pitch: Math.asin(Math.max(-1, Math.min(1, nn.y))) };
     },
+    wombOutside() {
+      if (!womb) return { womb: false };
+      const w0 = (KB + KC + KX) * M, wv = new THREE.Vector3(), sv = new THREE.Vector3(), c = new THREE.Vector3();
+      const walls: THREE.Vector3[] = [];
+      for (let q = w0; q < TV; q++) { tube.getVertexPosition(q, wv); walls.push(wv.clone()); c.add(wv); }
+      c.divideScalar(walls.length);
+      // her torso's skin as drawn, in the same (her mesh's) space
+      const skin: THREE.Vector3[] = [], skinI: number[] = [];
+      for (let i = 0; i < n; i++) { const x = rest[i * 3], y = rest[i * 3 + 1], z = rest[i * 3 + 2]; if (Math.abs(x) > 0.2 || y < 0.7 || y > 1.35 || z < -0.02) continue; body.getVertexPosition(i, sv); skin.push(sv.clone()); skinI.push(i); }
+      // a wall point is out of her when it is further from the womb's middle than her skin is that way (the skin within
+      // a few degrees of the same direction, the nearest of it)
+      const out: { q: number; mm: number; near: number; bones: string; laid?: number[] }[] = [];
+      const d = new THREE.Vector3(), e = new THREE.Vector3();
+      for (let k = 0; k < walls.length; k++) {
+        d.copy(walls[k]).sub(c); const r = d.length(); if (r < 1e-9) continue; d.divideScalar(r);
+        let best = Infinity;
+        for (const s2 of skin) { e.copy(s2).sub(c); const l = e.length(); if (l < 1e-9) continue; if (e.dot(d) / l > 0.995) best = Math.min(best, l); }
+        if (best < Infinity && r > best) {
+          const q = w0 + k, near = wombNear[q - w0];
+          const ti = tubeGeom.getAttribute('skinIndex') as THREE.BufferAttribute, tw = tubeGeom.getAttribute('skinWeight') as THREE.BufferAttribute;
+          const bones = [0, 1, 2, 3].filter((cI) => tw.getComponent(q, cI) > 0.05).map((cI) => `${body.skeleton.bones[ti.getComponent(q, cI)]?.name ?? '?'}:${tw.getComponent(q, cI).toFixed(2)}`).join(' ');
+          out.push({ q, mm: +(((r - best) / perMetre) * 1000).toFixed(1), near, bones, laid: [tubePos[q * 3], tubePos[q * 3 + 1], tubePos[q * 3 + 2]].map((x) => +(x / perMetre).toFixed(3)), posed: walls[k].toArray().map((x) => +(x / perMetre).toFixed(3)), centre: c.toArray().map((x) => +(x / perMetre).toFixed(3)) } as never);
+        }
+      }
+      out.sort((a, b) => b.mm - a.mm);
+      return { walls: walls.length, outside: out.length, worst: out.slice(0, 8), nearRest: out.slice(0, 8).map((o) => o.near >= 0 ? [rest[o.near * 3], rest[o.near * 3 + 1], rest[o.near * 3 + 2]].map((x) => +x.toFixed(3)) : null) };
+    },
     debug() {
       const bad = (a: ArrayLike<number>) => { let k = 0; for (let i = 0; i < a.length; i++) if (!Number.isFinite(a[i])) k++; return k; };
       let jl = -1, jr = -1, jb = 0, jf = 0;
@@ -1955,6 +2025,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
     get dressed() { return dressed; },
     setWomb(w: WombShape | null, bone = -1) {
       if (w === womb && bone === wombBone) return;
+      if (w !== womb) wombFitSkin.clear();
       womb = w; wombBone = bone; openApplied = -1; posVersion = -1; sync();
     },
     seeWomb(through: boolean) {
