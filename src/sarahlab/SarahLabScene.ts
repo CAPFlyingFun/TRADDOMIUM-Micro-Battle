@@ -70,6 +70,8 @@ import * as THREE from 'three';
 import { HUMAN_POSE_TURNS, humanStride, poseHuman } from '../actor/humanPose';
 import { newJointTurn, type BindJoint, type HumanMeasure, type JointTurn, type MutableJointTurn } from '../actor/humanRig';
 import { SEATED_TURNS, poseSeated } from '../actor/humanSeated';
+import { createSoftBaby, restorePose, stepSoftBaby, type SoftBaby } from './softBaby';
+import { createSqueezeUniforms, patchSqueeze, setSqueeze } from './babySqueeze';
 import { measureHuman } from '../actor/humanSkeleton';
 import type { AppScene, FrameInfo, SceneContext, SceneFactory } from '../app/Scene';
 import { assets, assetUrl } from '../assets/assets';
@@ -114,7 +116,13 @@ const BABY_BODY_FADE = [0.3, 0.7] as const;
 /** GAME TUNING: where a hand rests on a knee -- its fingertip on the top of the thigh (`out` above its middle) so far back
  * up it from the knee, the wrist `lift` higher than the fingers (metres) */
 const KNEE_HANDS = Object.freeze({ out: 0.072, up: 0.04, lift: 0.012, poleSteps: 24, poleOut: 1.5 });
-const BIRTH_HEAD = Object.freeze({ radius: 0.0475, atLength: 0.51, lift: [0, 0.008, 0.007] as const, tangentSpan: 0.0125, bodyBehind: 0.1, pastMouth: 0.6 });
+/** Its soft body's chains (softBaby.ts): its back from its waist, then each arm and leg from its shoulder or hip out to its
+ * hand or foot -- never its neck or head */
+const BABY_SOFT_CHAINS: readonly (readonly string[])[] = [['Bone_005', 'Bone_004', 'Bone_003'], ['Bone_022', 'Bone_021', 'Bone_020', 'Bone_019'], ['Bone_027', 'Bone_026', 'Bone_025', 'Bone_024'], ['Bone_010', 'Bone_009', 'Bone_008', 'Bone_007'], ['Bone_015', 'Bone_014', 'Bone_013', 'Bone_012']];
+/** GAME TUNING: her skin under her baby as it lies on her -- every `every`th point within `reach` (metres), chosen again
+ * when it has moved `again`; its joints kept `margin` out from it */
+const ON_HER_SKIN = Object.freeze({ reach: 0.3, every: 3, again: 0.05, margin: 0.008 });
+const BIRTH_HEAD = Object.freeze({ radius: 0.0475, atLength: 0.51, lift: [0, 0.008, 0.007] as const, tangentSpan: 0.0125, bodyBehind: 0.1, pastMouth: 0.6, centreEase: 0.35 });
 import { BIRTH_CONTACT_FIELD, createBirthContact, type BirthContact } from './birthContact';
 import { KNEE_TURN_FIELD, createKneeTurn, type KneeTurn } from './kneeTurn';
 import { HIP_TURN_FIELD, createHipTurn, type HipTurn } from './hipTurn';
@@ -444,6 +452,15 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const LIE_MODES = ['auto', 'head', 'breech', 'side', 'random'] as const;
   /** the other babies (twins, triplets): copies of the first; and each one's own sac when there is more than one */
   let babyCopies: THREE.Object3D[] = [], babyOwnSacs: THREE.Mesh[] = [];
+  /** each baby's soft body (softBaby.ts); on (a probe can hold it off) */
+  const softBabies = new WeakMap<THREE.Object3D, SoftBaby>();
+  let babySoftOn = true;
+  /** how far its body has been moved across to pass through the middle of her opening (birthPlace), eased */
+  const birthCentreOff = new THREE.Vector3();
+  /** where its head came out of her and the way it was going (her rest frame), held while the rest of it follows */
+  let birthOutLine: { at: THREE.Vector3; way: THREE.Vector3 } | null = null;
+  const babySqueeze = createSqueezeUniforms();
+  const babyDown = new THREE.Vector3(0, -1, 0);
   /** how her hands' reach onto her knees went last (reclined) */
   let kneeHold: { L: number; R: number; holding: boolean; [k: string]: number | boolean } | null = null;
   /** each baby's straight body (BABY_STRAIGHT_MODEL), kept out of `userData` so a clone of it does not serialise a mesh */
@@ -3120,6 +3137,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         babyLoading = false;
         if (disposed || root.userData.isPlaceholder === true) { release(root); refresh(); return; }
         const mat = new THREE.MeshStandardMaterial({ color: 0xe9a98f, roughness: 0.55, metalness: 0 });
+        // (giving a little where it crosses her opening: babySqueeze.ts)
+        patchSqueeze(mat, babySqueeze);
         root.traverse((n) => { const m = n as THREE.Mesh; if (m.isMesh) { m.material = mat; m.frustumCulled = false; } });
         // the curl's own frame, in its units (the model's rest is the curl): its points, and its head to say which end
         root.updateMatrixWorld(true);
@@ -3183,7 +3202,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           s2.updateMatrixWorld(true);
           const bones = mesh.skeleton.bones.map((b) => root.getObjectByName(b.name) as THREE.Bone | undefined);
           if (bones.some((b) => !b)) return;
-          const own = new THREE.SkinnedMesh(mesh.geometry, mat.clone()); own.name = 'baby-straight'; own.frustumCulled = false; own.visible = false;
+          const ownMat = mat.clone(); patchSqueeze(ownMat, babySqueeze);
+          const own = new THREE.SkinnedMesh(mesh.geometry, ownMat); own.name = 'baby-straight'; own.frustumCulled = false; own.visible = false;
           root.add(own); own.bind(new THREE.Skeleton(bones as THREE.Bone[], mesh.skeleton.boneInverses.map((m) => m.clone())), mesh.matrixWorld.clone());
           babyStraight.set(root, own);
           babyDirty = true; refresh();
@@ -3473,6 +3493,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    */
   function moveBabies(): void {
     const roots = babyRoots(), K = jiggle.kickAt.value, D = jiggle.kickDir.value;
+    // (each one's pose put back as it was given, before it is posed again: its soft body is laid over it after)
+    for (const r of roots) { const sb = softBabies.get(r); if (sb) restorePose(sb); }
     for (const k of K) k.w = 0;
     if (babyFrame) { jiggle.kickRest.value.copy(babyFrame.meshToRest); jiggle.kickUnits.value.setFromMatrix4(babyFrame.meshToRest).invert(); }
     if (babyHolder) babyHolder.updateMatrixWorld(true);
@@ -3555,6 +3577,71 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         const F = babyFloats[j]; F.vx += moveAxis.x * deep * 4; F.vy += moveAxis.y * deep * 4; F.vz += moveAxis.z * deep * 4;
       });
     });
+    softenBabies(roots);
+  }
+  /**
+   * Each baby's soft body over the pose just given it (softBaby.ts): its back, arms and legs swinging a little behind
+   * its motion, floating in her womb, hanging under their weight once born -- and whenever an automatic move poses it (a
+   * kick or a roll or a stretch, its birth, being lifted onto her), driven by that move outright.
+   */
+  function softenBabies(roots: readonly THREE.Object3D[]): void {
+    softFrame++;
+    // (and where it crosses her opening, it gives a little: babySqueeze.ts)
+    setSqueeze(babySqueeze, babySoftOn && birthNow && vulva ? vulva.passFrame() : null, M);
+    roots.forEach((r, i) => {
+      const m = babyMoveOf(i, r);
+      let sb = softBabies.get(r);
+      if (!sb) { sb = createSoftBaby(m.bones, BABY_SOFT_CHAINS); softBabies.set(r, sb); }
+      if (!babySoftOn) { sb.ready = false; return; }
+      const b = i === 0 ? birthNow : null;
+      // what drives it: a move under way; its birth from its settling into her pelvis until it lies on her; a stretch
+      let drive = m.t >= 0 ? Math.min(1, 4 * moveEnvelope(m.kind, m.t)) : 0;
+      if (b) {
+        const lying = b.onHer >= 1 && b.stretch < 0.02;
+        if (b.engage > 0.3 && !lying) drive = 1;
+      }
+      // in her womb's fluid until its body is out of her
+      const fluid = !b || b.down < 1.6 ? 1 : 0;
+      r.updateMatrixWorld(true);
+      stepSoftBaby(sb, babyStepDt, { drive, fluid, down: babyDown, ...(b && b.onHer > 0.5 ? { push: onHerPush(r) } : {}) });
+    });
+  }
+  /**
+   * LYING ON HER, ITS ARMS AND LEGS ON HER SKIN, NOT IN IT (2026-11-03): her skin under it sampled (every few points of
+   * her within `ON_HER_SKIN.reach` of it, chosen again when it has moved), each frame where it is drawn and which way it
+   * faces; a joint that would go into her is put back `margin` out from the nearest of it, along its face.
+   */
+  const herSkin = { at: new THREE.Vector3(Infinity, 0, 0), idx: new Uint32Array(0), pos: new Float32Array(0), nrm: new Float32Array(0), frame: -1 };
+  let softFrame = 0;
+  function onHerPush(r: THREE.Object3D): ((from: THREE.Vector3, dir: THREE.Vector3, length: number) => boolean) | undefined {
+    const mesh = bodyOf()?.mesh; if (!mesh) return undefined;
+    const C = r.getWorldPosition(new THREE.Vector3()), reach = ON_HER_SKIN.reach * M, g = mesh.geometry, P = g.getAttribute('position'), Nn = g.getAttribute('normal');
+    mesh.updateMatrixWorld(true);
+    if (herSkin.at.distanceTo(C) > ON_HER_SKIN.again * M) {
+      // (her points near it, from her as she is drawn now: every `every`th)
+      const keep: number[] = [], v = new THREE.Vector3();
+      for (let i = 0; i < P.count; i += ON_HER_SKIN.every) { mesh.getVertexPosition(i, v); mesh.localToWorld(v); if (v.distanceTo(C) < reach) keep.push(i); }
+      herSkin.idx = Uint32Array.from(keep); herSkin.pos = new Float32Array(keep.length * 3); herSkin.nrm = new Float32Array(keep.length * 3); herSkin.at.copy(C); herSkin.frame = -1;
+    }
+    if (herSkin.frame !== softFrame) {
+      herSkin.frame = softFrame;
+      const v = new THREE.Vector3(), nm = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
+      herSkin.idx.forEach((q, k) => { mesh.getVertexPosition(q, v); mesh.localToWorld(v); v.toArray(herSkin.pos, k * 3); if (Nn) { v.fromBufferAttribute(Nn, q).applyMatrix3(nm).normalize(); v.toArray(herSkin.nrm, k * 3); } });
+    }
+    const n = herSkin.idx.length, margin = ON_HER_SKIN.margin * M, tip = new THREE.Vector3(), nv = new THREE.Vector3();
+    if (n === 0) return undefined;
+    return (from, dir, length) => {
+      tip.copy(from).addScaledVector(dir, length);
+      let best = -1, bd = Infinity;
+      for (let k = 0; k < n; k++) { const dx = herSkin.pos[k * 3] - tip.x, dy = herSkin.pos[k * 3 + 1] - tip.y, dz = herSkin.pos[k * 3 + 2] - tip.z, d2 = dx * dx + dy * dy + dz * dz; if (d2 < bd) { bd = d2; best = k; } }
+      if (best < 0) return false;
+      nv.fromArray(herSkin.nrm, best * 3);
+      const over = (tip.x - herSkin.pos[best * 3]) * nv.x + (tip.y - herSkin.pos[best * 3 + 1]) * nv.y + (tip.z - herSkin.pos[best * 3 + 2]) * nv.z;
+      if (over >= margin) return false;
+      tip.addScaledVector(nv, margin - over);
+      dir.copy(tip).sub(from).normalize();
+      return true;
+    };
   }
   /** Which of its two bodies is drawn: curled (its rest, in her womb) or straight (being born; see BABY_STRAIGHT_MODEL),
    * and between, the straight one faded in over the curled one (2026-11-03, Joshua: no jump as one becomes the other
@@ -3661,8 +3748,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // (the way along, over a span either side: its rings at the mouth are too close together to say it alone; past her
     // opening, the way the last 2.5 cm of her canal points)
     const end = down[n - 1], span = BIRTH_HEAD.tangentSpan;
-    if (d <= end) at(d, bpA);
-    else { at(end - 2 * span, bpB); at(end, bpA); bpT.copy(bpA).sub(bpB).normalize(); bpA.addScaledVector(bpT, d - end); }
+    // (out of her, along the way her canal pointed as its head came out, held from then: her opening is drawn round it
+    // as it passes and her canal's mouth with it, and a way read from that each frame swung it, and that her opening)
+    if (d <= end) { at(d, bpA); birthOutLine = null; }
+    else {
+      if (!birthOutLine) { at(end - 2 * span, bpB); at(end, bpA); birthOutLine = { at: bpA.clone(), way: bpA.clone().sub(bpB).normalize() }; }
+      bpA.copy(birthOutLine.at).addScaledVector(birthOutLine.way, d - end);
+    }
     // its length along the line from its body, up her canal behind its head, to its head: its body follows the curve
     // rather than going straight back through her (2026-11-02: its toes came out under her opening as it crowned)
     at(d - BIRTH_HEAD.bodyBehind, bpB); bpT.copy(bpA).sub(bpB).normalize();
@@ -3681,17 +3773,23 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // head rides her canal's line, and its trunk lies beside that line, its neck bent -- so its shoulders and hips came
     // out of her two to six centimetres to one side of her opening, through the skin beside it. Once its head is out,
     // it is moved across (not turned: its pose is the same) until where its trunk crosses her opening is its middle.
+    if (!(m.down > 1 && m.onHer < 1)) birthCentreOff.set(0, 0, 0);
     if (m.down > 1 && m.onHer < 1) {
       const hl = r.getObjectByName(BABY_BONES.leg.left[0]), hr = r.getObjectByName(BABY_BONES.leg.right[0]), nk = r.getObjectByName(BABY_BONES.neck);
       if (hl && hr && nk) {
         r.updateMatrixWorld(true);
         const inHolder = (b: THREE.Object3D) => r.worldToLocal(b.getWorldPosition(new THREE.Vector3())).multiplyScalar(scale).applyQuaternion(bpQ).add(pos);
         const hip = inHolder(hl).add(inHolder(hr)).multiplyScalar(0.5), neck = inHolder(nk);
-        const E = at(end, new THREE.Vector3()), tE = at(end, new THREE.Vector3()).sub(at(end - 2 * span, new THREE.Vector3())).normalize(), dir = neck.clone().sub(hip);
+        const E = birthOutLine ? birthOutLine.at.clone() : at(end, new THREE.Vector3()), tE = birthOutLine ? birthOutLine.way.clone() : at(end, new THREE.Vector3()).sub(at(end - 2 * span, new THREE.Vector3())).normalize(), dir = neck.clone().sub(hip);
         const den = dir.dot(tE);
         if (Math.abs(den) > 1e-9) {
           const t = Math.min(1.2, Math.max(0, E.clone().sub(hip).dot(tE) / den)), X = hip.addScaledVector(dir, t), off = X.sub(E); off.addScaledVector(tE, -off.dot(tE));
-          const w = Math.min(1, Math.max(0, (m.down - 1) / 0.2)); pos.addScaledVector(off, -w * w * (3 - 2 * w));
+          const w = Math.min(1, Math.max(0, (m.down - 1) / 0.2));
+          // (eased toward, not taken at once: her opening is drawn toward its middle as it is drawn toward hers, and
+          // each taking the other's place at once, they chased each other, a few centimetres a frame)
+          const k = 1 - Math.exp(-Math.max(0, babyStepDt) / BIRTH_HEAD.centreEase);
+          birthCentreOff.addScaledVector(off.multiplyScalar(w * w * (3 - 2 * w)).sub(birthCentreOff), k);
+          pos.sub(birthCentreOff);
         }
       }
     }
@@ -3750,7 +3848,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
   /** BIRTH: begun (from the start) or paused and on again; reset takes it back to before it began. */
   function birthControl(cmd: 'run' | 'reset' | 'pace'): void {
-    if (cmd === 'reset') { birthRest = null; if (birthPushWas !== null) { babyPushOff = birthPushWas; birthPushWas = null; babyDirty = true; } if (birthBellyShare !== 1) { birthBellyShare = 1; applyLook(); } if (birthTimeInput) birthTimeInput.value = '0'; if (babyHolder && !babyShown) { babyHolder.visible = false; for (const m of [...placentaMeshes, ...cordMeshes]) m.visible = true; if (babySac) babySac.visible = babyCount === 1; } birthLen = null; birthClock = null; birthRunning = false; birthNow = null; birthPath = null; vulva?.setBirthDrive(null); vulva?.setHead(null, 0); const f = fields[SARAH_LAB_FIELD.birthLine]; if (f) f.textContent = birthLine(null); return; }
+    if (cmd === 'reset') { birthRest = null; birthOutLine = null; if (birthPushWas !== null) { babyPushOff = birthPushWas; birthPushWas = null; babyDirty = true; } if (birthBellyShare !== 1) { birthBellyShare = 1; applyLook(); } if (birthTimeInput) birthTimeInput.value = '0'; if (babyHolder && !babyShown) { babyHolder.visible = false; for (const m of [...placentaMeshes, ...cordMeshes]) m.visible = true; if (babySac) babySac.visible = babyCount === 1; } birthLen = null; birthClock = null; birthRunning = false; birthNow = null; birthPath = null; vulva?.setBirthDrive(null); vulva?.setHead(null, 0); const f = fields[SARAH_LAB_FIELD.birthLine]; if (f) f.textContent = birthLine(null); return; }
     if (cmd === 'pace') { const was = birthPace; birthPace = was === 'fast' ? 'realistic' : 'fast'; if (birthClock !== null) birthClock *= was === 'fast' ? 5 : 1 / 5; return; }
     // (a birth from RECLINE or SQUAT only -- Joshua, 2026-11-02: LEGS APART is her pre-labour stance)
     if (birthClock === null) { if (!BIRTH_POSES_OK.includes(pose)) { const f = fields[SARAH_LAB_FIELD.birthLine]; if (f) f.textContent = 'BIRTH · from RECLINE or SQUAT'; return; } birthClock = 0; birthRunning = true; return; }
@@ -4585,6 +4683,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         kneeHands: () => kneeHold,
         // (a probe's camera on her hand: aimed at where her left (or right) fingertip goes, from yaw/pitch/distance)
         aimHand: (side: 'L' | 'R', yaw: number, pitch: number, distance: number) => { const t = kneeTips[side]; if (!t) return false; orbit.yaw = yaw; orbit.pitch = pitch; orbit.distance = distance; orbit.target.copy(t); turning = false; return true; },
+        // its soft body: on or off, and how far each part lags its pose now (degrees, the most), its drive
+        babySoft: (on?: boolean) => { if (on !== undefined) { babySoftOn = on; if (!on) setSqueeze(babySqueeze, null, M); } const r = babyRoots()[0], sb = r && softBabies.get(r); if (!sb) return { on: babySoftOn };
+          return { on: babySoftOn, drive: +sb.drive.toFixed(3), ready: sb.ready, swing: +Math.max(...sb.vel.map((v) => v.length())).toFixed(3) }; },
         herHidden: (on: boolean) => {
           const inBaby = (o: THREE.Object3D) => { for (let q: THREE.Object3D | null = o; q; q = q.parent) if (q === babyHolder) return true; return false; };
           model?.traverse((o) => { if ((o as THREE.Mesh).isMesh && !inBaby(o)) { const u = o.userData as { wasVisible?: boolean }; if (on) { u.wasVisible ??= o.visible; o.visible = false; } else if (u.wasVisible !== undefined) { o.visible = u.wasVisible; delete u.wasVisible; } } });

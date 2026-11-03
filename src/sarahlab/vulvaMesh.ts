@@ -165,6 +165,10 @@ export interface VulvaPatch {
   canalPath(): { points: THREE.Vector3[]; down: number[]; length: number } | null;
   /** the middle of her opening's rim as laid on her rest shape (her rest frame, metres) */
   openingRest(): THREE.Vector3;
+  /** while her baby passes, the most her opening opens, in the world: the oval's middle, the way through it, the way up
+   * her slit and across it, its half-length and half-width inside her skin (world units); and the passing head's
+   * middle and radius (world), when its head is what passes -- for her baby to give a little where it crosses */
+  passFrame(): { centre: THREE.Vector3; axis: THREE.Vector3; up: THREE.Vector3; across: THREE.Vector3; ra: number; rb: number; head: THREE.Vector3 | null; headR: number } | null;
   /** (a probe's: the canal path read with her belly's soft move, as drawn -- on -- or without it) */
   pathSoft: boolean;
   /** how far open she is drawn now (the larger of the slider's and her pose's) */
@@ -1604,6 +1608,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
               if (slitUp.lengthSq() > 0.5) {
                 const A1 = slitUp, A2 = new THREE.Vector3().crossVectors(aN, A1), ra = (VULVA_OPEN.passMostAlong / 2) * perMetre, rb = (VULVA_OPEN.passMostAcross / 2) * perMetre;
                 const Co = C.clone().addScaledVector(A1, rb - ra);
+                passOval = { c: Co.clone(), n: aN.clone(), up: A1.clone(), across: A2.clone(), ra: ra - VULVA_OPEN.passWall * perMetre, rb: rb - VULVA_OPEN.passWall * perMetre };
                 for (let j2 = 0; j2 < M; j2++) {
                   e.fromArray(hugAt, j2 * 3).sub(Co); const h2 = e.dot(aN); e.addScaledVector(aN, -h2);
                   const x2 = e.dot(A1), y2 = e.dot(A2), k2 = Math.hypot(x2 / ra, y2 / rb);
@@ -2000,6 +2005,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   let womb: WombShape | null = null, wombBone = -1, wombFloor: number[] = [], roundDbg: number[] = [];
   /** her baby passing through her opening (world points), and how many of them her rim last hugged */
   let passing: Float32Array | null = null, passAxis: THREE.Vector3 | null = null, passCentre: THREE.Vector3 | null = null, passRadius = 0, passingHugged = 0, hugDbg: Record<string, number> = {};
+  /** the oval her opening is held to while her baby passes (her mesh's own frame and units), as last laid */
+  let passOval: { c: THREE.Vector3; n: THREE.Vector3; up: THREE.Vector3; across: THREE.Vector3; ra: number; rb: number } | null = null;
   /** each point of the womb's wall carried as the nearest of her skin is (her belly moves her womb with it, so the wall
    * stays under her skin as she bends -- 2026-11-01, carried by one bone it showed through her belly) */
   const wombNear = new Int32Array(KW * M).fill(-1);
@@ -2163,6 +2170,13 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
       }
       out.sort((a, b) => b.mm - a.mm);
       return { walls: walls.length, outside: out.length, worst: out.slice(0, 8), nearRest: out.slice(0, 8).map((o) => o.near >= 0 ? [rest[o.near * 3], rest[o.near * 3 + 1], rest[o.near * 3 + 2]].map((x) => +x.toFixed(3)) : null) };
+    },
+    passFrame() {
+      if (!passing || !passOval) return null;
+      body.updateMatrixWorld(true);
+      const W = body.matrixWorld, scale = new THREE.Vector3().setFromMatrixScale(W).x;
+      return { centre: passOval.c.clone().applyMatrix4(W), axis: passOval.n.clone().transformDirection(W), up: passOval.up.clone().transformDirection(W), across: passOval.across.clone().transformDirection(W),
+        ra: passOval.ra * scale, rb: passOval.rb * scale, head: passCentre ? passCentre.clone() : null, headR: passRadius * perMetre * scale };
     },
     debug() {
       const bad = (a: ArrayLike<number>) => { let k = 0; for (let i = 0; i < a.length; i++) if (!Number.isFinite(a[i])) k++; return k; };
