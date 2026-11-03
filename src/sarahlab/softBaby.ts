@@ -23,6 +23,8 @@ export interface SoftBaby {
   /** the bones it moves, parents first, and the next bone down from each (what its direction points at) */
   readonly bones: readonly THREE.Bone[];
   readonly next: readonly THREE.Bone[];
+  /** how much of its weight bends each (1 a limb; 0 its back, held up by what it lies on) */
+  readonly weight: readonly number[];
   /** the pose each was given this frame (local), put back before the next pose is laid */
   readonly posed: THREE.Quaternion[];
   /** each bone's soft direction and its swing (world, a unit vector and its rate) */
@@ -37,16 +39,18 @@ export interface SoftBaby {
 /**
  * The soft body for a baby whose bones are `bones` (by name): `chains` each a run of bones from the body outward, every
  * one but the last moved (the last is where the one before points). Chains in the order to move them: its back first.
+ * `unweighted` bones are not bent by its weight (its back: what it lies on holds that up -- 2026-11-03, a back let sag
+ * gave it a hollow belly on her).
  */
-export function createSoftBaby(bones: ReadonlyMap<string, THREE.Bone>, chains: readonly (readonly string[])[]): SoftBaby {
-  const moved: THREE.Bone[] = [], next: THREE.Bone[] = [];
+export function createSoftBaby(bones: ReadonlyMap<string, THREE.Bone>, chains: readonly (readonly string[])[], unweighted: readonly string[] = []): SoftBaby {
+  const moved: THREE.Bone[] = [], next: THREE.Bone[] = [], weight: number[] = [];
   for (const chain of chains) {
     for (let i = 0; i + 1 < chain.length; i++) {
       const a = bones.get(chain[i]), b = bones.get(chain[i + 1]);
-      if (a && b && !moved.includes(a)) { moved.push(a); next.push(b); }
+      if (a && b && !moved.includes(a)) { moved.push(a); next.push(b); weight.push(unweighted.includes(chain[i]) ? 0 : 1); }
     }
   }
-  return { bones: moved, next, posed: moved.map((b) => b.quaternion.clone()), dir: moved.map(() => new THREE.Vector3()), vel: moved.map(() => new THREE.Vector3()), ready: false, drive: 1 };
+  return { bones: moved, next, weight, posed: moved.map((b) => b.quaternion.clone()), dir: moved.map(() => new THREE.Vector3()), vel: moved.map(() => new THREE.Vector3()), ready: false, drive: 1 };
 }
 
 /** The pose put back as it was given (before this frame's posing: a pose left alone holds what it was given). */
@@ -100,7 +104,7 @@ export function stepSoftBaby(s: SoftBaby, dt: number, step: SoftStep): void {
     // its weight, out of the fluid: bent toward the floor by as much as it lies across it
     if (sag > 0) {
       tAx.crossVectors(tT, step.down); const across = tAx.length();
-      if (across > 1e-6) tT.applyAxisAngle(tAx.divideScalar(across), sag * across);
+      if (across > 1e-6) tT.applyAxisAngle(tAx.divideScalar(across), sag * across * s.weight[i]);
     }
     if (!s.ready) { s.dir[i].copy(posedDir); s.vel[i].set(0, 0, 0); }
     const d = s.dir[i], v = s.vel[i];

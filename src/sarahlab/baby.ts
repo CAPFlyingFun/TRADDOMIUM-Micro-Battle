@@ -1456,9 +1456,10 @@ export function poseDescent(bones: ReadonlyMap<string, THREE.Bone>, k: number, f
  * across its chest, forward), as its straight body is baked (`.scratch/baby/straight-pose.json`) */
 export const DESCENT = Object.freeze({ straighten: 0.8, legOut: 0.08, upperDown: 0.85, upperOut: -0.15, upperFront: 0.45, foreUp: 0.3, foreIn: 0.85, foreFront: 0.4 });
 
-/** GAME TUNING: the newborn on her -- how far its back straightens, its head's turn (radians), and each limb's aim (its
+/** GAME TUNING: the newborn on her -- how far its back straightens (all the way: its straight body, part-curled, had a
+ * hollow belly -- 2026-11-03), its head's turn (radians), and each limb's aim (its
  * side, along it toward its head, and down onto her) */
-export const ON_HER = Object.freeze({ straighten: 0.75, headTurn: 1.0, armOut: 0.75, armUp: 0.4, handUp: 0.6, legOut: 0.7, legDown: 0.35, shinBack: 0.55, shinIn: 0.35, onto: 0.5 });
+export const ON_HER = Object.freeze({ straighten: 1, headTurn: 1.0, armOut: 0.75, armUp: 0.4, handUp: 0.6, legOut: 0.7, legDown: 0.35, shinBack: 0.55, shinIn: 0.35, onto: 0.5 });
 
 /** How far toward its feet (of its length) a leg's aim always is, kicking or stretching. GAME TUNING. */
 export const KICK_AWAY = 0.45;
