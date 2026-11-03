@@ -3748,9 +3748,6 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function settleBelly(dt: number): void {
     const tilt = torsoTilt();
     if (pose === 'stand') uprightTilt = tilt;
-    // (held as it is while her baby is being born: 2026-11-02, Joshua -- her belly shrank before her baby was born; it
-    // settles on once her baby is out)
-    if (birthNow && birthNow.stage !== 'after') return;
     const want = !bellySettleOn ? 0 : Math.max(-1, Math.min(1, (tilt - uprightTilt) / BELLY_SETTLE.flatDeg)), rate = dt / BELLY_SETTLE.seconds;
     bellySettle += Math.max(-rate, Math.min(rate, want - bellySettle));
     bellySettleAt += dt;
