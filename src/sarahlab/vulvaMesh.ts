@@ -83,7 +83,7 @@ export const VULVA_OPEN = Object.freeze({
   /** her baby passing (`setPassing`): what of it within `passSlab` of her opening's plane is its outline there; each rim
    * point takes the farthest of it within `passSpanDeg` of its own way out, `passWall` outside it, evened round
    * `passEven` times (metres; GAME TUNING) */
-  passSlab: 0.012, passSpanDeg: 14, passWall: 0.003, passEven: 3, passStray: 1.6, passMouth: 0.03, passShift: 0.035, passShiftBody: 0.012, passFitQ: 0.9, canalMostR: 0.05, passHeadReach: 1.2, passLeast: 0.015, bulgeFootM: 0.02,
+  passSlab: 0.012, passSpanDeg: 14, passWall: 0.003, passEven: 3, passStray: 1.6, passMouth: 0.03, passShift: 0.035, passShiftBody: 0.03, passFitQ: 0.98, passReach: 0.1, passOval: 0.85, passBinDeg: 5, canalMostR: 0.05, passHeadReach: 1.7, passLeast: 0.015, bulgeFootM: 0.02,
   /** GAME TUNING: passes evening the opening's edge round its outline */
   edgeSmooth: 6,
   /** GAME TUNING: how much the bear trap's corners at its hinges are rounded (0 a sharp lens, 1 an oval) */
@@ -1486,7 +1486,10 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
               if (!Number.isFinite(passLocal[i])) continue;
               v.set(passLocal[i] - C.x, passLocal[i + 1] - C.y, passLocal[i + 2] - C.z);
               const hN = v.dot(aN); if (Math.abs(hN) > slab) continue;
-              v.addScaledVector(aN, -hN); th.push(Math.atan2(v.dot(w3), v.dot(u))); rd.push(v.length());
+              v.addScaledVector(aN, -hN);
+              // (nothing further from her opening's middle than `passReach` is passing through it: a foot swung wide)
+              if (!headLocal && v.length() > VULVA_OPEN.passReach * perMetre) continue;
+              th.push(Math.atan2(v.dot(w3), v.dot(u))); rd.push(v.length());
             }
             // (strays -- a hand or a foot beside the head -- left out: points further from the middle of what passes than
             // `passStray` times their own typical distance from it)
@@ -1497,7 +1500,7 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
             }
             passingHugged = th.length;
             { const hs: number[] = []; for (let i = 0; i < passLocal.length; i += 3) { if (!Number.isFinite(passLocal[i])) continue; v.set(passLocal[i] - C.x, passLocal[i + 1] - C.y, passLocal[i + 2] - C.z); hs.push(v.dot(aN) / perMetre * 100); }
-              hs.sort((a, b) => a - b); const near = hs.filter((x) => Math.abs(x) < 5).length;
+              hs.sort((a, b) => a - b); const near = hs.filter((x) => Math.abs(x) < 5).length; if (hs.length)
               hugDbg = { ...hugDbg, planeMinCm: +hs[0].toFixed(1), planeMaxCm: +hs[hs.length - 1].toFixed(1), within5cm: near, q10: +hs[Math.floor(hs.length * 0.1)].toFixed(1), q50: +hs[Math.floor(hs.length * 0.5)].toFixed(1), q90: +hs[Math.floor(hs.length * 0.9)].toFixed(1) }; }
             // HER OPENING ROUND THE BABY (Joshua, 2026-11-03: "the opening should start circle and stay that shape while
             // adjusting size until the shoulders start to pass the change to an oval... until the end of the birth before
@@ -1505,34 +1508,63 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
             // crosses her opening; after it, an OVAL fitted to what of it crosses there (its shoulders, its body) -- each rim
             // point laid on it in its own way round, `passWall` outside it (her skin's thickness). Her opening is drawn the
             // few centimetres the baby sits off its own middle (at most `passShift`), as tissue is.
-            let hugCx = 0, hugCy = 0, hugA = 0, hugB = 0, ex = 1, ey = 0, hugOk = false;
+            let hugCx = 0, hugCy = 0, hugA = 0, hugB = 0, ex = 1, ey = 0, hugOk = false, bodyOval = false;
             if (headLocal && headR > 0) {
               const hc = headLocal.clone().sub(C), h = hc.dot(aN);
               hugCx = hc.dot(u); hugCy = hc.dot(w3);
+              // (as wide as the head's own skin is where it crosses her opening, measured -- not the sphere the birth is
+              // timed by: the model's head is wider than a newborn's, and a circle that size let it through her skin)
+              // (and where it stands out past that, its outline there: below)
               const sec = Math.sqrt(Math.max(headR * headR - h * h, 0)) + VULVA_OPEN.passWall * perMetre;
               hugA = hugB = Math.max(sec, VULVA_OPEN.passLeast * perMetre); hugOk = true;
             } else if (th.length >= 6) {
               let mx = 0, my = 0; for (let i = 0; i < th.length; i++) { mx += rd[i] * Math.cos(th[i]); my += rd[i] * Math.sin(th[i]); } mx /= th.length; my /= th.length;
               let sxx = 0, syy = 0, sxy = 0; for (let i = 0; i < th.length; i++) { const x = rd[i] * Math.cos(th[i]) - mx, y = rd[i] * Math.sin(th[i]) - my; sxx += x * x; syy += y * y; sxy += x * y; }
               const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy); ex = Math.cos(ang); ey = Math.sin(ang);
-              // (its size the `passFitQ` share of the way out each way, not the one furthest point: a hand or an elbow beside
-              // its body stood the oval out to seventeen centimetres across, wider than her pelvis)
-              const pa: number[] = [], pb: number[] = []; for (let i = 0; i < th.length; i++) { const x = rd[i] * Math.cos(th[i]) - mx, y = rd[i] * Math.sin(th[i]) - my; pa.push(Math.abs(x * ex + y * ey)); pb.push(Math.abs(-x * ey + y * ex)); }
-              pa.sort((a, b) => a - b); pb.sort((a, b) => a - b);
-              const q = (xs: number[]) => xs[Math.min(xs.length - 1, Math.floor(xs.length * VULVA_OPEN.passFitQ))];
-              const ma = q(pa), mb = q(pb);
-              hugCx = mx; hugCy = my; hugA = ma + VULVA_OPEN.passWall * perMetre; hugB = mb + VULVA_OPEN.passWall * perMetre; hugOk = hugA > 0 && hugB > 0;
+              // (its proportions from its spread each way; its size set after it is placed, below, so the oval goes round
+              // all of it -- 2026-11-03, Joshua: "the shoulders are wider than the opening")
+              let sa = 0, sb = 0; for (let i = 0; i < th.length; i++) { const x = rd[i] * Math.cos(th[i]) - mx, y = rd[i] * Math.sin(th[i]) - my; sa += (x * ex + y * ey) ** 2; sb += (-x * ey + y * ex) ** 2; }
+              hugCx = mx; hugCy = my; hugA = Math.sqrt(sa / th.length) || 1; hugB = Math.sqrt(sb / th.length) || 1; hugOk = hugA > 0 && hugB > 0; bodyOval = true;
             }
             if (hugOk) {
+              hugDbg = { ...hugDbg, offCm: +(Math.hypot(hugCx, hugCy) / perMetre * 100).toFixed(2) };
               const shift = Math.hypot(hugCx, hugCy), most = (headLocal ? VULVA_OPEN.passShift : VULVA_OPEN.passShiftBody) * perMetre; if (shift > most) { hugCx *= most / shift; hugCy *= most / shift; }
+              // (the body's oval, round its middle where her opening is drawn to: as big as most of it -- `passOval` of
+              // what crosses there inside it -- and her skin's thickness more; what stands out past it, below)
+              if (bodyOval) {
+                const k = th.map((t2, i) => { const x = rd[i] * Math.cos(t2) - hugCx, y = rd[i] * Math.sin(t2) - hugCy; return Math.hypot((x * ex + y * ey) / hugA, (-x * ey + y * ex) / hugB); }).sort((a, b) => a - b);
+                const grow = k[Math.min(k.length - 1, Math.floor(k.length * VULVA_OPEN.passOval))] || 1, wall = VULVA_OPEN.passWall * perMetre;
+                hugA = hugA * grow + wall; hugB = hugB * grow + wall;
+              }
               const Bc = C.clone().addScaledVector(u, hugCx).addScaledVector(w3, hugCy), e = new THREE.Vector3(), E1 = u.clone().multiplyScalar(ex).addScaledVector(w3, ey), E2 = new THREE.Vector3().crossVectors(aN, E1);
               hugAt = new Float32Array(M * 3);
+              // WHERE IT STANDS OUT PAST THE CIRCLE OR OVAL, HER OPENING GOES ROUND IT THERE (2026-11-03, Joshua: "the
+              // shoulders are wider than the opening"): what crosses her opening, by its way round from the middle, the
+              // furthest of it in each `passBinDeg` (all but its last `passFitQ`); each rim point as far out as the
+              // furthest within `passSpanDeg` of its own way, the circle or oval where that is further, evened round
+              // `passEven` times and never back inside what it goes round. One soft rim: the shape, and the give.
+              const nB = Math.round(360 / VULVA_OPEN.passBinDeg), bins: number[][] = Array.from({ length: nB }, () => []);
+              const ox = hugCx, oy = hugCy;
+              for (let i = 0; i < th.length; i++) { const x = rd[i] * Math.cos(th[i]) - ox, y = rd[i] * Math.sin(th[i]) - oy; const a = Math.atan2(y, x); bins[((Math.floor(((a + Math.PI) / (2 * Math.PI)) * nB) % nB) + nB) % nB].push(Math.hypot(x, y)); }
+              const binR = bins.map((b) => { if (!b.length) return 0; b.sort((p2, q2) => p2 - q2); return b[Math.min(b.length - 1, Math.floor(b.length * VULVA_OPEN.passFitQ))]; });
+              // (a way round with nothing of it there -- between its legs, say -- takes the nearer of its neighbours' either side)
+              if (binR.some((x) => x > 0)) { const filled = binR.slice(); for (let b = 0; b < nB; b++) { if (binR[b] > 0) continue; let l = 1, rr = 1; while (binR[((b - l) % nB + nB) % nB] <= 0 && l < nB) l++; while (binR[(b + rr) % nB] <= 0 && rr < nB) rr++; const a1 = binR[((b - l) % nB + nB) % nB], a2 = binR[(b + rr) % nB]; filled[b] = (a1 * rr + a2 * l) / (l + rr); } binR.splice(0, nB, ...filled); }
+              const span = Math.ceil(VULVA_OPEN.passSpanDeg / VULVA_OPEN.passBinDeg), wallM = VULVA_OPEN.passWall * perMetre;
+              const ways = Array.from({ length: M }, () => new THREE.Vector3()), alongs = new Float32Array(M), need = new Float32Array(M), want = new Float32Array(M);
               for (let j2 = 0; j2 < M; j2++) {
                 e.fromArray(Pp, j2 * 3); const along = e.clone().sub(Bc).dot(aN);
                 e.sub(Bc).addScaledVector(aN, -along); if (e.lengthSq() < 1e-18) e.copy(E1); e.normalize();
-                const c1 = e.dot(E1), c2 = e.dot(E2), r = (hugA * hugB) / Math.sqrt((hugB * c1) ** 2 + (hugA * c2) ** 2);
-                e.multiplyScalar(r).add(Bc).addScaledVector(aN, along); e.toArray(hugAt, j2 * 3);
+                const c1 = e.dot(E1), c2 = e.dot(E2), rO = (hugA * hugB) / Math.sqrt((hugB * c1) ** 2 + (hugA * c2) ** 2);
+                const a = Math.atan2(e.dot(w3), e.dot(u)), b0 = Math.floor(((a + Math.PI) / (2 * Math.PI)) * nB);
+                let out = 0; for (let k2 = -span; k2 <= span; k2++) out = Math.max(out, binR[((b0 + k2) % nB + nB) % nB]);
+                // (round its head, a circle at least; round its body, its own outline -- 2026-11-03: an oval round the
+                // middle of its shoulders and arms left her opening standing open beside them)
+                need[j2] = out > 0 ? out + wallM : 0; want[j2] = bodyOval && need[j2] > 0 ? Math.max(VULVA_OPEN.passLeast * perMetre, need[j2]) : Math.max(rO, need[j2]); ways[j2].copy(e); alongs[j2] = along;
               }
+              { const tmp = new Float32Array(M); for (let pass = 0; pass < VULVA_OPEN.passEven; pass++) { for (let j2 = 0; j2 < M; j2++) tmp[j2] = Math.max(need[j2], 0.25 * want[(j2 + M - 1) % M] + 0.5 * want[j2] + 0.25 * want[(j2 + 1) % M]); want.set(tmp); } }
+              let outMost = 0;
+              for (let j2 = 0; j2 < M; j2++) { outMost = Math.max(outMost, want[j2]); e.copy(ways[j2]).multiplyScalar(want[j2]).add(Bc).addScaledVector(aN, alongs[j2]); e.toArray(hugAt, j2 * 3); }
+              hugDbg = { ...hugDbg, outMostCm: +(outMost / perMetre * 100).toFixed(2) };
               hugDbg = { ...hugDbg, meanCm: +(mean / perMetre * 100).toFixed(2), shiftCm: +(Math.hypot(hugCx, hugCy) / perMetre * 100).toFixed(2), aCm: +(hugA / perMetre * 100).toFixed(2), bCm: +(hugB / perMetre * 100).toFixed(2), head: passCentre ? 1 : 0, points: th.length };
             }
           }

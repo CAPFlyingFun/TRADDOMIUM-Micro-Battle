@@ -174,6 +174,9 @@ export function wombRadius(w: Pick<Womb, 'a' | 'b' | 'd' | 'egg'>, x: number, u:
 // --------------------------------------------------------------------------------------------------------- placement
 
 export const BABY_MODEL = 'models/sarah-baby.glb';
+/** The same newborn baked straight, in the pose it is born in (arms at its sides, legs straight), bound to the same bones:
+ * drawn while it is born so its belly is its own and not the curl's folds pulled straight (2026-11-03). */
+export const BABY_STRAIGHT_MODEL = 'models/sarah-baby-straight.glb';
 /** The packed model's crown-heel length in its own units (re-proportioned, before the curl). MEASURED on the model. */
 export const BABY_MODEL_LENGTH = 1.5448;
 /** How far round from straight forward its back faces, toward her left: the commonest settling (left occiput anterior). GAME TUNING. */

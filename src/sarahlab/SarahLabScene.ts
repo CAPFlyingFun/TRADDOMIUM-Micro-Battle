@@ -81,7 +81,7 @@ import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields,
 import { dropIdleMorphs } from '../view/morphPrune';
 import { BIRTH_CLEFT_FIELD, BIRTH_LIPS_FIELD, birthAreaCentre, birthAreaFields, LIPS_COVERED, patchBirthShade } from './birthArea';
 import { BIRTH_POSES, poseBirth, type BirthSpec } from '../actor/humanBirth';
-import { AUTO_LIES, BABIES_NAME, BABY_MODEL, BABY_MODEL_LENGTH, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, poseOnHer, poseDescent, BABY_BONES, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, wombFromSkin, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
+import { AUTO_LIES, BABIES_NAME, BABY_MODEL, BABY_MODEL_LENGTH, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, poseOnHer, poseDescent, BABY_BONES, BABY_STRAIGHT_MODEL, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, wombFromSkin, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { PUBIC_PRESS, pubicPressWant, setPush, jiggleOf as jiggleOfMesh, navelAfterBirth, navelPressure, restingSoftBelly, softAt, softBellyWant, stepSoftBelly, type SoftBellyWant } from './softBody';
 import { createVulvaPatch, VULVA_OPEN, type VulvaPatch } from './vulvaMesh';
@@ -439,6 +439,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const LIE_MODES = ['auto', 'head', 'breech', 'side', 'random'] as const;
   /** the other babies (twins, triplets): copies of the first; and each one's own sac when there is more than one */
   let babyCopies: THREE.Object3D[] = [], babyOwnSacs: THREE.Mesh[] = [];
+  /** each baby's straight body (BABY_STRAIGHT_MODEL), kept out of `userData` so a clone of it does not serialise a mesh */
+  const babyStraight = new WeakMap<THREE.Object3D, THREE.SkinnedMesh>();
   /** THE BALANCE's weight on her tilt shape now: its degrees on the TILT scale, carried by her thighs as she sits as her own tilt is. */
   function balanceTiltWeight(): number {
     return babyBalanceDeg ? (babyBalanceDeg * (effectiveTiltDeg(SIZE_TILT_PRESETS_DEG[2], seated) / SIZE_TILT_PRESETS_DEG[2]) * Math.PI) / 180 / BELLY_MOTION.tiltRad : 0;
@@ -3067,6 +3069,24 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         babyRoot = root; babyDirty = true;
         if (babyShown) showBaby(true);
         refresh();
+        // ITS BODY STRAIGHT, FOR ITS BIRTH (2026-11-03, Joshua: "the baby's belly looks ripped and not smooth"): its
+        // curl is baked into the model as its rest, folds and all where its thighs and arms pressed into its belly and
+        // chest -- hidden curled, laid bare once its legs straighten coming down her canal. A second body, the same
+        // newborn baked in the pose it is born in (arms at its sides, legs straight; `.scratch/baby/straight-pose.json`),
+        // bound to the SAME bones: whatever pose they hold, each body is drawn from its own rest, and the straight one
+        // is shown while it is born (`birthBody`). Fetched once the curled one is in.
+        void assets.loadModel(BABY_STRAIGHT_MODEL, () => new THREE.Object3D()).then((s2) => {
+          if (disposed || s2.userData.isPlaceholder === true || babyRoot !== root) { release(s2); return; }
+          let sm: THREE.SkinnedMesh | null = null; s2.traverse((n) => { if (!sm && (n as THREE.SkinnedMesh).isSkinnedMesh) sm = n as THREE.SkinnedMesh; });
+          const mesh = sm as THREE.SkinnedMesh | null; if (!mesh) return;
+          s2.updateMatrixWorld(true);
+          const bones = mesh.skeleton.bones.map((b) => root.getObjectByName(b.name) as THREE.Bone | undefined);
+          if (bones.some((b) => !b)) return;
+          const own = new THREE.SkinnedMesh(mesh.geometry, mat); own.name = 'baby-straight'; own.frustumCulled = false; own.visible = false;
+          root.add(own); own.bind(new THREE.Skeleton(bones as THREE.Bone[], mesh.skeleton.boneInverses.map((m) => m.clone())), mesh.matrixWorld.clone());
+          babyStraight.set(root, own);
+          babyDirty = true; refresh();
+        });
       });
     }
   }
@@ -3368,6 +3388,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       r.position.copy(at).sub(mid).applyQuaternion(floatTurn).add(mid).add(floatMove).add(jiggle.belly.value);
       if (f) r.position.add(floatAt.set(f.x, f.y, f.z));
       (r.userData.drift ??= new THREE.Vector3()).copy(floatMove);
+      // (its straight body while it is born, once it has settled into her pelvis -- from then on through its birth and on her)
+      if (i === 0) birthBody(r, !!birthNow && birthNow.engage > 0.6);
       // being born: down her canal, where the birth has it now (its moves wait)
       if (i === 0 && birthPlace(r)) {
         r.updateMatrixWorld(true);
@@ -3427,6 +3449,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         const F = babyFloats[j]; F.vx += moveAxis.x * deep * 4; F.vy += moveAxis.y * deep * 4; F.vz += moveAxis.z * deep * 4;
       });
     });
+  }
+  /** Which of its two bodies is drawn: curled (its rest, in her womb) or straight (being born; see BABY_STRAIGHT_MODEL). */
+  function birthBody(r: THREE.Object3D, straight: boolean): void {
+    const own = babyStraight.get(r); if (!own) return;
+    if (own.visible === straight) return;
+    own.visible = straight;
+    r.traverse((o) => { if (o !== own && (o as THREE.SkinnedMesh).isSkinnedMesh) o.visible = !straight; });
   }
   /** Her baby's head's radius (rest metres) at the size it is drawn (`scale`: rest metres a model unit). */
   const headRadiusOf = (scale: number): number => BIRTH_HEAD.radius * (scale * BABY_MODEL_LENGTH) / BIRTH_HEAD.atLength;
@@ -3530,7 +3559,29 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const side = new THREE.Vector3().crossVectors(long, back).normalize(); back.crossVectors(side, long).normalize();
     bpM.makeBasis(side, long, back); bpOwn.makeBasis(babyCurl.side, babyCurl.long, babyCurl.back).transpose();
     bpQ.setFromRotationMatrix(bpM.multiply(bpOwn));
+    // ITS TRUNK DOWN HER CANAL, NOT ITS CURL (2026-11-03, Joshua: "the shoulders are wider than the opening"): the
+    // line above is its curl's long axis, its middle as it lay curled; made long coming down, its trunk lies at a slant
+    // to that, and its shoulders and hips came out of her three to six centimetres off her opening's middle -- through
+    // the skin beside it. Its trunk as posed (hips to neck) turned onto the way on, about its head, as it is made long.
     const pos = bpA.clone().sub(birthHeadModel.clone().multiplyScalar(scale).applyQuaternion(bpQ));
+    // ITS BODY THROUGH THE MIDDLE OF HER OPENING (2026-11-03, Joshua: "the shoulders are wider than the opening"): its
+    // head rides her canal's line, and its trunk lies beside that line, its neck bent -- so its shoulders and hips came
+    // out of her two to six centimetres to one side of her opening, through the skin beside it. Once its head is out,
+    // it is moved across (not turned: its pose is the same) until where its trunk crosses her opening is its middle.
+    if (m.down > 1 && m.onHer < 1) {
+      const hl = r.getObjectByName(BABY_BONES.leg.left[0]), hr = r.getObjectByName(BABY_BONES.leg.right[0]), nk = r.getObjectByName(BABY_BONES.neck);
+      if (hl && hr && nk) {
+        r.updateMatrixWorld(true);
+        const inHolder = (b: THREE.Object3D) => r.worldToLocal(b.getWorldPosition(new THREE.Vector3())).multiplyScalar(scale).applyQuaternion(bpQ).add(pos);
+        const hip = inHolder(hl).add(inHolder(hr)).multiplyScalar(0.5), neck = inHolder(nk);
+        const E = at(end, new THREE.Vector3()), tE = at(end, new THREE.Vector3()).sub(at(end - 2 * span, new THREE.Vector3())).normalize(), dir = neck.clone().sub(hip);
+        const den = dir.dot(tE);
+        if (Math.abs(den) > 1e-9) {
+          const t = Math.min(1.2, Math.max(0, E.clone().sub(hip).dot(tE) / den)), X = hip.addScaledVector(dir, t), off = X.sub(E); off.addScaledVector(tE, -off.dot(tE));
+          const w = Math.min(1, Math.max(0, (m.down - 1) / 0.2)); pos.addScaledVector(off, -w * w * (3 - 2 * w));
+        }
+      }
+    }
     // from where it lies in her womb onto her cervix as its head settles
     if (m.engage < 1) { pos.lerpVectors(r.position, pos, m.engage); bpQ.slerpQuaternions(r.quaternion, bpQ.clone(), m.engage); }
     // born: lifted up and onto her, face down on her chest and belly, its head toward hers (skin to skin), in an arc
@@ -4411,6 +4462,78 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           if (toAnkle && foot) k.lerp(foot.getWorldPosition(new THREE.Vector3()), toAnkle);
           orbit.yaw = yaw; orbit.pitch = pitch; orbit.distance = distance; orbit.target.copy(k); turning = false;
           return orbit.target.toArray().map((x) => +(x / M).toFixed(3));
+        },
+        // HER BABY MEASURED (a probe's ruler): every vertex of it as drawn now, sliced every `stepCm` along its own long
+        // axis from the crown of its head, each slice's widest and narrowest extent across (cm); `aimAt` (a share of its
+        // length from its head) points the camera there
+        // (a probe's look at her baby alone: her own meshes hidden, the baby's left)
+        herHidden: (on: boolean) => {
+          const inBaby = (o: THREE.Object3D) => { for (let q: THREE.Object3D | null = o; q; q = q.parent) if (q === babyHolder) return true; return false; };
+          model?.traverse((o) => { if ((o as THREE.Mesh).isMesh && !inBaby(o)) { const u = o.userData as { wasVisible?: boolean }; if (on) { u.wasVisible ??= o.visible; o.visible = false; } else if (u.wasVisible !== undefined) { o.visible = u.wasVisible; delete u.wasVisible; } } });
+          if (vulva) vulva.mesh.visible = !on;
+          return true;
+        },
+        // HER BABY'S PARTS MEASURED (a probe's ruler, cm): its head (its own bones' skin, along and across it), and
+        // slices square to its trunk at its neck, shoulders, chest, belly, hips and down its legs -- each the widest
+        // and narrowest it is across, its arms and legs included where they lie beside it
+        babyParts: () => {
+          const r = babyRoots()[0]; if (!r) return null; r.updateMatrixWorld(true);
+          const wp = (n: string) => r.getObjectByName(n)?.getWorldPosition(new THREE.Vector3()) ?? null;
+          const hip = wp(BABY_BONES.leg.left[0])?.add(wp(BABY_BONES.leg.right[0])!).multiplyScalar(0.5), sh = wp(BABY_BONES.arm.left[0])?.add(wp(BABY_BONES.arm.right[0])!).multiplyScalar(0.5), neck = wp(BABY_BONES.neck), headB = wp('Bone_017'), top = wp('Bone_016');
+          if (!hip || !sh || !neck || !headB || !top) return null;
+          const knee = wp(BABY_BONES.leg.left[1])!.add(wp(BABY_BONES.leg.right[1])!).multiplyScalar(0.5), ankle = wp(BABY_BONES.leg.left[2])!.add(wp(BABY_BONES.leg.right[2])!).multiplyScalar(0.5);
+          const P: number[] = [], lead: string[] = [], v = new THREE.Vector3();
+          r.traverse((o) => { const m = o as THREE.SkinnedMesh; if (!m.isSkinnedMesh || !m.visible) return; m.skeleton.update(); const SI = m.geometry.getAttribute('skinIndex'), SW = m.geometry.getAttribute('skinWeight'), n = SI.count;
+            for (let i = 0; i < n; i++) { m.getVertexPosition(i, v); m.localToWorld(v); P.push(v.x, v.y, v.z); let b = 0, w = -1; for (let k = 0; k < 4; k++) if (SW.getComponent(i, k) > w) { w = SW.getComponent(i, k); b = SI.getComponent(i, k); } lead.push(m.skeleton.bones[b]?.name ?? ''); } });
+          const N = lead.length, cm = (x: number) => +((x / M) * 100).toFixed(1);
+          const spans = (idx: number[], axis: THREE.Vector3) => {
+            const u = Math.abs(axis.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0); u.addScaledVector(axis, -u.dot(axis)).normalize(); const w = new THREE.Vector3().crossVectors(axis, u);
+            const xs = idx.map((i) => v.set(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]).dot(u)), ys = idx.map((i) => v.set(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]).dot(w));
+            let wide = 0, narrow = Infinity; for (let a = 0; a < 90; a++) { const ca = Math.cos((a * Math.PI) / 90), sa = Math.sin((a * Math.PI) / 90); let lo = Infinity, hi = -Infinity; for (let k = 0; k < xs.length; k++) { const q = xs[k] * ca + ys[k] * sa; lo = Math.min(lo, q); hi = Math.max(hi, q); } wide = Math.max(wide, hi - lo); narrow = Math.min(narrow, hi - lo); }
+            return idx.length ? { wideCm: cm(wide), narrowCm: cm(narrow), points: idx.length } : null;
+          };
+          // the head: its own skin, from its crown along the way from its neck
+          const H = top.clone().sub(neck).normalize(), headIdx: number[] = []; for (let i = 0; i < N; i++) if (lead[i] === 'Bone_017' || lead[i] === 'Bone_016') headIdx.push(i);
+          let hlo = Infinity, hhi = -Infinity; for (const i of headIdx) { const t = v.set(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]).dot(H); hlo = Math.min(hlo, t); hhi = Math.max(hhi, t); }
+          const A = sh.clone().sub(hip).normalize(), at = (p: THREE.Vector3) => p.dot(A), half = (0.75 / 100) * M;
+          const slice = (level: number, skipHead = true) => { const idx: number[] = []; for (let i = 0; i < N; i++) { if (skipHead && (lead[i] === 'Bone_017' || lead[i] === 'Bone_016')) continue; const t = v.set(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]).dot(A); if (Math.abs(t - level) <= half) idx.push(i); } return spans(idx, A); };
+          const h0 = at(hip), s0 = at(sh), n0 = at(neck);
+          return {
+            head: { lengthCm: cm(hhi - hlo), ...spans(headIdx, H) },
+            neck: slice(n0), shoulders: slice(s0), chest: slice(h0 + 0.75 * (s0 - h0)), belly: slice(h0 + 0.45 * (s0 - h0)), hips: slice(h0),
+            thighs: slice((h0 + at(knee)) / 2), knees: slice(at(knee)), shins: slice((at(knee) + at(ankle)) / 2), ankles: slice(at(ankle)),
+            trunkCm: cm(s0 - h0),
+          };
+        },
+        babyProfile: (stepCm = 1, aimAt?: number, distance = 30, yaw = 0, pitch = 0) => {
+          const r = babyRoots()[0]; if (!r) return null; r.updateMatrixWorld(true);
+          const P: number[] = [], v = new THREE.Vector3();
+          r.traverse((o) => { const m = o as THREE.SkinnedMesh; if (!(m as THREE.Mesh).isMesh || !m.visible) return; const n = m.geometry.getAttribute('position').count; if (m.isSkinnedMesh) m.skeleton.update(); for (let i = 0; i < n; i++) { m.getVertexPosition(i, v); m.localToWorld(v); P.push(v.x, v.y, v.z); } });
+          const N = P.length / 3; if (N < 10) return null;
+          const c = new THREE.Vector3(); for (let i = 0; i < N; i++) c.x += P[i * 3] / N, c.y += P[i * 3 + 1] / N, c.z += P[i * 3 + 2] / N;
+          // (its long axis: power iteration on the spread)
+          const C = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+          for (let i = 0; i < N; i++) { const d = [P[i * 3] - c.x, P[i * 3 + 1] - c.y, P[i * 3 + 2] - c.z]; for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) C[a * 3 + b] += d[a] * d[b]; }
+          let ax = new THREE.Vector3(1, 1, 1).normalize(); for (let k = 0; k < 60; k++) ax = new THREE.Vector3(C[0] * ax.x + C[1] * ax.y + C[2] * ax.z, C[3] * ax.x + C[4] * ax.y + C[5] * ax.z, C[6] * ax.x + C[7] * ax.y + C[8] * ax.z).normalize();
+          // (its head end first: the head model's middle, if known, says which)
+          if (birthHeadModel) { const h = birthHeadModel.clone().applyMatrix4(r.matrixWorld); if (h.sub(c).dot(ax) < 0) ax.negate(); }
+          const t = new Float32Array(N); let lo = Infinity, hi = -Infinity; for (let i = 0; i < N; i++) { t[i] = (P[i * 3] - c.x) * ax.x + (P[i * 3 + 1] - c.y) * ax.y + (P[i * 3 + 2] - c.z) * ax.z; lo = Math.min(lo, t[i]); hi = Math.max(hi, t[i]); }
+          const step = (stepCm / 100) * M, len = hi - lo, rows: Array<{ fromHeadCm: number; n: number; wideCm: number; narrowCm: number; wide98Cm: number }> = [];
+          const u0 = Math.abs(ax.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0); u0.addScaledVector(ax, -u0.dot(ax)).normalize(); const w0 = new THREE.Vector3().crossVectors(ax, u0);
+          let aimPt: THREE.Vector3 | null = null;
+          for (let s0 = hi; s0 > lo; s0 -= step) {
+            const xs: number[] = [], ys: number[] = []; const mid = new THREE.Vector3(); let k = 0;
+            for (let i = 0; i < N; i++) { if (t[i] > s0 || t[i] <= s0 - step) continue; v.set(P[i * 3] - c.x, P[i * 3 + 1] - c.y, P[i * 3 + 2] - c.z); xs.push(v.dot(u0)); ys.push(v.dot(w0)); mid.add(v); k++; }
+            const from = (hi - s0) / M * 100;
+            if (aimAt !== undefined && !aimPt && (hi - s0) / len >= aimAt && k) aimPt = mid.divideScalar(k).add(c);
+            if (k < 3) { rows.push({ fromHeadCm: +from.toFixed(1), n: k, wideCm: 0, narrowCm: 0, wide98Cm: 0 }); continue; }
+            // (widest and narrowest over 36 directions across)
+            let wide = 0, narrow = Infinity, wide98 = 0;
+            for (let a = 0; a < 36; a++) { const ca = Math.cos((a * Math.PI) / 36), sa = Math.sin((a * Math.PI) / 36); const pr = xs.map((x, i) => x * ca + ys[i] * sa).sort((p, q) => p - q); const span = pr[pr.length - 1] - pr[0], span98 = pr[Math.floor(pr.length * 0.99)] - pr[Math.floor(pr.length * 0.01)]; if (span > wide) { wide = span; } narrow = Math.min(narrow, span); wide98 = Math.max(wide98, span98); }
+            rows.push({ fromHeadCm: +from.toFixed(1), n: k, wideCm: +(wide / M * 100).toFixed(1), narrowCm: +(narrow / M * 100).toFixed(1), wide98Cm: +(wide98 / M * 100).toFixed(1) });
+          }
+          if (aimPt) { orbit.yaw = yaw; orbit.pitch = pitch; orbit.distance = distance; orbit.target.copy(aimPt); turning = false; }
+          return { lengthCm: +(len / M * 100).toFixed(1), vertices: N, straight: !!(babyRoot && babyStraight.get(babyRoot)), straightShown: !!(babyRoot && babyStraight.get(babyRoot)?.visible), rows };
         },
         aim: (yaw: number, pitch: number, distance: number, dx = 0, dy = 0, dz = 0) => {
           const sk = model && findSkinnedMesh(model);
