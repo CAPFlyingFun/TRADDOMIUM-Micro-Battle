@@ -83,7 +83,7 @@ export const VULVA_OPEN = Object.freeze({
   /** her baby passing (`setPassing`): what of it within `passSlab` of her opening's plane is its outline there; each rim
    * point takes the farthest of it within `passSpanDeg` of its own way out, `passWall` outside it, evened round
    * `passEven` times (metres; GAME TUNING) */
-  passSlab: 0.012, passSpanDeg: 14, passWall: 0.003, passEven: 3, passStray: 1.6, passMouth: 0.03, passShift: 0.035, passShiftBody: 0.03, passFitQ: 0.98, passReach: 0.1, passOval: 0.85, passBinDeg: 5, canalMostR: 0.05, passHeadReach: 1.7, passLeast: 0.015, bulgeFootM: 0.02,
+  passSlab: 0.012, passSpanDeg: 14, passWall: 0.003, passEven: 3, passStray: 1.6, passMouth: 0.03, passShift: 0.035, passShiftBody: 0.03, passFitQ: 0.98, passHeadQ: 0.5, passHeadPast: 0.6, passReach: 0.1, passOval: 0.85, passBinDeg: 5, canalMostR: 0.05, passHeadReach: 1.7, passLeast: 0.015, bulgeFootM: 0.02,
   /** GAME TUNING: passes evening the opening's edge round its outline */
   edgeSmooth: 6,
   /** GAME TUNING: how much the bear trap's corners at its hinges are rounded (0 a sharp lens, 1 an oval) */
@@ -1514,8 +1514,18 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
               hugCx = hc.dot(u); hugCy = hc.dot(w3);
               // (as wide as the head's own skin is where it crosses her opening, measured -- not the sphere the birth is
               // timed by: the model's head is wider than a newborn's, and a circle that size let it through her skin)
-              // (and where it stands out past that, its outline there: below)
-              const sec = Math.sqrt(Math.max(headR * headR - h * h, 0)) + VULVA_OPEN.passWall * perMetre;
+              let sec = Math.sqrt(Math.max(headR * headR - h * h, 0)) + VULVA_OPEN.passWall * perMetre;
+              // (round the head's own skin where it crosses her opening, measured, once there is enough of it there: its
+              // middle and its size -- `passHeadQ` of the way out, so an ear does not hold her open beside it; the sphere
+              // the birth is timed by is smaller than this model's head, and off its middle -- 2026-11-03, the red crescent
+              // under its head as it crowned)
+              // (and only while its head is in her opening: once its middle is well past, what crosses her opening is its
+              // neck, and the sphere's narrowing slice says it -- measured, its chin and shoulders held her open round it)
+              if (th.length >= 12 && h < VULVA_OPEN.passHeadPast * headR) {
+                let mx = 0, my = 0; for (let i = 0; i < th.length; i++) { mx += rd[i] * Math.cos(th[i]); my += rd[i] * Math.sin(th[i]); } mx /= th.length; my /= th.length;
+                const ds = th.map((t2, i) => Math.hypot(rd[i] * Math.cos(t2) - mx, rd[i] * Math.sin(t2) - my)).sort((a, b) => a - b);
+                hugCx = mx; hugCy = my; sec = ds[Math.min(ds.length - 1, Math.floor(ds.length * VULVA_OPEN.passHeadQ))] + VULVA_OPEN.passWall * perMetre;
+              }
               hugA = hugB = Math.max(sec, VULVA_OPEN.passLeast * perMetre); hugOk = true;
             } else if (th.length >= 6) {
               let mx = 0, my = 0; for (let i = 0; i < th.length; i++) { mx += rd[i] * Math.cos(th[i]); my += rd[i] * Math.sin(th[i]); } mx /= th.length; my /= th.length;
@@ -1559,6 +1569,8 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
                 let out = 0; for (let k2 = -span; k2 <= span; k2++) out = Math.max(out, binR[((b0 + k2) % nB + nB) % nB]);
                 // (round its head, a circle at least; round its body, its own outline -- 2026-11-03: an oval round the
                 // middle of its shoulders and arms left her opening standing open beside them)
+                // (round its head a circle only, as she opens round it -- Joshua, 2026-11-03)
+                if (!bodyOval) out = 0;
                 need[j2] = out > 0 ? out + wallM : 0; want[j2] = bodyOval && need[j2] > 0 ? Math.max(VULVA_OPEN.passLeast * perMetre, need[j2]) : Math.max(rO, need[j2]); ways[j2].copy(e); alongs[j2] = along;
               }
               { const tmp = new Float32Array(M); for (let pass = 0; pass < VULVA_OPEN.passEven; pass++) { for (let j2 = 0; j2 < M; j2++) tmp[j2] = Math.max(need[j2], 0.25 * want[(j2 + M - 1) % M] + 0.5 * want[j2] + 0.25 * want[(j2 + 1) % M]); want.set(tmp); } }

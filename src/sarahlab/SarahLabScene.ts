@@ -109,7 +109,9 @@ const BIRTH_SHRINK = 0.45;
 /** GAME TUNING: how far further in than her skin her womb is held as it settles (metres, once settled) */
 const BIRTH_WOMB_IN = 0.015;
 const BIRTH_REST = Object.freeze({ top: 1.2, span: 0.3, across: 0.05, depth: 0.32, over: 0.7, gap: 0 });
-const BIRTH_HEAD = Object.freeze({ radius: 0.0475, atLength: 0.51, lift: [0, 0.008, 0.007] as const, tangentSpan: 0.0125, bodyBehind: 0.1 });
+/** GAME TUNING: its straight body faded in over its curled one between these shares of its legs' straightening */
+const BABY_BODY_FADE = [0.3, 0.7] as const;
+const BIRTH_HEAD = Object.freeze({ radius: 0.0475, atLength: 0.51, lift: [0, 0.008, 0.007] as const, tangentSpan: 0.0125, bodyBehind: 0.1, pastMouth: 0.6 });
 import { BIRTH_CONTACT_FIELD, createBirthContact, type BirthContact } from './birthContact';
 import { KNEE_TURN_FIELD, createKneeTurn, type KneeTurn } from './kneeTurn';
 import { HIP_TURN_FIELD, createHipTurn, type HipTurn } from './hipTurn';
@@ -3082,7 +3084,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           s2.updateMatrixWorld(true);
           const bones = mesh.skeleton.bones.map((b) => root.getObjectByName(b.name) as THREE.Bone | undefined);
           if (bones.some((b) => !b)) return;
-          const own = new THREE.SkinnedMesh(mesh.geometry, mat); own.name = 'baby-straight'; own.frustumCulled = false; own.visible = false;
+          const own = new THREE.SkinnedMesh(mesh.geometry, mat.clone()); own.name = 'baby-straight'; own.frustumCulled = false; own.visible = false;
           root.add(own); own.bind(new THREE.Skeleton(bones as THREE.Bone[], mesh.skeleton.boneInverses.map((m) => m.clone())), mesh.matrixWorld.clone());
           babyStraight.set(root, own);
           babyDirty = true; refresh();
@@ -3388,8 +3390,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       r.position.copy(at).sub(mid).applyQuaternion(floatTurn).add(mid).add(floatMove).add(jiggle.belly.value);
       if (f) r.position.add(floatAt.set(f.x, f.y, f.z));
       (r.userData.drift ??= new THREE.Vector3()).copy(floatMove);
-      // (its straight body while it is born, once it has settled into her pelvis -- from then on through its birth and on her)
-      if (i === 0) birthBody(r, !!birthNow && birthNow.engage > 0.6);
+      // (its straight body while it is born: faded in over its curled one as its legs straighten coming down -- both
+      // bodies half-bent there, alike -- and from then on through its birth and on her)
+      if (i === 0) {
+        const sm = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+        const legs = birthNow ? sm(0.3, 0.9, birthNow.engage) * sm(0.2, 1, birthNow.down) : 0;
+        birthBody(r, !birthNow ? 0 : birthNow.down >= 1 ? 1 : sm(BABY_BODY_FADE[0], BABY_BODY_FADE[1], legs));
+      }
       // being born: down her canal, where the birth has it now (its moves wait)
       if (i === 0 && birthPlace(r)) {
         r.updateMatrixWorld(true);
@@ -3450,12 +3457,17 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       });
     });
   }
-  /** Which of its two bodies is drawn: curled (its rest, in her womb) or straight (being born; see BABY_STRAIGHT_MODEL). */
-  function birthBody(r: THREE.Object3D, straight: boolean): void {
+  /** Which of its two bodies is drawn: curled (its rest, in her womb) or straight (being born; see BABY_STRAIGHT_MODEL),
+   * and between, the straight one faded in over the curled one (2026-11-03, Joshua: no jump as one becomes the other
+   * with SEE BABY on) -- in front of it by a hair, so the two do not fight where they lie together. */
+  function birthBody(r: THREE.Object3D, share: number): void {
     const own = babyStraight.get(r); if (!own) return;
-    if (own.visible === straight) return;
-    own.visible = straight;
-    r.traverse((o) => { if (o !== own && (o as THREE.SkinnedMesh).isSkinnedMesh) o.visible = !straight; });
+    const k = Math.min(1, Math.max(0, share)), m = own.material as THREE.MeshStandardMaterial, fading = k > 0 && k < 1;
+    if (own.userData.share === k) return; own.userData.share = k;
+    own.visible = k > 0;
+    if (m.transparent !== fading) { m.transparent = fading; m.depthWrite = !fading; m.polygonOffset = fading; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -4; m.needsUpdate = true; }
+    m.opacity = fading ? k : 1;
+    r.traverse((o) => { if (o !== own && (o as THREE.SkinnedMesh).isSkinnedMesh) o.visible = k < 1; });
   }
   /** Her baby's head's radius (rest metres) at the size it is drawn (`scale`: rest metres a model unit). */
   const headRadiusOf = (scale: number): number => BIRTH_HEAD.radius * (scale * BABY_MODEL_LENGTH) / BIRTH_HEAD.atLength;
@@ -3480,8 +3492,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     birthPath = vulva.canalPath();
     // (and the way it travels there: her canal's own way out at her opening)
     { const pp = birthPath?.points, k = pp ? pp.length - 1 : -1, axis = pp && k >= 3 ? pp[k].clone().sub(pp[k - 3]) : undefined;
-      // (its middle: the head's own while the head passes)
-      const headW = r && birthHeadModel && birthNow.down < 1.3 ? birthHeadModel.clone().applyMatrix4(r.matrixWorld) : null;
+      // (its middle: the head's own while the head passes -- until its middle is `BIRTH_HEAD.pastMouth` of its radius out
+      // of her; from there what crosses her opening is its neck and shoulders, hugged as its body is)
+      const Lp = birthLen ?? birthPath?.length ?? 0.105, past = headDownOf(birthNow, Lp, scale) - Lp;
+      const headW = r && birthHeadModel && past < BIRTH_HEAD.pastMouth * R ? birthHeadModel.clone().applyMatrix4(r.matrixWorld) : null;
       vulva.setPassing(birthNow.down > 0.7 && birthNow.down < 1.98 && r ? babyPassing(r) : null, axis, headW, R); }
     // (her canal's length as the birth began: laid again as her opening widens, its rings move a little, and a head placed
     // by the new length jumped)

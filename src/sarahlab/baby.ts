@@ -34,7 +34,7 @@ export const FETAL_CHART: readonly ChartWeek[] = Object.freeze([
 ]);
 
 /** The model's crown-rump as a share of its crown-heel (as re-proportioned): turns the chart's early crown-rump into a length. MEASURED on the model. */
-export const MODEL_CROWN_RUMP = 0.652;
+export const MODEL_CROWN_RUMP = 0.662;
 
 /** The week her belly stands for: 0% week 12, 100% week 40, on to 42 at 200%. */
 export function weekForBump(bumpPercent: number, babies = 1): number {
@@ -174,11 +174,14 @@ export function wombRadius(w: Pick<Womb, 'a' | 'b' | 'd' | 'egg'>, x: number, u:
 // --------------------------------------------------------------------------------------------------------- placement
 
 export const BABY_MODEL = 'models/sarah-baby.glb';
-/** The same newborn baked straight, in the pose it is born in (arms at its sides, legs straight), bound to the same bones:
- * drawn while it is born so its belly is its own and not the curl's folds pulled straight (2026-11-03). */
+/** The same newborn baked straight, in the pose it is born in (arms tucked to its chest, legs straight), bound to the same
+ * bones: drawn while it is born so its belly is its own and not the curl's folds pulled straight (2026-11-03). Both are
+ * baked from the Meshy newborn with its head made bigger (x1.1) and its body slimmer (width x0.75, depth x0.9), so its
+ * head is its widest part (Joshua, 2026-11-03: "if the head is the biggest part of the body on a baby, why is the
+ * shoulders wider?") -- `.scratch/baby/py/slim.py`, then `pose.py` with `pose3.json` (curled) and `straight-pose.json`. */
 export const BABY_STRAIGHT_MODEL = 'models/sarah-baby-straight.glb';
-/** The packed model's crown-heel length in its own units (re-proportioned, before the curl). MEASURED on the model. */
-export const BABY_MODEL_LENGTH = 1.5448;
+/** The packed model's crown-heel length in its own units (re-proportioned and slimmed, before the curl). MEASURED on the model. */
+export const BABY_MODEL_LENGTH = 1.5888;
 /** How far round from straight forward its back faces, toward her left: the commonest settling (left occiput anterior). GAME TUNING. */
 export const BACK_TO_LEFT_RAD = Math.PI / 4;
 
@@ -1418,11 +1421,23 @@ export function poseDescent(bones: ReadonlyMap<string, THREE.Bone>, k: number, f
     turnToward(a, b, v, k);
     turnToward(b, c, v, k);
   };
-  for (const s of ['left', 'right'] as const) { limb(BABY_BONES.arm[s], L.armOut, k); limb(BABY_BONES.leg[s], L.legOut, legK); }
+  // its arms tucked to its chest, as a baby's are born (2026-11-03, Joshua, of its arms at its sides making it 16-18 cm
+  // wide: "fix"): each upper arm down its side and a little forward, its forearm folded up across its chest
+  const arm = (chain: readonly string[], k: number) => {
+    const [a, b, c] = chain.map((n) => bones.get(n));
+    if (!a || !b || !c || !(k > 0)) return;
+    const side = a.getWorldPosition(w).sub(centre).dot(f.left) >= 0 ? f.left.clone() : f.left.clone().negate();
+    v.copy(f.long).multiplyScalar(-L.upperDown).addScaledVector(side, L.upperOut).addScaledVector(f.front, L.upperFront).normalize();
+    turnToward(a, b, v, k);
+    v.copy(f.long).multiplyScalar(L.foreUp).addScaledVector(side, -L.foreIn).addScaledVector(f.front, L.foreFront).normalize();
+    turnToward(b, c, v, k);
+  };
+  for (const s of ['left', 'right'] as const) { arm(BABY_BONES.arm[s], k); limb(BABY_BONES.leg[s], L.legOut, legK); }
 }
-/** GAME TUNING: its body made long coming down -- how far its back straightens, and how far each limb lies out from its
- * length to its side (arms along its sides, legs nearly together) */
-export const DESCENT = Object.freeze({ straighten: 0.8, armOut: 0.18, legOut: 0.08 });
+/** GAME TUNING: its body made long coming down -- how far its back straightens; its legs nearly together (how far out
+ * from its length); its arms tucked to its chest -- each upper arm's aim (down, out, forward) and forearm's (up, in
+ * across its chest, forward), as its straight body is baked (`.scratch/baby/straight-pose.json`) */
+export const DESCENT = Object.freeze({ straighten: 0.8, legOut: 0.08, upperDown: 0.85, upperOut: 0.22, upperFront: 0.48, foreUp: 0.5, foreIn: 0.62, foreFront: 0.6 });
 
 /** GAME TUNING: the newborn on her -- how far its back straightens, its head's turn (radians), and each limb's aim (its
  * side, along it toward its head, and down onto her) */
