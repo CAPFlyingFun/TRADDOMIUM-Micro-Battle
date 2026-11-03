@@ -1303,6 +1303,23 @@ export const BABY_BONES = Object.freeze({
   back: ['Bone_001', 'Bone_005', 'Bone_004'], neck: 'Bone_018',
 });
 
+/**
+ * Which side of its body a limb is on, along `left` (+1 or -1): its root against the middle of it and its pair's roots
+ * (its other arm, its other leg) -- not against its body's own middle, which a limb drawn close in (its shoulders as
+ * narrow as a real newborn's, 2026-11-03) could lie on the far side of, sending one arm across its chest and the other
+ * out.
+ */
+export function sideOf(bones: ReadonlyMap<string, THREE.Bone>, chain: readonly string[], left: THREE.Vector3): number {
+  const pairs = [[BABY_BONES.arm.left, BABY_BONES.arm.right], [BABY_BONES.leg.left, BABY_BONES.leg.right]];
+  const pair = pairs.find((p) => p[0] === chain || p[1] === chain || p[0][0] === chain[0] || p[1][0] === chain[0]);
+  const a = bones.get(chain[0]); if (!a) return 1;
+  const other = pair ? bones.get((pair[0][0] === chain[0] ? pair[1] : pair[0])[0]) : undefined;
+  const at = a.getWorldPosition(new THREE.Vector3());
+  if (!other) return 1;
+  const mid = other.getWorldPosition(new THREE.Vector3()).add(at).multiplyScalar(0.5);
+  return at.sub(mid).dot(left) >= 0 ? 1 : -1;
+}
+
 const tA = new THREE.Vector3(), tB = new THREE.Vector3(), tQ = new THREE.Quaternion(), tP = new THREE.Quaternion(), tR = new THREE.Quaternion();
 /** Turn a bone (in the world) so the way to its child goes `share` of the way toward `to` (unit). */
 export function turnToward(bone: THREE.Object3D, child: THREE.Object3D, to: THREE.Vector3, share: number): void {
@@ -1372,8 +1389,7 @@ export function poseMove(bones: ReadonlyMap<string, THREE.Bone>, rest: ReadonlyM
 export function poseOnHer(bones: ReadonlyMap<string, THREE.Bone>, k: number, f: MoveFrame): void {
   if (!(k > 0)) return;
   const root = bones.get('Bone_000'); root?.updateMatrixWorld(true);
-  const centre = root ? root.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3();
-  const L = ON_HER, v = new THREE.Vector3(), w = new THREE.Vector3();
+  const L = ON_HER, v = new THREE.Vector3();
   // its back and neck out of the curl, toward its length
   const spine = [...BABY_BONES.back, BABY_BONES.neck, 'Bone_017'];
   for (let i = 0; i + 1 < spine.length; i++) { const a = bones.get(spine[i]), b = bones.get(spine[i + 1]); if (a && b) turnToward(a, b, f.long, L.straighten * k); }
@@ -1388,7 +1404,7 @@ export function poseOnHer(bones: ReadonlyMap<string, THREE.Bone>, k: number, f: 
   const limb = (chain: readonly string[], upper: (s: THREE.Vector3) => THREE.Vector3, lower: (s: THREE.Vector3) => THREE.Vector3) => {
     const [a, b, c] = chain.map((n) => bones.get(n));
     if (!a || !b || !c) return;
-    const side = a.getWorldPosition(w).sub(centre).dot(f.left) >= 0 ? f.left.clone() : f.left.clone().negate();
+    const side = sideOf(bones, chain, f.left) >= 0 ? f.left.clone() : f.left.clone().negate();
     turnToward(a, b, upper(side).normalize(), k);
     turnToward(b, c, lower(side).normalize(), k);
   };
@@ -1408,8 +1424,7 @@ export function poseOnHer(bones: ReadonlyMap<string, THREE.Bone>, k: number, f: 
 export function poseDescent(bones: ReadonlyMap<string, THREE.Bone>, k: number, f: MoveFrame, legK = k): void {
   if (!(k > 0)) return;
   const root = bones.get('Bone_000'); root?.updateMatrixWorld(true);
-  const centre = root ? root.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3();
-  const L = DESCENT, v = new THREE.Vector3(), w = new THREE.Vector3();
+  const L = DESCENT, v = new THREE.Vector3();
   // its back out of the curl, along its length (not its neck)
   const back = BABY_BONES.back;
   for (let i = 0; i + 1 < back.length; i++) { const a = bones.get(back[i]), b = bones.get(back[i + 1]); if (a && b) turnToward(a, b, f.long, L.straighten * k); }
@@ -1418,7 +1433,7 @@ export function poseDescent(bones: ReadonlyMap<string, THREE.Bone>, k: number, f
   const limb = (chain: readonly string[], hug: number, k: number) => {
     const [a, b, c] = chain.map((n) => bones.get(n));
     if (!a || !b || !c || !(k > 0)) return;
-    const side = a.getWorldPosition(w).sub(centre).dot(f.left) >= 0 ? f.left.clone() : f.left.clone().negate();
+    const side = sideOf(bones, chain, f.left) >= 0 ? f.left.clone() : f.left.clone().negate();
     v.copy(f.long).negate().addScaledVector(side, hug).normalize();
     turnToward(a, b, v, k);
     turnToward(b, c, v, k);
@@ -1428,7 +1443,7 @@ export function poseDescent(bones: ReadonlyMap<string, THREE.Bone>, k: number, f
   const arm = (chain: readonly string[], k: number) => {
     const [a, b, c] = chain.map((n) => bones.get(n));
     if (!a || !b || !c || !(k > 0)) return;
-    const side = a.getWorldPosition(w).sub(centre).dot(f.left) >= 0 ? f.left.clone() : f.left.clone().negate();
+    const side = sideOf(bones, chain, f.left) >= 0 ? f.left.clone() : f.left.clone().negate();
     v.copy(f.long).multiplyScalar(-L.upperDown).addScaledVector(side, L.upperOut).addScaledVector(f.front, L.upperFront).normalize();
     turnToward(a, b, v, k);
     v.copy(f.long).multiplyScalar(L.foreUp).addScaledVector(side, -L.foreIn).addScaledVector(f.front, L.foreFront).normalize();
@@ -1439,7 +1454,7 @@ export function poseDescent(bones: ReadonlyMap<string, THREE.Bone>, k: number, f
 /** GAME TUNING: its body made long coming down -- how far its back straightens; its legs nearly together (how far out
  * from its length); its arms tucked to its chest -- each upper arm's aim (down, out, forward) and forearm's (up, in
  * across its chest, forward), as its straight body is baked (`.scratch/baby/straight-pose.json`) */
-export const DESCENT = Object.freeze({ straighten: 0.8, legOut: 0.08, upperDown: 0.45, upperOut: -0.3, upperFront: 0.84, foreUp: 0.6, foreIn: 0.55, foreFront: 0.58 });
+export const DESCENT = Object.freeze({ straighten: 0.8, legOut: 0.08, upperDown: 0.85, upperOut: -0.15, upperFront: 0.45, foreUp: 0.3, foreIn: 0.85, foreFront: 0.4 });
 
 /** GAME TUNING: the newborn on her -- how far its back straightens, its head's turn (radians), and each limb's aim (its
  * side, along it toward its head, and down onto her) */

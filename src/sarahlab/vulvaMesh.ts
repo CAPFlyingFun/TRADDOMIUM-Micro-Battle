@@ -83,7 +83,7 @@ export const VULVA_OPEN = Object.freeze({
   /** her baby passing (`setPassing`): what of it within `passSlab` of her opening's plane is its outline there; each rim
    * point takes the farthest of it within `passSpanDeg` of its own way out, `passWall` outside it, evened round
    * `passEven` times (metres; GAME TUNING) */
-  passSlab: 0.012, passSpanDeg: 14, passWall: 0.003, passEven: 3, passStray: 1.6, passMouth: 0.03, passShift: 0.035, passShiftBody: 0.03, passShiftUp: 0.43, passFitQ: 0.98, passMostAlong: 0.12, passMostAcross: 0.1, passHeadQ: 0.5, passHeadFit: false, passHeadPast: 0.6, passReach: 0.1, passOval: 0.85, passBinDeg: 5, canalMostR: 0.05, passHeadReach: 1.7, passLeast: 0.015, bulgeFootM: 0.02,
+  passSlab: 0.012, passSpanDeg: 14, passWall: 0.003, passEven: 3, passStray: 1.6, passMouth: 0.05, passShift: 0.035, passShiftBody: 0.03, passShiftUp: 0.43, passFitQ: 0.98, passMostAlong: 0.12, passMostAcross: 0.1, passHeadQ: 0.5, passHeadFit: false, passHeadPast: 0.6, passReach: 0.1, passOval: 0.85, passBinDeg: 5, canalMostR: 0.05, passHeadReach: 1.7, passLeast: 0.015, bulgeFootM: 0.02,
   /** GAME TUNING: passes evening the opening's edge round its outline */
   edgeSmooth: 6,
   /** GAME TUNING: how much the bear trap's corners at its hinges are rounded (0 a sharp lens, 1 an oval) */
