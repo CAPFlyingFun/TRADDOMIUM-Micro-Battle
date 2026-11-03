@@ -59,7 +59,7 @@ export const VULVA_OPEN = Object.freeze({
   bead: 0.004, lipWall: 0.008,
   /** GAME TUNING: the balloon's rolled rim round the opening -- how round (metres, at full size), how far its middle stands
    * out of her (a share of that), and how many Taubin passes even the edge it is laid round */
-  rimBead: 0.0036, rimLift: 0.3, rimTuck: 0.002, rimReach: 0.004, openForward: 0.01, backMargin: 0.02, canalWall: 0.004, canalEase: 1.2, backInset: 0, edgeTrim: 0.015, edgeKeep: 0.03, rimSmooth: 30, rimWeightReach: 6,
+  rimBead: 0.0036, rimLift: 0.3, rimTuck: 0.002, rimReach: 0.004, openForward: 0.01, backMargin: 0.02, canalWall: 0.004, canalEase: 1.2, canalEaseOut: 0.2, backInset: 0, edgeTrim: 0.015, edgeKeep: 0.03, rimSmooth: 30, rimWeightReach: 6,
   /** GAME TUNING: the outer skin ring -- how round (metres), how far out from the rim, how far its middle stands out of
    * her skin (a share of that), and how many Taubin passes even its loop */
   outerRound: 0.005, outerGap: 0.012, outerLift: 0.2, outerSmooth: 30,
@@ -1874,7 +1874,9 @@ export function createVulvaPatch(body: THREE.SkinnedMesh, basePos: Float32Array,
   }
   /** each ring toward what the head wants of it: out at once, back over `canalEase` seconds */
   function stepCanalRings(dt: number): void {
-    const k = 1 - Math.exp(-Math.max(0, dt) / VULVA_OPEN.canalEase);
+    // (quicker once its head is out: held wide behind it, her canal stood out through her skin as her opening closed in
+    // round its neck)
+    const k = 1 - Math.exp(-Math.max(0, dt) / (passing && !passCentre ? VULVA_OPEN.canalEaseOut : VULVA_OPEN.canalEase));
     for (const m of CANAL_RINGS) {
       const was = ringNow[m], want = ringWant[m];
       const now = want >= was ? want : was + (want - was) * k;
