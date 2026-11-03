@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { BELLY_SOFT, createJiggleUniforms, restingSoftBelly, softAt, softBellyGive, softBellyWant, stepSoftBelly, UNITS_PER_METRE } from '../src/sarahlab/softBody';
+import { BELLY_SOFT, createJiggleUniforms, navelPressPercent, NAVEL_PRESS, restingSoftBelly, softAt, softBellyGive, softBellyWant, stepSoftBelly, UNITS_PER_METRE } from '../src/sarahlab/softBody';
 
 // the way down in her frame (x her left, y up, z out of her front), `lean` degrees forward and `side` to her left
 const down = (lean: number, side = 0) => { const p = (lean * Math.PI) / 180, r = (side * Math.PI) / 180; return { x: Math.sin(r), y: -Math.cos(r) * Math.cos(p), z: Math.cos(r) * Math.sin(p) }; };
@@ -66,5 +66,12 @@ describe('her soft belly (Joshua, 2026-11-03: four rules)', () => {
     expect(out.length()).toBe(0);
     softAt(u, 0, { x: 0, y: 1, z: 0.3 }, out);
     expect(out.length()).toBe(0);
+  });
+  it('her navel is pushed out by her womb and her baby: fuller more, a baby forward more, dropped low less', () => {
+    expect(navelPressPercent(1, null)).toBeCloseTo(100, 6);
+    expect(navelPressPercent(0.5, null)).toBeCloseTo(50, 6);
+    expect(navelPressPercent(1, { low: 0, forward: 1 })).toBeCloseTo(100 + NAVEL_PRESS.forward, 6);
+    expect(navelPressPercent(1, { low: 1.0, forward: 0 })).toBeCloseTo(100 - NAVEL_PRESS.dropped, 6);
+    expect(navelPressPercent(1, { low: 0.2, forward: 0 })).toBeCloseTo(100, 6);
   });
 });

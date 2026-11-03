@@ -503,3 +503,19 @@ if (${SOFT_REF_ATTRIBUTE}.w > 0.0) {
   material.customProgramCacheKey = function () { return `${cacheKey ? cacheKey.call(this) : ''}|wombSoft`; };
   material.needsUpdate = true;
 }
+
+/**
+ * HER NAVEL PUSHED OUT BY WHAT IS BEHIND IT (Joshua, 2026-11-03: "the bellybutton outie could be based on the baby's
+ * location or how full the womb is and how it pushes against the bellybutton"): the pressure behind her navel, as the
+ * belly size her navel's automatic outie reads (`navelFlatFor`: an innie to 75%, its outie out by 100%) -- her womb's
+ * fullness (her size, her babies and their fluid; less once her baby is born, so her navel goes back in as her womb
+ * settles), and her baby pressing it: further forward more, dropped low into her pelvis less. GAME TUNING.
+ */
+export const NAVEL_PRESS = Object.freeze({ forward: 20, dropped: 20 });
+export function navelPressPercent(fullness: number, baby: { low: number; forward: number } | null): number {
+  const F = clamp(Number.isFinite(fullness) ? fullness : 1, 0, 2);
+  let p = 100 * F;
+  // (a baby low in her womb -- most of all dropped into her pelvis in labour -- presses below her navel, not behind it)
+  if (baby) p += NAVEL_PRESS.forward * clamp(baby.forward, 0, 1) * clamp(1 - baby.low, 0, 1) - NAVEL_PRESS.dropped * clamp((baby.low - 0.3) / 0.7, 0, 1);
+  return Math.max(0, p);
+}
