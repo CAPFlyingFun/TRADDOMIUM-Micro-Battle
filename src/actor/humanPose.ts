@@ -192,12 +192,34 @@ const ARM_SWINGS: Readonly<Record<HumanStance, number>> = {
  * foot covers `STANCE_SHARES.walk` of the cycle — 0.9 of a leg. The run
  * sweeps further; most of its extra distance is the flight between
  * stances, which `STANCE_SHARES.run` gives it.
+ *
+ * Shortened (2026-11-04) to 0.8 and 0.9 when the step stopped being swept
+ * evenly about the hip (`BACK_SWING_MOST`): a real step is longer than its
+ * hip's sweep because the foot rolls from heel to toe and the pelvis turns
+ * with it, and this rig has neither, so the whole step is the hip's -- at
+ * 0.9 with the back held in, the leg reached 42 degrees out in front. A
+ * walk of a little over 1.3 leg lengths a stride reads as a shorter step.
  */
 const STEP_LENGTHS: Readonly<Record<HumanStance, number>> = {
   stand: 0,
-  walk: 0.9,
-  run: 1.15,
+  walk: 0.8,
+  run: 0.9,
 };
+
+/**
+ * HOW FAR BEHIND THE HIP A PLANTED LEG GOES (Joshua, 2026-11-04: a joint
+ * may not pass how far a real one goes -- data/jointRange.ts, read for the
+ * walk by actor/jointLimits.ts). Swept evenly, an ordinary walk took the
+ * back leg 27 degrees behind the hip and a run 35 (40 as the swing
+ * began), and the foot, held flat on the ground, bent its ankle up by as
+ * much -- where a hip extends about 17 to 18 degrees and an ankle bends
+ * up 13 to 14 by itself (CDC 2011). So the sweep is taken mostly IN FRONT
+ * of the hip: the leg goes no further back than this (and the flat foot's
+ * ankle no further up, in the step or the swing), and the rest of the
+ * step is in front. GAME TUNING under those walls, with room for the
+ * walk's lean and a man's ankle.
+ */
+const BACK_SWING_MOST = 12 * DEG;
 
 /**
  * What share of a cycle each foot is ON THE GROUND. MEASURED: walking
@@ -460,7 +482,8 @@ function writeLeg(
   ankle: number,
   legPhase: number,
   share: number,
-  hipSwing: number,
+  front: number,
+  back: number,
   kneeBend: number,
   spread = 0,
 ): void {
@@ -476,13 +499,23 @@ function writeLeg(
     forward = ((-4 * u + 6) * u) * u - 1 + m * (((2 * u - 3) * u + 1) * u);
     fold = (1 - Math.cos(2 * Math.PI * u)) / 2;
   }
-  if (spread === 0) writeTurn(out[at], hip, 1, 0, 0, -hipSwing * forward);
-  else writeTurnXZ(out[at], hip, -hipSwing * forward, spread);
+  // the foot's place along the ground under the hip (a share of the leg),
+  // from `front` ahead of it to `back` behind: the hip's angle is its
+  // asin, so a planted foot's place moves on at an even pace and it does
+  // not slide; and it does not go further back than `back`, even where
+  // the swing's start would carry it on past (it turns forward there)
+  const place = Math.max(-back, (front - back) / 2 + ((front + back) / 2) * forward);
+  const hipAngle = Math.asin(clamp(place, -1, 1));
+  if (spread === 0) writeTurn(out[at], hip, 1, 0, 0, -hipAngle);
+  else writeTurnXZ(out[at], hip, -hipAngle, spread);
   writeTurn(out[at + 1], knee, 1, 0, 0, kneeBend * fold);
   // The ankle undoes the hip and the knee, so the sole stays level with
   // the ground while it is on it; in the swing the toes trail by part of
   // the fold.
-  const ankleFlex = hipSwing * forward - kneeBend * fold * (1 - TOE_TRAIL);
+  // (and never bent up further than a leg goes behind: a run's deep knee
+  // fold, half undone, bent it up 19 degrees in the swing -- the toes trail
+  // a little more instead)
+  const ankleFlex = Math.max(-BACK_SWING_MOST, hipAngle - kneeBend * fold * (1 - TOE_TRAIL));
   // a thigh turned out tips the foot onto its edge; the ankle sets it back flat
   if (spread === 0) writeTurn(out[at + 2], ankle, 1, 0, 0, ankleFlex);
   else writeTurnXZ(out[at + 2], ankle, ankleFlex, -spread);
@@ -561,15 +594,15 @@ export function poseHuman(
   const lift = KNEE_LIFTS[stance] * measure.legLength;
   const kneeBend = shin > 0 ? Math.acos(clamp(1 - lift / shin, -1, 1)) : 0;
   // The step is a fraction of THIS body's leg, and the hip angle that
-  // takes the foot that far is `asin(step / 2 legLength)`. The length
+  // takes the foot that far is an asin of a share of the leg. The length
   // cancels, which is the point: the same fraction is the same angle on
   // Sarah's 0.638 leg and Jack's 0.678, and would be on a re-export in
-  // millimetres.
+  // millimetres. The share is split: no more than `BACK_SWING_MOST`
+  // behind the hip, the rest in front.
   const carried = carryGait(gait.carry ?? 0);
   const step = STEP_LENGTHS[stance] * carried.step * measure.legLength;
-  const hipSwing = measure.legLength > 0
-    ? Math.asin(clamp(step / (2 * measure.legLength), 0, 1))
-    : 0;
+  const sweep = measure.legLength > 0 ? clamp(step / measure.legLength, 0, 2) : 0;
+  const back = Math.min(sweep / 2, Math.sin(BACK_SWING_MOST)), front = Math.min(1, sweep - back);
 
   // Breath and sway are functions of the CLOCK, never of the phase: a
   // body standing still has a phase that never advances, and these two
@@ -606,8 +639,8 @@ export function poseHuman(
 
   // The left foot lands, furthest forward, at phase 0.25; the right half
   // a cycle later.
-  writeLeg(out, 9, joints.hipL, joints.kneeL, joints.ankleL, fract(gait.phase - 0.25), share, hipSwing, kneeBend, left * carried.spread);
-  writeLeg(out, 12, joints.hipR, joints.kneeR, joints.ankleR, fract(gait.phase + 0.25), share, hipSwing, kneeBend, -left * carried.spread);
+  writeLeg(out, 9, joints.hipL, joints.kneeL, joints.ankleL, fract(gait.phase - 0.25), share, front, back, kneeBend, left * carried.spread);
+  writeLeg(out, 12, joints.hipR, joints.kneeR, joints.ankleR, fract(gait.phase + 0.25), share, front, back, kneeBend, -left * carried.spread);
 
   return usedPrefix(out, HUMAN_POSE_TURNS);
 }

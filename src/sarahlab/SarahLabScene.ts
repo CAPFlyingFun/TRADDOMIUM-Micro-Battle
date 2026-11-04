@@ -23,6 +23,8 @@ import { setClothDetail } from './clothDetail';
 import { DetailSpots, SARAH_V2_DETAIL_POINTS, SARAH_V2_LITE_TEE_NAVEL, TeeNavel } from './detailSpots';
 import { SkinPose } from './skinPose';
 import { SkinContact, spreadTriangles } from './skinContact';
+import { JointLimits } from '../actor/jointLimits';
+import { rangeDeg, type RangeLevel } from '../data/jointRange';
 import { SKIN_BRUSH_CM, SKIN_CHOICES, SKIN_ORIGINAL_IMAGE, SKIN_SWATCHES, SKIN_TEXTURE_CM, hexRgb, nextSkin, skinBrushLine, skinLine, skinNote, skinStrengthLine, skinTextureLine, type SkinId } from './skinChoices';
 import { SkinPainter, tilePattern, type SkinImage, type SkinPattern, type SkinStrokeSettings } from './skinPaint';
 import { ensureRest } from './fabricMaterial';
@@ -2949,12 +2951,29 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         { shoulder: j.shoulderR, elbow: j.elbowR, out: measure.leftSign > 0 ? -1 : 1, fraction: side === 'left' ? 0 : f },
       ])];
     }
+    // EVERY JOINT INSIDE ITS RANGE (Joshua, 2026-11-04, "two levels": data/jointRange.ts, actor/jointLimits.ts) -- her back,
+    // neck, hips, knees and ankles held to what she moves them to herself, or, in a birth position (placed: the bed holds
+    // her, her thighs let fall open, her weight on her feet), to how far they give placed
+    base = limitedTurns(base, isBirthPose(p) ? 'passive' : 'active', out);
     if (curl <= 0 || fingers.length === 0) return base;
     const extra: JointTurn[] = [];
     for (const f of fingers) {
       f.joints.forEach((j, k) => extra.push({ joint: j, ax: f.axis.x, ay: f.axis.y, az: f.axis.z, radians: fingerBend(curl, k, f.thumb) }));
     }
     return [...base, ...extra];
+  }
+  /** Her joint ranges, read once a skeleton, at each level (a woman's: Sarah's, as her arms' are); and each pose's own
+   * place to write its held turns, so a pose blended with another keeps its own. */
+  let jointLimits: { measure: HumanMeasure; active: JointLimits; passive: JointLimits } | null = null;
+  const limitedOut = new WeakMap<MutableJointTurn[], MutableJointTurn[]>();
+  function limitedTurns(turns: readonly JointTurn[], level: RangeLevel, owner: MutableJointTurn[]): readonly JointTurn[] {
+    if (!rig || !measure) return turns;
+    if (jointLimits?.measure !== measure) {
+      const at = (lv: RangeLevel) => new JointLimits(measure!, rig!.bind, (j, m) => rangeDeg(j, m as never, 'female', lv));
+      jointLimits = { measure, active: at('active'), passive: at('passive') };
+    }
+    let out = limitedOut.get(owner); if (!out) { out = []; limitedOut.set(owner, out); }
+    return jointLimits[level].limit(turns, out);
   }
 
   /**

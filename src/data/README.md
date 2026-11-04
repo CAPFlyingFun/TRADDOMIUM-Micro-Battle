@@ -6,7 +6,11 @@ is the ten typed registries. Both are pure: no three, no DOM, no storage.
 
 `jointRange.ts` is the master table of how far each human joint goes, a
 woman's and a man's (Joshua, 2026-11-04), every number MEASURED from a named
-source; its `JOINT_RANGE_WIRED` lists the motions a live system reads.
+source; its `JOINT_RANGE_WIRED` lists the motions a live system reads. It has
+two levels (Joshua's choice, 2026-11-04): ACTIVE, what a person moves a joint
+to by herself, and PASSIVE, how far it gives placed or loaded (a squat, a
+birth position, a lunge) -- a study's mean plus two standard deviations where
+one measured it, never less than active, and the active range where none did.
 
 ## The pattern in one line
 
