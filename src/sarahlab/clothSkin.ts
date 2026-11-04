@@ -66,6 +66,7 @@ import * as THREE from 'three';
 import type { ClothBinding, SkinContacts } from './clothTypes';
 import { mirrorIndex } from './bodyRegions';
 import { jiggleAt, jiggleOf, type Jiggle } from './softBody';
+import { navelOffsetAt, navelOffsetOf, type NavelOffset } from './navelSoft';
 
 export interface ClothSkinOptions {
   /** World units: every `SkinContacts.standOff` is this (default 0.15 = 1.5 mm in a 100-units-per-metre room). */
@@ -254,6 +255,8 @@ export class ClothSkin {
   /** Her belly and breasts as the masses have them this frame (softBody.ts), added after the morphs as the shader adds them. */
   private jig: Jiggle | null = null;
   private readonly jigAt = { x: 0, y: 0, z: 0 };
+  /** her navel as the shaders push it (navelSoft.ts), or null */
+  private navel: NavelOffset | null = null;
   private morphArr: (Float32Array | null)[] = [];
   private morphAttr: (Attr | null)[] = [];
   private morphStride = new Int32Array(0);
@@ -834,6 +837,7 @@ export class ClothSkin {
     }
     this.morphN = k;
     this.jig = jiggleOf(m);
+    this.navel = navelOffsetOf(m);
     this.morphRelative = g.morphTargetsRelative;
 
     // bones: boneWorld · boneInverse · bindMatrix, once each
@@ -907,6 +911,8 @@ export class ClothSkin {
       }
       x += dx; y += dy; z += dz;
     }
+    // her navel as drawn (added where the shader adds it: after her morphs, ahead of her soft belly's motion)
+    if (this.navel) { const J = this.jigAt; navelOffsetAt(this.navel, v, J); x += J.x; y += J.y; z += J.z; }
     if (this.jig) { const J = this.jigAt; jiggleAt(this.jig, v, J, x, y, z); x += J.x; y += J.y; z += J.z; }
     { const bp = this.bindPos, o = v * 3; bp[o] = x; bp[o + 1] = y; bp[o + 2] = z; }
     if (this.skinned) {

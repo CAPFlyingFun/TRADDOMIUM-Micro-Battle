@@ -25,6 +25,7 @@
  */
 import * as THREE from 'three';
 import { jiggleAt, jiggleOf, type Jiggle } from './softBody';
+import { navelOffsetAt, navelOffsetOf, type NavelOffset } from './navelSoft';
 
 type Attr = THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
 
@@ -57,6 +58,8 @@ export class SkinPose {
   /** Her belly and breasts as the masses have them this frame (softBody.ts), added after the morphs as the shader adds them. */
   private jig: Jiggle | null = null;
   private readonly jigAt = { x: 0, y: 0, z: 0 };
+  /** her navel as the shaders push it (navelSoft.ts), or null */
+  private navel: NavelOffset | null = null;
   private morphArr: (Float32Array | null)[] = [];
   private morphAttr: (Attr | null)[] = [];
   private morphStride = new Int32Array(0);
@@ -117,6 +120,7 @@ export class SkinPose {
     }
     this.morphN = k;
     this.jig = jiggleOf(m);
+    this.navel = navelOffsetOf(m);
     this.morphRelative = g.morphTargetsRelative;
 
     // bones: boneWorld · boneInverse · bindMatrix, once each
@@ -183,6 +187,8 @@ export class SkinPose {
       }
       x += dx; y += dy; z += dz;
     }
+    // her navel as drawn (added where the shader adds it: after her morphs, ahead of her soft belly's motion)
+    if (this.navel) { const J = this.jigAt; navelOffsetAt(this.navel, v, J); x += J.x; y += J.y; z += J.z; }
     if (this.jig) { const J = this.jigAt; jiggleAt(this.jig, v, J, x, y, z); x += J.x; y += J.y; z += J.z; }
     if (this.skinned) {
       const SI = this.skinIndex!, SW = this.skinWeight!, n = this.boneCount;

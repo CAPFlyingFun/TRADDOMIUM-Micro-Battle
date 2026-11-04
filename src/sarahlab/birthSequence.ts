@@ -12,14 +12,22 @@
  *              round to her front (`turn`);
  *   CROWNING   the head's widest part at her opening, staying there between contractions now;
  *   BIRTH      the head out, a pause (`restitution`: nothing turns -- Joshua, 2026-11-02); a last push and the body follows;
- *   AFTER      her baby out and resting; her womb settling (later checkpoints lay the placenta and the rest).
+ *   AFTER      her baby out, lifted onto her and resting; her womb settling. Its cord is cut a while after it is
+ *              settled on her (`cutAfter`), or sooner with CUT CORD;
+ *   AFTERBIRTH the placenta (Joshua, 2026-11-03: "comes on its own after the cut, a DELIVER PLACENTA button for sooner"):
+ *              a few mild contractions; it peels off her womb's wall (`separate`), slides down her canal (`placentaDown`,
+ *              0 its leading edge at the top of her cervix .. 1 at her opening .. 2 all of it out), into the bowl
+ *              (`bowl`); her womb settles smaller again (`afterbirth`).
+ *
+ * The two buttons are MOMENTS on this clock (`BirthEvents`, FAST seconds): a cut or a placenta asked for sooner than its
+ * own time. Dragged back before one, it has not happened yet (the scene forgets it); with none, each comes on its own.
  *
  * The shape of it is from how midwives describe labour (contractions every few minutes, about a minute long; the head
  * moving forward with each and back a little between until it crowns; the head turning as it passes her pelvis and back
  * once born) -- with every length GAME TUNING, much shorter than a real labour.
  */
 
-export type BirthStage = 'labour' | 'pushing' | 'crowning' | 'birth' | 'after';
+export type BirthStage = 'labour' | 'pushing' | 'crowning' | 'birth' | 'after' | 'afterbirth';
 export type BirthPace = 'fast' | 'realistic';
 
 /** GAME TUNING: the FAST pace's seconds. */
@@ -41,6 +49,14 @@ export const BIRTH_TIMING = Object.freeze({
   /** after: its first stretch as it is born (`firstStretch` seconds long), lifted onto her over `toHer`, settled on her
    * by `settle`; her opening easing back over `close` */
   firstStretch: 3.5, toHer: 4, settle: 10, close: 14,
+  /** its cord cut on its own this long after it is settled on her (unless CUT CORD cuts it sooner) */
+  cutAfter: 12,
+  /** AFTERBIRTH: the placenta starts this long after the cut (unless DELIVER PLACENTA starts it sooner); so many mild
+   * contractions (`placentaSqueeze` of a birth's), `placentaEvery` apart; it peels off her womb's wall over
+   * `placentaSeparate`, comes down her canal over `placentaDown`, out of her over `placentaOut`, settles into the bowl
+   * over `placentaBowl`, and her womb settles smaller over `placentaSettle` from when it is out */
+  placentaAfterCut: 8, placentaContractions: 3, placentaEvery: 3.5, placentaLong: 0.6, placentaSqueeze: 0.55,
+  placentaSeparate: 3, placentaDown: 4, placentaOut: 2, placentaBowl: 1.5, placentaSettle: 8,
 });
 /** REALISTIC is the same birth this many times slower. GAME TUNING. */
 export const REALISTIC_STRETCH = 5;
@@ -75,17 +91,39 @@ export interface BirthMoment {
   readonly stretch: number;
   /** after the birth, how far her opening has eased back (0 as the body is born .. 1 settled) */
   readonly closing: number;
+  /** its cord cut (and when, FAST seconds; null not yet) */
+  readonly cut: boolean;
+  readonly cutAt: number | null;
+  /** AFTERBIRTH: seconds since the placenta started (below 0, not yet); how far it has peeled off her womb's wall (0..1);
+   * how far down (0 its leading edge at the top of her cervix .. 1 at her opening .. 2 all of it out); how far into the
+   * bowl (0..1); how far her womb has settled after it (0..1) */
+  readonly placentaFor: number;
+  readonly separate: number;
+  readonly placentaDown: number;
+  readonly bowl: number;
+  readonly afterbirth: number;
 }
+
+/** A cut or a placenta asked for sooner than its own time: the moment it was asked (FAST seconds), or null. */
+export interface BirthEvents { readonly cutAt?: number | null; readonly placentaAt?: number | null }
 
 const smooth = (a: number, b: number, v: number): number => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
 const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
 
-/** Each part's start and the whole length, in FAST seconds. */
-export function birthPlan(): { labour: number; pushing: number; crowning: number; birth: number; after: number; total: number } {
+/** Each part's start and the whole length, in FAST seconds -- the cut and the placenta at their own times, or at the
+ * moments `events` asked for them (never a cut before its navel is out of her, never a placenta before the cut). */
+export function birthPlan(events: BirthEvents = {}): { labour: number; pushing: number; crowning: number; birth: number; after: number; navelOut: number; cut: number; placenta: number; placentaOut: number; total: number } {
   const T = BIRTH_TIMING;
   const labour = 0, pushing = T.labourCount * T.labourEvery, crowning = pushing + T.pushCount * T.pushEvery;
   const birth = crowning + T.crowning, after = birth + T.headOut + T.restitution + T.bodyOut;
-  return { labour, pushing, crowning, birth, after, total: after + T.settle };
+  // (its navel out of her: half way along its body, in the body's last push)
+  const navelOut = birth + T.headOut + T.restitution + T.bodyOut * 0.5;
+  const ownCut = after + 0.5 + T.toHer + T.cutAfter;
+  const cut = events.cutAt !== null && events.cutAt !== undefined && Number.isFinite(events.cutAt) ? Math.min(ownCut, Math.max(navelOut, events.cutAt)) : ownCut;
+  const ownPlacenta = cut + T.placentaAfterCut;
+  const placenta = events.placentaAt !== null && events.placentaAt !== undefined && Number.isFinite(events.placentaAt) ? Math.min(ownPlacenta, Math.max(cut, events.placentaAt)) : ownPlacenta;
+  const placentaOut = placenta + T.placentaSeparate + T.placentaDown + T.placentaOut;
+  return { labour, pushing, crowning, birth, after, navelOut, cut, placenta, placentaOut, total: Math.max(after + T.settle, placentaOut + T.placentaSettle) };
 }
 
 /** A contraction's strength at `phase` (0..1 of its cycle): a rise and fall over the first `long` of it, then rest. */
@@ -94,9 +132,9 @@ export function squeeze(phase: number, long: number): number {
   return Math.sin((phase / long) * Math.PI) ** 1.5;
 }
 
-/** The birth at `seconds` since it began, at `pace`. */
-export function birthAt(seconds: number, pace: BirthPace = 'fast'): BirthMoment {
-  const T = BIRTH_TIMING, P = birthPlan(), stretch = pace === 'realistic' ? REALISTIC_STRETCH : 1;
+/** The birth at `seconds` since it began, at `pace` (and `events`: a cut or placenta asked for sooner, FAST seconds). */
+export function birthAt(seconds: number, pace: BirthPace = 'fast', events: BirthEvents = {}): BirthMoment {
+  const T = BIRTH_TIMING, P = birthPlan(events), stretch = pace === 'realistic' ? REALISTIC_STRETCH : 1;
   const real = Math.max(0, Number.isFinite(seconds) ? seconds : 0), t = real / stretch;
   let stage: BirthStage, contraction = 0, cervix = 1, engage = 1, down = 0, turnDeg: number = TURN_DEG.inWomb, onHer = 0, stretchK = 0, closing = 0;
   if (t < P.pushing) {
@@ -127,7 +165,7 @@ export function birthAt(seconds: number, pace: BirthPace = 'fast'): BirthMoment 
     // the head out (its middle past her opening by a third of the baby), held while it turns, then the rest of it
     down = u < T.headOut + T.restitution ? 1 + 0.35 * smooth(0, T.headOut, u) : 1.35 + 0.65 * smooth(T.headOut + T.restitution, T.headOut + T.restitution + T.bodyOut, u);
   } else {
-    stage = 'after';
+    stage = t < P.placenta ? 'after' : 'afterbirth';
     down = 2;
     const u = t - P.after;
     // lifted onto her; a stretch as it meets the air, and smaller ones as it settles
@@ -139,8 +177,22 @@ export function birthAt(seconds: number, pace: BirthPace = 'fast'): BirthMoment 
   // once it is out (2026-11-02, Joshua: "the baby is rotating halfway out of her body... either have it rotated before it
   // gets to the opening, or not at all as it looks weird"): the pause after the head is a pause, nothing turning
   if (stage === 'pushing' || stage === 'crowning') turnDeg = TURN_DEG.inWomb + (TURN_DEG.born - TURN_DEG.inWomb) * smooth(0.2, 0.75, down);
-  else if (stage === 'birth' || stage === 'after') turnDeg = TURN_DEG.born;
-  return { stage, seconds: real, contraction: clamp01(contraction), cervix: clamp01(cervix), engage: clamp01(engage), down, turnDeg, progress: clamp01(t / P.total), onHer, stretch: clamp01(stretchK), closing };
+  else if (stage === 'birth' || stage === 'after' || stage === 'afterbirth') turnDeg = TURN_DEG.born;
+  // THE AFTERBIRTH: mild contractions; the placenta peels off her womb's wall, comes down her canal and out of her, and
+  // settles into the bowl; her womb settles smaller after it
+  const v = t - P.placenta;
+  let separate = 0, placentaDown = 0, bowl = 0, afterbirth = 0;
+  if (v >= 0) {
+    if (v < T.placentaContractions * T.placentaEvery) contraction = Math.max(contraction, T.placentaSqueeze * squeeze((v % T.placentaEvery) / T.placentaEvery, T.placentaLong));
+    const down0 = T.placentaSeparate, out0 = down0 + T.placentaDown, bowl0 = out0 + T.placentaOut;
+    separate = smooth(0, T.placentaSeparate, v);
+    placentaDown = v < out0 ? smooth(down0, out0, v) : 1 + smooth(out0, bowl0, v);
+    bowl = smooth(bowl0, bowl0 + T.placentaBowl, v);
+    afterbirth = smooth(bowl0 - T.placentaOut * 0.5, bowl0 + T.placentaSettle, v);
+  }
+  const cut = t >= P.cut;
+  return { stage, seconds: real, contraction: clamp01(contraction), cervix: clamp01(cervix), engage: clamp01(engage), down, turnDeg, progress: clamp01(t / P.total), onHer, stretch: clamp01(stretchK), closing,
+    cut, cutAt: cut ? P.cut : null, placentaFor: v, separate, placentaDown, bowl, afterbirth };
 }
 
 /** The birth's whole length in seconds at `pace`. */
@@ -155,7 +207,7 @@ export function cervixLine(cervix: number): string {
 /** The line shown for it: where the birth is, her cervix, and her opening (`openCm`, as drawn) when given. */
 export function birthLine(m: BirthMoment | null, openCm?: number): string {
   if (!m) return 'BIRTH · not started';
-  const name: Record<BirthStage, string> = { labour: 'labour', pushing: 'pushing', crowning: 'crowning', birth: 'birth', after: 'born' };
+  const name: Record<BirthStage, string> = { labour: 'labour', pushing: 'pushing', crowning: 'crowning', birth: 'birth', after: 'born', afterbirth: 'afterbirth' };
   const squeezing = m.contraction > 0.15 ? ' · contraction' : '';
   const open = openCm !== undefined ? ` · Opening ${openCm.toFixed(1)} cm` : '';
   return `BIRTH · ${name[m.stage]}${squeezing} · ${cervixLine(m.cervix)}${open}`;

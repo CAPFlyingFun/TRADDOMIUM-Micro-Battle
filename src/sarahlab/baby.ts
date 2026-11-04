@@ -1543,9 +1543,9 @@ export const BABY_NAVEL = Object.freeze({
   fromCrown: 0.516,
 });
 /** Its cord once its navel is out of her, until it is cut (GAME TUNING): how much longer than the way from her opening
- * to its navel it hangs; then its stump (metres, a clamp's 2 to 3 cm), and how long after it is settled on her it is
- * cut (seconds of the FAST birth; REALISTIC stretches it) unless CUT CORD cuts it first. */
-export const CORD_CUT = Object.freeze({ slack: 1.15, stumpM: 0.03, stumpNodes: 6, autoAfterS: 12 });
+ * to its navel it hangs; then its stump (metres, a clamp's 2 to 3 cm) and its links. When it is cut is the birth's
+ * timeline's (birthSequence.ts `cutAfter`, or CUT CORD sooner). */
+export const CORD_CUT = Object.freeze({ slack: 1.15, stumpM: 0.03, stumpNodes: 6 });
 /** The placenta by week: [week, radius, thickness] (rest metres): about 22 cm across and 2.5 thick at term. BIOLOGICAL SHAPE. */
 export const PLACENTA: readonly (readonly [number, number, number])[] = [[12, 0.035, 0.008], [20, 0.07, 0.015], [28, 0.09, 0.02], [40, 0.11, 0.025], [42, 0.112, 0.026]];
 export const placentaSize = (week: number): { radius: number; thick: number } => ({ radius: lerpTable(PLACENTA, week, 1), thick: lerpTable(PLACENTA, week, 2) });
@@ -1773,4 +1773,26 @@ export function layPlacenta(g: THREE.BufferGeometry, spot: PlacentaSpot, womb: W
   lay(0, 0, 0);
   for (let r = 1; r <= PLACENTA_RINGS; r++) for (let s = 0; s < PLACENTA_SIDES; s++) lay(1 + (r - 1) * PLACENTA_SIDES + s, (s / PLACENTA_SIDES) * 2 * Math.PI, r / PLACENTA_RINGS);
   P.needsUpdate = true; g.computeVertexNormals(); g.computeBoundingSphere();
+}
+/**
+ * The same placenta delivered and lying open (`placentaGeometry`'s points, as `layPlacenta` numbers them): no longer
+ * following her womb's curve -- laid on her lining it is a shell as deep as its curve, and in a bowl it stood up out of it
+ * -- but a lens `spot.radius` across, in the plane its spot faced, its lining side on that plane and dished `dish` metres
+ * toward its own side at its rim (rest metres, her womb's frame as the spot is). Its middle where the laid one's is.
+ */
+export function placentaOpen(spot: PlacentaSpot, dish: number): Float32Array {
+  const per = 1 + PLACENTA_RINGS * PLACENTA_SIDES, out = new Float32Array(per * 2 * 3);
+  const n = spot.normal.clone().normalize(), o = n.clone().negate(), side = new THREE.Vector3(0, 1, 0).cross(o);
+  if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
+  side.normalize();
+  const up = new THREE.Vector3().crossVectors(o, side), p = new THREE.Vector3();
+  const lay = (k: number, ang: number, rho: number) => {
+    const thick = spot.thick * Math.sqrt(Math.max(0, 1 - rho * rho));
+    p.copy(spot.at).addScaledVector(side, rho * spot.radius * Math.cos(ang)).addScaledVector(up, rho * spot.radius * Math.sin(ang)).addScaledVector(n, dish * rho * rho);
+    p.toArray(out, k * 3);
+    p.addScaledVector(n, thick).toArray(out, (k + per) * 3);
+  };
+  lay(0, 0, 0);
+  for (let r = 1; r <= PLACENTA_RINGS; r++) for (let s = 0; s < PLACENTA_SIDES; s++) lay(1 + (r - 1) * PLACENTA_SIDES + s, (s / PLACENTA_SIDES) * 2 * Math.PI, r / PLACENTA_RINGS);
+  return out;
 }
