@@ -29,6 +29,7 @@
  *   up past the cut (`UNDER_TOP_MARGIN`).
  */
 import * as THREE from 'three';
+import { SkinPose } from './skinPose';
 import { BODY_REGIONS, type BodyMap } from './bodyRegions';
 import { necklineTop, type CoverageParams } from './paintTemplates';
 
@@ -135,6 +136,17 @@ function upperHull(pts: readonly { x: number; z: number; i: number }[]): { x: nu
 
 export class CleavageBridge {
   readonly mesh: THREE.Mesh;
+  private readonly pose: SkinPose;
+  private readonly localFromWorld = new THREE.Matrix4();
+  private readonly point = new Float32Array(3);
+  private refreshPose(): void {
+    this.localFromWorld.copy(this.body.matrixWorld).invert();
+    this.pose.refresh();
+  }
+  private vertex(v: number, out: THREE.Vector3): THREE.Vector3 {
+    this.pose.posedVertex(v, this.point);
+    return out.fromArray(this.point).applyMatrix4(this.localFromWorld);
+  }
   private readonly chest: number[] = [];
   /** Her skin that can be behind the sheet: in front of her neck's axis, at the bridge's heights, near her midline. */
   private readonly cleft: number[] = [];
@@ -154,6 +166,7 @@ export class CleavageBridge {
   private covered: ((v: number) => number) | null = null;
 
   constructor(private readonly body: THREE.SkinnedMesh, private readonly map: BodyMap) {
+    this.pose = new SkinPose(body);
     const chestId = BODY_REGIONS.findIndex((r) => r.id === 'chest') + 1;
     for (let v = 0; v < map.region.length; v++) {
       if (map.region[v] === chestId && map.front[v] > 0 && map.trunk[v] >= T_LOW - SLAB && map.trunk[v] <= T_HIGH + SLAB && map.lateral[v] < REACH) this.chest.push(v);
@@ -204,11 +217,12 @@ export class CleavageBridge {
    */
   reshape(): void {
     this.body.skeleton.update();
+    this.refreshPose();
     const facing = this.map.facing, pos = this.shaped;
     pos.clear();
     let sum = 0;
-    for (const v of this.chest) { const p = this.body.getVertexPosition(v, new THREE.Vector3()); pos.set(v, p); sum += p.x; }
-    for (const v of this.cleft) if (!pos.has(v)) pos.set(v, this.body.getVertexPosition(v, new THREE.Vector3()));
+    for (const v of this.chest) { const p = this.vertex(v, new THREE.Vector3()); pos.set(v, p); sum += p.x; }
+    for (const v of this.cleft) if (!pos.has(v)) pos.set(v, this.vertex(v, new THREE.Vector3()));
     this.midX = this.chest.length ? sum / this.chest.length : 0;
     const trunk = this.map.trunkLength, rows: Row[] = [];
     for (let r = 0; r < this.rowCount(); r++) {
@@ -255,7 +269,7 @@ export class CleavageBridge {
     this.underVersion = ++underNumber;
     if (!key) return;
     const T = this.map.trunkLength, facing = this.map.facing;
-    const at = (v: number) => this.shaped.get(v) ?? this.body.getVertexPosition(v, new THREE.Vector3());
+    const at = (v: number) => this.shaped.get(v) ?? this.vertex(v, new THREE.Vector3());
     const ends = rows.map((row) => [at(row.a).clone(), at(row.b).clone()] as const);
     smoothEnds(ends, SMOOTH, false);
     const mids = rows.map((row) => at(row.m));
@@ -326,6 +340,7 @@ export class CleavageBridge {
   update(): void {
     if (!this.mesh.visible || !this.params || this.rows.length < 2) return;
     this.body.skeleton.update();
+    this.refreshPose();
     const g = this.mesh.geometry, P = g.getAttribute('position') as THREE.BufferAttribute, R = g.getAttribute('fabricRest') as THREE.BufferAttribute;
     const RN = g.getAttribute('fabricRestNormal') as THREE.BufferAttribute;
     const rest = this.body.geometry.getAttribute('fabricRest') as THREE.BufferAttribute | undefined;
@@ -334,8 +349,8 @@ export class CleavageBridge {
     let top = 0;
     while (top < this.rows.length && (!this.covered || (this.covered(this.rows[top].a) > 0.5 && this.covered(this.rows[top].b) > 0.5))) top++;
     const rows = this.rows.slice(0, Math.max(2, top));
-    const ends = rows.map((row) => [this.body.getVertexPosition(row.a, new THREE.Vector3()), this.body.getVertexPosition(row.b, new THREE.Vector3())] as const);
-    const mids = rows.map((row) => this.body.getVertexPosition(row.m, new THREE.Vector3()));
+    const ends = rows.map((row) => [this.vertex(row.a, new THREE.Vector3()), this.vertex(row.b, new THREE.Vector3())] as const);
+    const mids = rows.map((row) => this.vertex(row.m, new THREE.Vector3()));
     // the ends hop a little sideways from slice to slice (each is the vertex the line touches): smoothed over the
     // slices either side, so the sheet's sides run in a smooth line over her breasts
     smoothEnds(ends, SMOOTH, false);
@@ -354,7 +369,7 @@ export class CleavageBridge {
     const normals = rows.map((row) => [normalOf(row.a), normalOf(row.b)] as const);
     smoothEnds(normals, SMOOTH_NORMAL, true);
     const N = g.getAttribute('normal') as THREE.BufferAttribute, C = g.getAttribute('color') as THREE.BufferAttribute;
-    const restOf = (v: number) => (rest ? new THREE.Vector3(rest.getX(v), rest.getY(v), rest.getZ(v)) : this.body.getVertexPosition(v, new THREE.Vector3()));
+    const restOf = (v: number) => (rest ? new THREE.Vector3(rest.getX(v), rest.getY(v), rest.getZ(v)) : this.vertex(v, new THREE.Vector3()));
     // the pattern is laid from the same smoothed ends, or the knit zigzags from row to row
     const restEnds = rows.map((row) => [restOf(row.a), restOf(row.b)] as const);
     smoothEnds(restEnds, SMOOTH, false);

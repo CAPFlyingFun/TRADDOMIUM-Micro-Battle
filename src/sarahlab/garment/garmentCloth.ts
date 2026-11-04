@@ -32,6 +32,7 @@
  *   particle's binding says where the settled garment has it.
  */
 import * as THREE from 'three';
+import { snapshotCapsules } from './capsules';
 import { ClothSim, type Capsules, type ClothSettings, type ClothStepStats } from '../clothSim';
 import { ClothSkin } from '../clothSkin';
 import { copyContacts, createContacts, type ClothBinding, type SkinContacts } from '../clothTypes';
@@ -961,7 +962,7 @@ export class GarmentCloth {
     if (this.weightless) this.sim.settings.gravity = [0, 0, 0];
     const stats = this.sim.step(dt, this.before, this.after, caps);
     this.sim.settings.damping = damping; this.sim.settings.gravity = gravity;
-    this.capsBefore = capsules ? cloneCapsules(capsules) : null;
+    this.capsBefore = capsules ? snapshotCapsules(capsules, this.capsBefore) : null;
     const swap = this.before; this.before = this.after; this.after = swap;
     const t1 = performance.now();
     const normals = this.sim.normals(), P = this.position.array as Float32Array, N = this.normal.array as Float32Array, vp = this.sewn.vertexParticle, slot = this.slotOf;
@@ -1227,7 +1228,6 @@ export class GarmentCloth {
   dispose(): void { this.mesh.removeFromParent(); this.mesh.geometry.dispose(); }
 }
 
-function cloneCapsules(c: Capsules): Capsules { return { count: c.count, a: c.a.slice(), b: c.b.slice(), radius: c.radius.slice() }; }
 
 /** Whether two per-slot arrays hold the same values. */
 function sameValues(a: Float32Array, b: Float32Array): boolean {

@@ -17,7 +17,7 @@
  * three.js, the room's side.
  */
 import * as THREE from 'three';
-import type { ClothSettings } from '../clothSim';
+import type { Capsules, ClothSettings } from '../clothSim';
 import { bodyInputOf, SARAH_V2_ARM_BONES, SARAH_V2_JOINTS } from './bodyInput';
 import { bodyCapsules, type CapsuleRequest } from './capsules';
 import { teeParams, type TeeParams } from './draft';
@@ -83,6 +83,9 @@ export class RoomGarment {
   private readonly qa = new THREE.Quaternion();
   private readonly qb = new THREE.Quaternion();
   private readonly qc = new THREE.Quaternion();
+  private readonly qd = new THREE.Quaternion();
+  private readonly frameQuaternion = new THREE.Quaternion();
+  private capsuleBuffer: Capsules | undefined;
   private readonly axis = new THREE.Vector3();
 
   constructor(options: RoomGarmentOptions) {
@@ -128,7 +131,7 @@ export class RoomGarment {
     if (!raise && !forward && !elbow) return;
     const bones = this.options.body.skeleton.bones, J = SARAH_V2_JOINTS;
     this.options.root.updateMatrixWorld(true);
-    const frame = this.options.root.getWorldQuaternion(new THREE.Quaternion());
+    const frame = this.options.root.getWorldQuaternion(this.frameQuaternion);
     const turn = (i: number, q: THREE.Quaternion) => {
       const b = bones[i];
       b.parent!.getWorldQuaternion(this.qa); b.getWorldQuaternion(this.qb);
@@ -137,16 +140,17 @@ export class RoomGarment {
     };
     for (let s = 0; s < 2; s++) {
       const sign = s === 0 ? 1 : -1;
-      const q = this.qc.setFromAxisAngle(this.axis.copy(Z).applyQuaternion(frame), sign * raise).multiply(new THREE.Quaternion().setFromAxisAngle(this.axis.copy(X).applyQuaternion(frame), -forward));
-      turn(J.shoulder[s], q.clone());
-      if (elbow) turn(J.elbow[s], new THREE.Quaternion().setFromAxisAngle(this.axis.copy(X).applyQuaternion(frame), -elbow));
+      const q = this.qc.setFromAxisAngle(this.axis.copy(Z).applyQuaternion(frame), sign * raise).multiply(this.qd.setFromAxisAngle(this.axis.copy(X).applyQuaternion(frame), -forward));
+      turn(J.shoulder[s], q);
+      if (elbow) turn(J.elbow[s], this.qd.setFromAxisAngle(this.axis.copy(X).applyQuaternion(frame), -elbow));
     }
   }
 
   /** One frame of the cloth, her capsules read from her as she is now. */
   frame(dt: number): void {
     const t = this.tailored, J = SARAH_V2_JOINTS;
-    const caps = bodyCapsules(this.options.body, { shoulder: J.shoulder, elbow: J.elbow, wrist: J.wrist, hip: J.hip, knee: J.knee }, t.measure, this.capsules, this.options.unitsPerMetre);
+    const caps = bodyCapsules(this.options.body, { shoulder: J.shoulder, elbow: J.elbow, wrist: J.wrist, hip: J.hip, knee: J.knee }, t.measure, this.capsules, this.options.unitsPerMetre, this.capsuleBuffer);
+    this.capsuleBuffer = caps;
     this.cloth.frame(dt, caps.count ? caps : undefined);
   }
 

@@ -1,3 +1,4 @@
+import { GarmentShapeTransfer } from './garmentShapeTransfer';
 import { BELLY_CURVES, BELLY_CURVE_NAMES, DEFAULT_BELLY_CURVE, type BellyCurve } from './bellyInterpolation';
 import { attachRecoveredMeshes, applyRecoveredBaseline, fitWeights, LEGGINGS_FIT_KEYS, SHIRT_FINE_FIT_KEYS, updateLeggingsHem, releaseRecoveredMeshes } from './recoveredClothes';
 import { garmentTexturePanel } from './garmentTexturePanel';
@@ -1414,10 +1415,25 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     return out;
   }
 
+  // Clothing owns these bindings; a new body gets new bindings. Native garment fields stay intact.
+  const garmentTransfers = new WeakMap<THREE.SkinnedMesh, GarmentShapeTransfer>();
+  function followMissingGarmentFields(weights: Readonly<Record<string, number>>): void {
+    const b = bodyOf(), source = b ? shaped.find((s) => s.mesh === b.mesh) : undefined;
+    if (!b || !source) return;
+    const wanted = new Set([...source.fields.fields.keys()].filter((n) => !!weights[n] && (n.startsWith('shape:baby:') || n.startsWith('shape:milk:'))));
+    if (!wanted.size) return;
+    const targets = shaped.filter((s) => s.mesh.userData.recoveredShirt || s.mesh.userData.recoveredLeggings);
+    if (!targets.length) return;
+    let transfer = garmentTransfers.get(b.mesh);
+    if (!transfer) { transfer = new GarmentShapeTransfer(b.mesh, source.fields); garmentTransfers.set(b.mesh, transfer); }
+    for (const target of targets) target.fields = transfer.sync(target.mesh, target.fields, source.fields, (name) => wanted.has(name)).fields;
+  }
+
   function applyLook(): void {
     babyDirty = true;
     const drawn = shownBump(); bellySettleApplied = bellySettle;
     const fieldWeights = fieldWeightsAt(drawn);
+    followMissingGarmentFields(fieldWeights);
     const build = currentBuild();
     for (const { mesh, fields } of shaped) applyShapeFields(mesh, fields, {
       ...fieldWeights,

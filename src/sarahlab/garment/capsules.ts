@@ -41,7 +41,7 @@ export interface CapsuleBones {
   readonly knee: readonly [number, number];
 }
 
-const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpC = new THREE.Vector3();
+const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpC = new THREE.Vector3(), tmpD = new THREE.Vector3();
 
 /** How many capsules a request makes. */
 export function capsuleCount(r: CapsuleRequest): number { return (r.arms ? 4 : 0) + (r.legs ? 2 : 0) + (r.stool ? 1 : 0); }
@@ -60,17 +60,29 @@ export function bodyCapsules(body: THREE.SkinnedMesh, bones: CapsuleBones, measu
   if (request.arms) for (let s = 0; s < 2; s++) {
     const g = measure.arms[s].girths;
     B[bones.shoulder[s]].getWorldPosition(tmpA); B[bones.elbow[s]].getWorldPosition(tmpB); B[bones.wrist[s]].getWorldPosition(tmpC);
-    const upper = circle(Math.max(...g.slice(3, 8))), fore = circle(Math.max(...g.slice(12, 16)));
-    put(tmpA.clone().lerp(tmpB, ARM_START), tmpB, upper);
+    const upper = circle(maxBand(g, 3, 8)), fore = circle(maxBand(g, 12, 16));
+    put(tmpD.copy(tmpA).lerp(tmpB, ARM_START), tmpB, upper);
     put(tmpB, tmpC, fore);
   }
   if (request.legs) for (let s = 0; s < 2; s++) {
     B[bones.hip[s]].getWorldPosition(tmpA); B[bones.knee[s]].getWorldPosition(tmpB);
-    put(tmpA.clone().lerp(tmpB, LEG_START), tmpB, (measure.thigh.girth / (2 * Math.PI)) * LEG_RADIUS_SHARE * unitsPerMetre);
+    put(tmpD.copy(tmpA).lerp(tmpB, LEG_START), tmpB, (measure.thigh.girth / (2 * Math.PI)) * LEG_RADIUS_SHARE * unitsPerMetre);
   }
   if (request.stool) {
     const { x, z, radius, top } = request.stool;
     put(tmpA.set(x, 0, z), tmpB.set(x, Math.max(0, top - radius), z), radius);
   }
   return caps;
+}
+
+/** Copy AFTER the solver has used the previous frame; never alias the live buffers. */
+export function snapshotCapsules(now: Capsules, out?: Capsules | null): Capsules {
+  const snapshot = out && out.count === now.count ? out : { count: now.count, a: new Float32Array(now.count * 3), b: new Float32Array(now.count * 3), radius: new Float32Array(now.count) };
+  snapshot.a.set(now.a); snapshot.b.set(now.b); snapshot.radius.set(now.radius);
+  return snapshot;
+}
+function maxBand(values: ArrayLike<number>, start: number, end: number): number {
+  let largest = -Infinity;
+  for (let i = start; i < Math.min(end, values.length); i++) largest = Math.max(largest, values[i]);
+  return largest;
 }

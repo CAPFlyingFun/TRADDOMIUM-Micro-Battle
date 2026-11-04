@@ -25,6 +25,7 @@
  * pose changes (a slider, STAND / SIT), at most every REBUILD_MS.
  */
 import * as THREE from 'three';
+import { attachJiggle, jiggleOf, jiggleWeights, JIGGLE_ATTRIBUTE, PUSH_ATTRIBUTE } from './softBody';
 import { BODY_REGIONS, type BodyMap } from './bodyRegions';
 
 /** The sheet's top, on her trunk (0 her hip joints, 1 the base of her neck): above her belly's fullest point. */
@@ -137,6 +138,10 @@ export class TunicDrape {
   private readonly motion: number[] = [];
   /** Her motion shapes' weights when the drape was last fitted to her. */
   private builtAt: number[] = [];
+  /** Existing nearest-skin correspondence, retained only for live pushes; never searched per frame. */
+  private pushSources = new Int32Array(0);
+  private pushWeights = new Float32Array(0);
+  private pushCount = 0;
   /**
    * Per vertex of her body, 0 to 1: how far the drape hangs clear of her skin there, where it shows (under her belly,
    * under her seat). The shirt's paint is taken off that skin (`fabricMaterial.ts`, `fabricHang`): cloth hanging away
@@ -221,6 +226,17 @@ export class TunicDrape {
     if (this.dirty && now - this.lastBuild >= REBUILD_MS) { this.lastBuild = now; this.dirty = false; this.build(this.hem); this.mesh.visible = true; }
     const from = this.body.morphTargetInfluences, to = this.mesh.morphTargetInfluences;
     if (from && to) this.motion.forEach((at, i) => { to[i] = (from[at] ?? 0) - (this.builtAt[i] ?? 0); });
+    const source = jiggleOf(this.body), target = jiggleOf(this.mesh);
+    if (source && target) {
+      target.push.fill(0);
+      for (let i = 0; i < this.pushCount; i++) for (let q = 0; q < NEAREST; q++) {
+        const slot = i * NEAREST + q, v = this.pushSources[slot];
+        if (v < 0) continue;
+        const w = this.pushWeights[slot];
+        for (let c = 0; c < 3; c++) target.push[i * 3 + c] += w * source.push[v * 3 + c];
+      }
+      (this.mesh.geometry.getAttribute(PUSH_ATTRIBUTE) as THREE.BufferAttribute).needsUpdate = true;
+    }
   }
 
   private build(hemT: number): void {
@@ -233,6 +249,8 @@ export class TunicDrape {
     const cand = this.candidates, nc = cand.length, px = new Float64Array(nc), py = new Float64Array(nc), pz = new Float64Array(nc);
     const p = new THREE.Vector3();
     body.skeleton.update();
+    // Fit to morphs + bones deliberately: the shared jiggle shader below adds the soft
+    // shape exactly once. Baking soft displacement here as well would double it.
     for (let i = 0; i < nc; i++) { body.getVertexPosition(cand[i], p); px[i] = p.x; py[i] = p.y; pz[i] = p.z; }
 
     const rows = Math.max(2, Math.min(this.maxRows, Math.ceil((T_TOP - hemT) / ROW_STEP) + 1));
@@ -666,6 +684,18 @@ export class TunicDrape {
     }
     for (const a of [P, C, FR, FN, SI, SW, ...(targets ?? [])]) a.needsUpdate = true;
     g.computeBoundingSphere();
+    const sourceJiggle = jiggleOf(body);
+    if (sourceJiggle && attachJiggle(this.mesh, sourceJiggle.uniforms)) {
+      // These motion targets were interpolated and smoothed by the existing fitter.
+      // Recompute follow weights when a hem/shape rebuild changes their geometry.
+      const weights = jiggleWeights(g, this.mesh.morphTargetDictionary);
+      if (weights) jiggleOf(this.mesh)!.weights.set(weights);
+      (g.getAttribute(JIGGLE_ATTRIBUTE) as THREE.BufferAttribute).needsUpdate = true;
+      this.pushCount = n;
+      this.pushSources = new Int32Array(n * NEAREST).fill(-1);
+      this.pushWeights = new Float32Array(nearW);
+      for (let i = 0; i < this.pushSources.length; i++) if (near[i] >= 0) this.pushSources[i] = cand[near[i]];
+    }
   }
 
   dispose(): void {

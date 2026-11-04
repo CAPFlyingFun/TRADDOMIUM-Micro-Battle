@@ -31,6 +31,7 @@
  * bones brings those up to date first (the renderer's scene update does it every frame).
  */
 import * as THREE from 'three';
+import { clothingMorphedVertex } from './clothingPose';
 
 /**
  * One point on her: a triangle of the FULL canonical triangle list and its barycentric weights. Declared here as well
@@ -49,7 +50,6 @@ const SCREEN_CELL_PX = 16;
 /** How far past the viewport's edges the tap grid reaches, so a slop circle at the edge of the screen still finds her. */
 const SCREEN_MARGIN_PX = 64;
 /** Three's own unskinned vertex read: base position plus morph targets. The skinning is applied here, see `posedVertex`. */
-const MORPHED_VERTEX = THREE.Mesh.prototype.getVertexPosition;
 /** A rest point this many cells off the grid is not a question about her: answered by brute force rather than rings. */
 const FAR_CELLS = 1 << 24;
 
@@ -555,7 +555,7 @@ export class BodySurface {
    */
   private posedVertex(v: number, pos: THREE.Vector3, N: THREE.BufferAttribute | THREE.InterleavedBufferAttribute | null, nrm: THREE.Vector3 | null): void {
     const m = this.mesh, g = m.geometry, sk = m.skeleton;
-    MORPHED_VERTEX.call(m, v, pos);
+    clothingMorphedVertex(m, v, pos);
     if (nrm && N) {
       nrm.set(N.getX(v), N.getY(v), N.getZ(v));
       // her morphs turn her surface as well as moving it (her file carries a normal for every morph target): a 200%

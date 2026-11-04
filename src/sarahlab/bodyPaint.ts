@@ -19,6 +19,7 @@
  * Core arithmetic is plain arrays (tested without a GPU); `pick` reads three's posed vertex positions.
  */
 import * as THREE from 'three';
+import { SkinPose } from './skinPose';
 import { bodyDetail } from './bodyDetail';
 import type { BodyMap } from './bodyRegions';
 
@@ -141,6 +142,8 @@ export const UNDO_STEPS = 30;
 
 /** The body's paint, as live data on its geometry. */
 export class BodyPaint {
+  private readonly pose: SkinPose;
+  private readonly posedPoint = new Float32Array(3);
   readonly weights: Float32Array;
   private readonly attribute: THREE.BufferAttribute;
   private readonly undoStack: { layer: number; bytes: Uint8Array }[] = [];
@@ -159,6 +162,7 @@ export class BodyPaint {
   private screen: { x: Float32Array; y: Float32Array; depth: Float32Array } | null = null;
 
   constructor(readonly mesh: THREE.SkinnedMesh) {
+    this.pose = new SkinPose(mesh);
     const g = mesh.geometry as THREE.BufferGeometry;
     const have = g.getAttribute(PAINT_ATTRIBUTE) as THREE.BufferAttribute | undefined;
     if (have) { this.attribute = have; this.weights = have.array as Float32Array; return; }
@@ -283,8 +287,10 @@ export class BodyPaint {
     const g = this.mesh.geometry as THREE.BufferGeometry, n = g.getAttribute('position').count;
     const x = new Float32Array(n), y = new Float32Array(n), depth = new Float32Array(n), v = new THREE.Vector3();
     this.mesh.updateMatrixWorld(true);
+    const pose = this.pose, point = this.posedPoint;
+    pose.refresh();
     for (let i = 0; i < n; i++) {
-      this.mesh.getVertexPosition(i, v).applyMatrix4(this.mesh.matrixWorld).project(camera);
+      pose.posedVertex(i, point); v.fromArray(point).project(camera);
       x[i] = (v.x * 0.5 + 0.5) * width; y[i] = (0.5 - v.y * 0.5) * height; depth[i] = v.z;
     }
     this.screen = { x, y, depth };
