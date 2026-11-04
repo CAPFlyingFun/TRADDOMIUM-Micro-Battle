@@ -22,6 +22,7 @@ import { setClothTrim } from './clothTrim';
 import { setClothDetail } from './clothDetail';
 import { DetailSpots, SARAH_V2_DETAIL_POINTS, SARAH_V2_LITE_TEE_NAVEL, TeeNavel } from './detailSpots';
 import { SkinPose } from './skinPose';
+import { SkinContact, spreadTriangles } from './skinContact';
 import { SKIN_BRUSH_CM, SKIN_CHOICES, SKIN_ORIGINAL_IMAGE, SKIN_SWATCHES, SKIN_TEXTURE_CM, hexRgb, nextSkin, skinBrushLine, skinLine, skinNote, skinStrengthLine, skinTextureLine, type SkinId } from './skinChoices';
 import { SkinPainter, tilePattern, type SkinImage, type SkinPattern, type SkinStrokeSettings } from './skinPaint';
 import { ensureRest } from './fabricMaterial';
@@ -117,25 +118,39 @@ const BIRTH_REST = Object.freeze({ top: 1.2, span: 0.3, across: 0.05, depth: 0.3
 const BABY_BODY_FADE = [0.3, 0.7] as const;
 /** GAME TUNING: where a hand rests on a knee -- over its top, the palm `capTilt` of the way from the thigh's top round to
  * the knee's point, the fingertip `capPast` beyond the knee and `capOut` off the bone, the wrist `lift` higher than the
- * fingers (metres); the elbow's place round the arm tried at
- * `poleSteps` places, an elbow in toward her costing `poleOut`, and (holding her baby in her arms) each metre the elbow
- * is from where its head lies costing `elbowWant` (as radians of wrist twist do); each metre her fingertip ends up from
- * where it was asked costing `tipMiss` (a reach past her arm's length, or a hand her wrist could not turn to); the turns
- * (degrees, about the palm's face) the fingers' way is tried at from the way asked, each radian of turn costing
- * `fingerTurnCost`; and how far (metres) the place asked moves before the whole search is made again (`searchAgain`;
- * nearer, round last frame's) */
-const KNEE_HANDS = Object.freeze({ capOut: 0.058, capTilt: 0.3, capPast: -0.03, lift: 0.012, poleSteps: 24, poleOut: 1.5, elbowWant: 10, tipMiss: 10, fingerTurns: [0, -25, 25, -50, 50, -75, 75], fingerTurnCost: 0.15, searchAgain: 0.02 });
+ * fingers (metres); the elbow's place round the arm tried at `poleSteps` places, an elbow in toward her costing
+ * `poleOut`, and (holding her baby in her arms) each metre the elbow is from where its head lies costing `elbowWant` (as
+ * radians of wrist twist do); each metre her fingertip ends up from where it was asked costing `tipMiss` (a reach past
+ * her arm's length, or a hand her wrist could not turn to); the turns (degrees, about the palm's face) the fingers' way
+ * is tried at from the way asked, each radian of turn costing `fingerTurnCost`; and how far (metres) the place asked
+ * jumps in one frame before the whole search is made again (`searchAgain`). A place that moves less is followed from
+ * last frame's choice, the elbow's place `followPoles` either way of it: the elbow goes with a moving hand instead of
+ * flipping round it, and a hand changing holds no longer pays for the whole search every frame (with her torso to keep
+ * out of, 16 ms a frame in the probe); once it stops, the whole search is made once more where it stopped */
+const KNEE_HANDS = Object.freeze({ capOut: 0.058, capTilt: 0.3, capPast: -0.03, lift: 0.012, poleSteps: 24, poleOut: 1.5, elbowWant: 10, tipMiss: 10, fingerTurns: [0, -25, 25, -50, 50, -75, 75], fingerTurnCost: 0.15, searchAgain: 0.02, followPoles: 2 });
+/**
+ * HER ARMS KEEP OUT OF HER (2026-11-04, Joshua: "her arm is in her stomach a little bit"; skinContact.ts). Her torso's
+ * skin as drawn, sampled a triangle each `spacing` (rest metres) over the part of her in `box` (her rest frame: `across`
+ * either side of her middle, `from` to `to` up her, front of `back`) that is not her arms, neck or head, in a grid of
+ * `cell`. Each arm asked at `points` + 1 places along its upper arm (from `upperFrom` of the way out of her shoulder --
+ * nearer, it is joined to her) and its forearm (to `foreTo` of the way to her wrist -- her hand is laid on what it holds
+ * by its own target), each round to its radius (BIOLOGICAL SHAPE, a slim adult woman's: `upper` at her shoulder's end and
+ * her elbow's, `fore` at her elbow's and her wrist's; metres). In her by more than `slack` (soft skin gives that much
+ * where an arm rests on her) costs `weight` a metre, as radians of a hand turned from the way asked do. GAME TUNING.
+ */
+const ARM_IN_HER = Object.freeze({ spacing: 0.025, cell: 0.05, box: { across: 0.25, from: 0.8, to: 1.45, back: -0.08 }, upperFrom: 0.4, foreTo: 0.9, points: 4, upper: [0.04, 0.034], fore: [0.033, 0.025], slack: 0.006, weight: 50 });
 /**
  * GAME TUNING (P2, POSITION B -- cradled in her arms, Joshua 2026-11-03): her baby on its back across her, its head to
  * her left in the crook of her left elbow, her left forearm under its back and her left hand under its bottom, her right
  * hand on its tummy. In her rest frame (metres): its middle at `y` up her, `left` toward her left and `out` off her skin
- * there; its length tipped `rise` up toward its head; its back turned `lie` (radians) from her chest down onto her
+ * there -- and its middle at least `armClear` out from her belly `armBelow` under it, where her forearm passes beneath
+ * it; its length tipped `rise` up toward its head; its back turned `lie` (radians) from her chest down onto her
  * forearm (0 would be its back flat against her chest -- a palm under it there would face away from her, a turn no
  * forearm makes: her left hand stood a hand short of it, its wrist bent as far as a wrist goes); her elbow `crook`
  * under its head and `past` beyond it; her right palm `tummy` of the way from its chest to its hips; and the seconds it
  * takes to turn into her arms or back onto her
  */
-const BABY_CRADLE = Object.freeze({ y: 1.16, left: -0.03, out: 0.1, rise: 0.3, lie: 1.2, crook: 0.08, past: 0.03, tummy: 0.4, arc: 0.08, seconds: 2.2 });
+const BABY_CRADLE = Object.freeze({ y: 1.16, left: -0.03, out: 0.1, rise: 0.3, lie: 1.2, armBelow: 0.08, armClear: 0.065, crook: 0.08, past: 0.03, tummy: 0.4, arc: 0.08, seconds: 2.2 });
 /** GAME TUNING (P2): her hands on her baby lying on her -- her left palm's middle this share of the way from its chest up
  * to its neck, her right palm's this far (metres) down from its hips toward its feet, cupped this much over its bottom,
  * its fingers this share down along it toward its legs (the rest across it);
@@ -2951,7 +2966,35 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    */
   const kneeTips: Record<string, THREE.Vector3> = {};
   /** each arm's last reach: where it was asked to, and the finger turn and elbow place it chose (handsOnKnees) */
-  const armSearch: Record<string, { at: THREE.Vector3; fi: number; pi: number } | undefined> = {};
+  const armSearch: Record<string, { last: THREE.Vector3; full: THREE.Vector3; fi: number; pi: number } | undefined> = {};
+  /**
+   * HER TORSO'S SKIN AS DRAWN THIS FRAME (ARM_IN_HER, skinContact.ts): which of her triangles are sampled is chosen once a
+   * body, on her rest shape -- in the box, and none whose corners her arms, her neck or her head carry most (her own arm
+   * would read as skin round itself); laid afresh each call from her as she is posed now.
+   */
+  let torsoTris: { mesh: THREE.SkinnedMesh; corners: Uint32Array } | null = null, torsoPose: SkinPose | null = null;
+  const torsoContact = new SkinContact();
+  function torsoSkin(sk: THREE.SkinnedMesh): SkinContact | null {
+    const f = babyFrame, j = measure?.joints;
+    if (!f || !j) return null;
+    if (torsoTris?.mesh !== sk) {
+      const g = sk.geometry, pos = g.getAttribute('position') as THREE.BufferAttribute, si = g.getAttribute('skinIndex'), sw = g.getAttribute('skinWeight');
+      if (!pos || !si || !sw) return null;
+      // (the bones that are her arms, her neck and her head: each under one of these)
+      const bones = sk.skeleton.bones, roots = [j.shoulderL, j.shoulderR, j.neck].map((i) => bones[i]).filter(Boolean);
+      const off = new Uint8Array(bones.length);
+      bones.forEach((b, i) => { for (let o: THREE.Object3D | null = b; o; o = o.parent) if (roots.includes(o as THREE.Bone)) { off[i] = 1; break; } });
+      const carried = (v: number): boolean => { let most = 0, at = 0; for (let k = 0; k < 4; k++) { const w = sw.getComponent(v, k); if (w > most) { most = w; at = si.getComponent(v, k); } } return off[at] === 1; };
+      const X = ARM_IN_HER.box, restOf = (v: number, out: THREE.Vector3) => out.fromBufferAttribute(pos, v).applyMatrix4(f.meshToRest), v3 = new THREE.Vector3();
+      const inBox = (v: number) => { restOf(v, v3); return Math.abs(v3.x) < X.across && v3.y > X.from && v3.y < X.to && v3.z > X.back && !carried(v); };
+      torsoTris = { mesh: sk, corners: spreadTriangles(g.index ? g.index.array : null, pos.count, restOf, (a, b, c) => inBox(a) && inBox(b) && inBox(c), ARM_IN_HER.spacing) };
+      torsoPose = new SkinPose(sk);
+    }
+    if (!torsoPose || torsoTris.corners.length === 0) return null;
+    torsoPose.refresh();
+    torsoContact.lay(torsoPose, torsoTris.corners, ARM_IN_HER.cell * M);
+    return torsoContact;
+  }
   /** Each arm's joints as a real arm's (armJoints.ts), read once from her skeleton's bind. */
   const armJointsFor = new Map<string, ArmJoints>();
   function armJointsOf(name: 'L' | 'R', sk: THREE.SkinnedMesh, sh: number, el: number, wr: number, h: { tip: number; knuckles: number[]; index: number; little: number }, other: number): ArmJoints {
@@ -3050,6 +3093,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const hand = handJointsOf(B);
     const out: Record<string, number> = {};
     { let top: THREE.Object3D = bones[0]; while (top.parent && (top.parent as THREE.Bone).isBone) top = top.parent; (top.parent ?? top).updateMatrixWorld(true); }
+    // her torso as drawn now, for her arms to keep out of (ARM_IN_HER)
+    const t0 = performance.now(), torso = torsoSkin(sk), AI = ARM_IN_HER;
+    out.contactMs = performance.now() - t0;
     const arm = (sh: number, el: number, wr: number, hip: number, knee: number, ankle: number, other: number, name: 'L' | 'R') => {
       const h = hand[name === 'L' ? 0 : 1]; if (!h || bones[el]?.parent !== bones[sh] || bones[wr]?.parent !== bones[el]) return;
       const S = wp(sh), H = wp(hip), Kn = wp(knee), A = wp(ankle), td = Kn.clone().sub(H), thigh = td.length(); td.normalize();
@@ -3105,16 +3151,24 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // fingers turned from the way asked a little; and a fingertip that did not get there -- the turn of the hand alone
         // does not see a wrist held short of a place past her reach)
         const miss = wp(h.tip).distanceTo(T) / perM;
-        return { p, cost: p.residual + K.tipMiss * miss + K.poleOut * Math.max(0, -pole.dot(outw)) + K.fingerTurnCost * Math.abs(yaw) + (elbowWant ? elbowWant.k * K.elbowWant * (E.distanceTo(elbowWant.at) / perM) : 0) };
+        // (and her arm into her own body, past what her skin gives, as it is posed: ARM_IN_HER)
+        let inHer = 0;
+        if (torso) {
+          const Ew = wp(el), Ww = wp(wr);
+          inHer = Math.max(torso.limbIn(S, Ew, AI.upper[0] * perM, AI.upper[1] * perM, AI.upperFrom, 1, AI.points), torso.limbIn(Ew, Ww, AI.fore[0] * perM, AI.fore[1] * perM, 0, AI.foreTo, AI.points)) / perM;
+        }
+        return { p, inHer, cost: p.residual + K.tipMiss * miss + AI.weight * Math.max(0, inHer - AI.slack) + K.poleOut * Math.max(0, -pole.dot(outw)) + K.fingerTurnCost * Math.abs(yaw) + (elbowWant ? elbowWant.k * K.elbowWant * (E.distanceTo(elbowWant.at) / perM) : 0) };
       };
       const memo = armSearch[name], F = K.fingerTurns.length, NP = K.poleSteps;
-      const all = !memo || memo.at.distanceTo(T) > K.searchAgain * perM;
+      const step = memo ? memo.last.distanceTo(T) : Infinity, again = K.searchAgain * perM;
+      const all = !memo || step > again || (step < 0.05 * again && memo.full.distanceTo(T) > again);
       let bestF = memo?.fi ?? 0, bestP = memo?.pi ?? 0, bestCost = Infinity;
       const tryAt = (fi: number, pi: number) => { reset(); const c = place(fi, pi).cost; if (c < bestCost) { bestCost = c; bestF = fi; bestP = pi; } };
       if (all) { for (let fi = 0; fi < F; fi++) for (let pi = 0; pi < NP; pi++) tryAt(fi, pi); }
-      else { const f0 = bestF, p0 = bestP; for (let df = -1; df <= 1; df++) for (let dp = -1; dp <= 1; dp++) { const fi = f0 + df; if (fi >= 0 && fi < F) tryAt(fi, (p0 + dp + NP) % NP); } }
-      armSearch[name] = { at: (all ? T.clone() : memo!.at), fi: bestF, pi: bestP };
-      reset(); const fin = place(bestF, bestP).p;
+      else { const f0 = bestF, p0 = bestP, fp = K.followPoles; for (let df = -1; df <= 1; df++) for (let dp = -fp; dp <= fp; dp++) { const fi = f0 + df; if (fi >= 0 && fi < F) tryAt(fi, (p0 + dp + NP) % NP); } }
+      armSearch[name] = { last: T.clone(), full: all ? T.clone() : memo!.full, fi: bestF, pi: bestP };
+      reset(); const done = place(bestF, bestP), fin = done.p;
+      out[name + 'In'] = Number.isFinite(done.inHer) ? +(done.inHer * 100).toFixed(1) : -99;
       out[name + 'Reach'] = +reachShown.toFixed(3);
       out[name + 'TwistDeg'] = Math.round(fin.residual * 180 / Math.PI);
       out[name + 'ElbowDeg'] = Math.round(fin.elbowDeg); out[name + 'PronDeg'] = Math.round(fin.pronationDeg); out[name + 'WristFlexDeg'] = Math.round(fin.wristFlexDeg); out[name + 'WristRadialDeg'] = Math.round(fin.wristRadialDeg); out[name + 'FingerTurn'] = K.fingerTurns[bestF];
@@ -3122,14 +3176,16 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       // (how far its fingertip is from where it was to go, cm, for the probes)
       out[name] = +(wp(h.tip).distanceTo(T) / perM * 100).toFixed(1);
     };
+    const t1 = performance.now();
     arm(j.shoulderL, j.elbowL, j.wristL, j.hipL, j.kneeL, j.ankleL, j.shoulderR, 'L');
     arm(j.shoulderR, j.elbowR, j.wristR, j.hipR, j.kneeR, j.ankleR, j.shoulderL, 'R');
+    out.armsMs = performance.now() - t1;
     // (and every other skeleton of hers -- her body may be drawn by one her clothes and helpers do not share -- given the
     // same turns, bone for bone by name)
     { const moved = [j.shoulderL, j.elbowL, j.wristL, j.shoulderR, j.elbowR, j.wristR].map((i) => bones[i]);
       const seen = new Set<THREE.Skeleton>([sk.skeleton]);
       for (const m of skinned) { if (!m.skeleton || seen.has(m.skeleton)) continue; seen.add(m.skeleton); for (const b of moved) { const o = m.skeleton.bones.find((x) => x.name === b.name); if (o && o !== b) o.quaternion.copy(b.quaternion); } } }
-    kneeHold = { L: out.L ?? -1, R: out.R ?? -1, holding: out.L !== undefined && out.R !== undefined, reachL: out.LReach ?? -1, reachR: out.RReach ?? -1, wristTwistL: out.LTwistDeg ?? -1, wristTwistR: out.RTwistDeg ?? -1, elbowL: out.LElbowDeg ?? -1, elbowR: out.RElbowDeg ?? -1, pronL: out.LPronDeg ?? 0, pronR: out.RPronDeg ?? 0, wristFlexL: out.LWristFlexDeg ?? 0, wristFlexR: out.RWristFlexDeg ?? 0, wristRadL: out.LWristRadialDeg ?? 0, wristRadR: out.RWristRadialDeg ?? 0 };
+    kneeHold = { L: out.L ?? -1, R: out.R ?? -1, holding: out.L !== undefined && out.R !== undefined, reachL: out.LReach ?? -1, reachR: out.RReach ?? -1, wristTwistL: out.LTwistDeg ?? -1, wristTwistR: out.RTwistDeg ?? -1, elbowL: out.LElbowDeg ?? -1, elbowR: out.RElbowDeg ?? -1, pronL: out.LPronDeg ?? 0, pronR: out.RPronDeg ?? 0, wristFlexL: out.LWristFlexDeg ?? 0, wristFlexR: out.RWristFlexDeg ?? 0, wristRadL: out.LWristRadialDeg ?? 0, wristRadR: out.RWristRadialDeg ?? 0, inL: out.LIn ?? -99, inR: out.RIn ?? -99, contactMs: +(out.contactMs ?? 0).toFixed(2), armsMs: +(out.armsMs ?? 0).toFixed(2), skinSamples: torso?.samples ?? 0 };
   }
   /** Each hand's joints, from her bind: its fingertip (the wrist's furthest descendant), the knuckles, the index and the
    * little finger's first joints, and the sign that turns (knuckles x little-to-index) into the palm (as bindPalm). */
@@ -4333,7 +4389,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * head, her left palm under its bottom, her right palm on its tummy (each a point and the way the palm faces, rest
    * frame; babyHandTarget takes them to the world). Worked out from her skin as drawn, again when that changes.
    */
-  let cradle: { position: THREE.Vector3; quaternion: THREE.Quaternion; head: THREE.Vector3; bottom: THREE.Vector3; middle: THREE.Vector3; long: THREE.Vector3; back: THREE.Vector3 } | null = null, cradleKey = '';
+  let cradle: { position: THREE.Vector3; quaternion: THREE.Quaternion; head: THREE.Vector3; bottom: THREE.Vector3; middle: THREE.Vector3; long: THREE.Vector3; back: THREE.Vector3; front: number; under: number } | null = null, cradleKey = '';
   function cradlePlace(scale: number): typeof cradle {
     const key = `${shownBump().toFixed(1)}|${pose}|${scale.toFixed(3)}`;
     if (cradle && cradleKey === key) return cradle;
@@ -4342,10 +4398,15 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     cradleKey = key;
     const C = BABY_CRADLE;
     // her front at that height: the furthest forward of her skin within a few centimetres of it, near her middle
-    let front = -Infinity;
-    for (let i = 0; i < skin.length; i += 3) if (Math.abs(skin[i + 1] - C.y) < 0.02 && Math.abs(skin[i] - C.left) < 0.08) front = Math.max(front, skin[i + 2]);
+    let front = -Infinity, under = -Infinity;
+    for (let i = 0; i < skin.length; i += 3) {
+      if (Math.abs(skin[i + 1] - C.y) < 0.02 && Math.abs(skin[i] - C.left) < 0.08) front = Math.max(front, skin[i + 2]);
+      // (and where her forearm passes under it, `armBelow` lower and across most of her: her belly there, which stands
+      // further out than her skin under her breasts -- her arm went into it, Joshua 2026-11-04)
+      if (Math.abs(skin[i + 1] - (C.y - C.armBelow)) < 0.025 && Math.abs(skin[i] - C.left) < 0.14) under = Math.max(under, skin[i + 2]);
+    }
     if (!Number.isFinite(front)) return null;
-    const middle = new THREE.Vector3(C.left, C.y, front + C.out);
+    const middle = new THREE.Vector3(C.left, C.y, Math.max(front + C.out, under + C.armClear));
     // its length across her toward her left (+x in her rest frame), tipped up toward its head; its back toward her and
     // turned down onto her forearm
     const long = new THREE.Vector3(1, C.rise, 0).normalize(), back = new THREE.Vector3(0, -Math.sin(C.lie), -Math.cos(C.lie));
@@ -4355,7 +4416,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const position = middle.clone().sub(babyCurl.centre.clone().multiplyScalar(scale).applyQuaternion(q));
     // its head and its bottom: its curl's length either side of its middle, a little short of each end
     const half = 0.5 * babyCurl.size.y * scale * 0.8;
-    cradle = { position, quaternion: q, head: middle.clone().addScaledVector(long, half), bottom: middle.clone().addScaledVector(long, -half), middle, long, back };
+    cradle = { position, quaternion: q, head: middle.clone().addScaledVector(long, half), bottom: middle.clone().addScaledVector(long, -half), middle, long, back, front, under };
     return cradle;
   }
   /** BIRTH: begun (from the start) or paused and on again; reset takes it back to before it began. */
@@ -5475,7 +5536,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // (a probe's look at her baby alone: her own meshes hidden, the baby's left)
         kneeHands: () => kneeHold,
         // (P2: her hands to her baby or on her knees, and how far they have come)
-        babyHold: (mode?: 'hands' | 'knees' | 'cradle') => { if (mode) babyHold = mode; return { mode: babyHold, share: +babyHoldShare.toFixed(3), cradle: +cradleShare.toFixed(3), hands: kneeHold }; },
+        babyHold: (mode?: 'hands' | 'knees' | 'cradle') => { if (mode) babyHold = mode; return { mode: babyHold, share: +babyHoldShare.toFixed(3), cradle: +cradleShare.toFixed(3), hands: kneeHold, place: cradle ? { z: +cradle.middle.z.toFixed(3), front: +cradle.front.toFixed(3), under: +cradle.under.toFixed(3) } : null }; },
         // (a probe's: how far its newborn is lifted off her, by which bone's skin, and its trunk's least gap to her)
         // (a probe's: the gap from her skin, as drawn now, of each of its trunk's parts and its legs' -- cm, the least)
         onHerGaps: () => { const r = babyRoots()[0]; let mesh: THREE.SkinnedMesh | null = null; r?.traverse((o) => { const m = o as THREE.SkinnedMesh; if (!mesh && m.isSkinnedMesh && m.visible) mesh = m; }); const m = mesh as THREE.SkinnedMesh | null; if (!m || !herSkin.idx.length) return null;
