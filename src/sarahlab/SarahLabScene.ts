@@ -115,11 +115,14 @@ const BIRTH_WOMB_IN = 0.015;
 const BIRTH_REST = Object.freeze({ top: 1.2, span: 0.3, across: 0.05, depth: 0.32, over: 0.7, gap: 0 });
 /** GAME TUNING: its straight body faded in over its curled one between these shares of its legs' straightening */
 const BABY_BODY_FADE = [0.3, 0.7] as const;
-/** GAME TUNING: where a hand rests on a knee -- its fingertip on the top of the thigh (`out` above its middle) so far back
- * up it from the knee, the wrist `lift` higher than the fingers (metres); the elbow's place round the arm tried at
+/** GAME TUNING: where a hand rests on a knee -- over its top, the palm `capTilt` of the way from the thigh's top round to
+ * the knee's point, the fingertip `capPast` beyond the knee and `capOut` off the bone, the wrist `lift` higher than the
+ * fingers (metres); the elbow's place round the arm tried at
  * `poleSteps` places, an elbow in toward her costing `poleOut`, and (holding her baby in her arms) each metre the elbow
- * is from where its head lies costing `elbowWant` (as radians of wrist twist do) */
-const KNEE_HANDS = Object.freeze({ out: 0.072, up: 0.04, lift: 0.012, poleSteps: 24, poleOut: 1.5, elbowWant: 40 });
+ * is from where its head lies costing `elbowWant` (as radians of wrist twist do); the turns (degrees, about the palm's
+ * face) the fingers' way is tried at from the way asked, each radian of turn costing `fingerTurnCost`; and how far
+ * (metres) the place asked moves before the whole search is made again (`searchAgain`; nearer, round last frame's) */
+const KNEE_HANDS = Object.freeze({ capOut: 0.058, capTilt: 0.3, capPast: -0.03, lift: 0.012, poleSteps: 24, poleOut: 1.5, elbowWant: 40, fingerTurns: [0, -25, 25, -50, 50, -75, 75], fingerTurnCost: 0.15, searchAgain: 0.02 });
 /** GAME TUNING (P2): her hands on her baby lying on her -- her left palm's middle this share of the way from its chest up
  * to its neck, her right palm's this far (metres) down from its hips toward its feet, cupped this much over its bottom,
  * its fingers this share down along it toward its legs (the rest across it);
@@ -134,7 +137,7 @@ const KNEE_HANDS = Object.freeze({ out: 0.072, up: 0.04, lift: 0.012, poleSteps:
  * arms or back onto her
  */
 const BABY_CRADLE = Object.freeze({ y: 1.16, left: -0.03, out: 0.13, rise: 0.3, crook: 0.08, past: 0.03, under: 0.055, fingersFeet: 0.6, arc: 0.08, seconds: 2.2 });
-const BABY_HANDS = Object.freeze({ backUp: 0.35, bottomDown: 0.02, bottomCup: 0.6, bottomFeet: 0.75, palm: 0.012, palmAt: 0.45, seconds: 1.4 });
+const BABY_HANDS = Object.freeze({ backUp: 0.35, bottomDown: -0.03, bottomCup: 0.6, bottomFeet: 0.85, palm: 0.012, palmAt: 0.45, seconds: 1.4 });
 /** Its soft body's chains (softBaby.ts): each arm and leg from its shoulder or hip out to its hand or foot -- never its
  * torso, neck or head (Joshua, 2026-11-03: "Keep the soft body after birth but not the torso... to hopefully keep the
  * shape") */
@@ -184,6 +187,7 @@ import { DEFAULT_VULVA_KEEP } from './detailMaterials';
 import { attachJiggle, bellyTune, breastTune, createJiggleUniforms, feltAcceleration, GRAVITY, GRAVITY_SHARE, LEG_TUNE, restingMass, stepMass, type LegBones, type Mass } from './softBody';
 import { applyMilk, applyWomb, applyZeroRefine, babyAnchors, babyWeightState, chestAnchors, chestFieldWeights, groinAnchors, groinFieldWeights, loadMilk, milkAnchors, milkBalanceState, milkFieldWeights, milkState, MILK_PATH, babyFieldWeights, loadWomb, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, WOMB_PATH, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
 import { NAVEL_MORPHS, type NavelPiece } from './navelPiece';
+import { ArmJoints } from './armJoints';
 import { clothingVertex } from './clothingPose';
 import { createNavelSoft, type NavelSoft } from './navelSoft';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
@@ -2942,6 +2946,21 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * elbow out to her side.
    */
   const kneeTips: Record<string, THREE.Vector3> = {};
+  /** each arm's last reach: where it was asked to, and the finger turn and elbow place it chose (handsOnKnees) */
+  const armSearch: Record<string, { at: THREE.Vector3; fi: number; pi: number } | undefined> = {};
+  /** Each arm's joints as a real arm's (armJoints.ts), read once from her skeleton's bind. */
+  const armJointsFor = new Map<string, ArmJoints>();
+  function armJointsOf(name: 'L' | 'R', sk: THREE.SkinnedMesh, sh: number, el: number, wr: number, h: { tip: number; knuckles: number[]; index: number; little: number }, other: number): ArmJoints {
+    const key = `${sk.uuid}|${name}`;
+    let a = armJointsFor.get(key);
+    if (!a) {
+      const j = measure!.joints;
+      // (Sarah: a woman's ranges)
+      a = new ArmJoints(sk.skeleton.bones, sk.skeleton.boneInverses, { shoulder: sh, elbow: el, wrist: wr, tip: h.tip, knuckles: h.knuckles[0], index: h.index, little: h.little, otherShoulder: other, hips: j.pelvis, neck: j.neck }, 'female');
+      armJointsFor.set(key, a);
+    }
+    return a;
+  }
   /**
    * WHERE ON HER BABY EACH HAND GOES (P2, POSITION A -- resting on her, skin to skin): her LEFT palm flat across its upper
    * back between its shoulder blades, her RIGHT palm over its bottom, fingers across it toward her other side; each a
@@ -3024,7 +3043,6 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const bones = sk.skeleton.bones, j = measure.joints, B = rig.bind, K = KNEE_HANDS;
     model.updateMatrixWorld(true);
     const wp = (i: number) => bones[i].getWorldPosition(new THREE.Vector3());
-    const turnWorld = (i: number, q: THREE.Quaternion) => { const b = bones[i], pq = b.parent ? b.parent.getWorldQuaternion(new THREE.Quaternion()) : new THREE.Quaternion(), bq = b.getWorldQuaternion(new THREE.Quaternion()); b.quaternion.copy(pq.invert().multiply(q).multiply(bq)); b.updateMatrixWorld(true); };
     const hand = handJointsOf(B);
     const out: Record<string, number> = {};
     { let top: THREE.Object3D = bones[0]; while (top.parent && (top.parent as THREE.Bone).isBone) top = top.parent; (top.parent ?? top).updateMatrixWorld(true); }
@@ -3036,7 +3054,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       // the top of the thigh: away from the way the shin folds
       const sd = A.clone().sub(Kn).normalize(), top = sd.clone().addScaledVector(td, -sd.dot(td)).negate().normalize();
       const handLen = wp(h.tip).distanceTo(wp(wr));
-      const T = Kn.clone().addScaledVector(top, K.out * perM).addScaledVector(td, -K.up * perM);
+      // OVER THE TOP OF HER KNEE (2026-11-04): flat on the top of her raised thigh, fingers up it to the knee, her arm came
+      // down onto it so steeply her wrist was bent back past what a wrist does (Joshua: "it looks really uncomfortable");
+      // on the knee's point, past her reach. So the palm lies `capTilt` of the way from her thigh's top round to her knee's
+      // point (away from her thigh and her shin both), its fingertips over the crest of her knee, `capPast` beyond it and
+      // `capOut` off the bone (her knee's skin)
+      { const point = td.clone().sub(sd).normalize(), face = top.clone().lerp(point, K.capTilt).normalize();
+        const along = td.clone().addScaledVector(face, -td.dot(face)).normalize(); top.copy(face); td.copy(along); }
+      const T = Kn.clone().addScaledVector(top, K.capOut * perM).addScaledVector(td, K.capPast * perM);
       // HER HANDS ON HER BABY (P2; Joshua, 2026-11-03: "where she can actually hold the baby instead of it laying with no
       // hands from her"): from her knee to where on it this hand goes (babyHandTarget), `babyHoldShare` of the way -- the
       // fingertip, the way the fingers point and the way the palm's back faces all carried over together
@@ -3049,36 +3074,44 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         top.addScaledVector(td, -top.dot(td)).normalize();
         out[name + 'Baby'] = +k.toFixed(2);
       }
-      const W = T.clone().addScaledVector(td, -handLen).addScaledVector(top, K.lift * perM);
-      // two bones from the shoulder to the wrist, the elbow out to her side and back toward her hips
-      const E0 = wp(el), a = E0.distanceTo(S), b = wp(wr).distanceTo(E0), SW = W.clone().sub(S); let d = SW.length();
-      out[name + 'Reach'] = +(d / (a + b)).toFixed(3);
-      const most = (a + b) * 0.995; if (d > most) { W.copy(S).addScaledVector(SW.normalize(), most); d = most; }
-      // WHICH WAY ROUND THE ELBOW GOES is chosen so the hand needs the least twist at the wrist to lie palm down (2026-11-03,
-      // Joshua: "her hands also look warped" -- no forearm twist bone, so a wrist rolled half a turn wrung her wrist):
-      // round the line from her shoulder to her wrist, the elbow tried at `K.poleSteps` places, kept out from her body
-      const dir = W.clone().sub(S).normalize(), outw = S.clone().sub(wp(other)).normalize();
-      const base = outw.clone().addScaledVector(H.clone().sub(S).normalize(), 0.6); base.addScaledVector(dir, -base.dot(dir)).normalize();
-      const x = (a * a - b * b + d * d) / (2 * d), r = Math.sqrt(Math.max(0, a * a - x * x));
+      // EACH JOINT AS A REAL ONE'S (Joshua, 2026-11-04: "her arms at the elbow and wrist... look really uncomfortable"):
+      // the elbow a hinge, the forearm's roll and the wrist's bends within a woman's ranges (armJoints.ts,
+      // data/jointRange.ts) -- and the hand as near the way asked as they allow. Searched: the way the fingers lie on
+      // what the palm is on (turned about the palm's face from the way asked, `K.fingerTurns` -- a hand on a knee
+      // turned to point down the thigh needed a wrist bent past what a wrist does), and for each the way round the
+      // elbow goes (`K.poleSteps` places round the line from her shoulder to her wrist). The fingertip lands where it
+      // was asked; the search keeps last frame's choice and looks round it, and looks at all of it again when the
+      // place asked has moved
+      const joints = armJointsOf(name, sk, sh, el, wr, h, other);
+      const palmWay = top.clone().negate(), outw = S.clone().sub(wp(other)).normalize();
+      const E0 = wp(el), a = E0.distanceTo(S), b = wp(wr).distanceTo(E0);
       const keepQ = [sh, el, wr].map((i) => bones[i].quaternion.clone()), reset = () => { [sh, el, wr].forEach((i, k) => bones[i].quaternion.copy(keepQ[k])); bones[sh].updateMatrixWorld(true); };
-      // (the hand's own way along and the way its palm faces, from its bones as they are drawn)
-      const handNow = () => { const w1 = wp(wr), al = wp(h.tip).sub(w1).normalize(), ac = wp(h.index).sub(wp(h.little)); return { al, palm: new THREE.Vector3().crossVectors(wp(h.knuckles[0]).sub(w1), ac).multiplyScalar(h.sign).normalize() }; };
-      const basis = (al: THREE.Vector3, face: THREE.Vector3) => { const f2 = face.clone().addScaledVector(al, -face.dot(al)).normalize(); return new THREE.Matrix4().makeBasis(al, f2, new THREE.Vector3().crossVectors(al, f2)); };
-      const toM = basis(td, top.clone().negate());
-      const place = (th: number) => {
-        const pole = base.clone().applyAxisAngle(dir, th), E = S.clone().addScaledVector(dir, x).addScaledVector(pole, r);
-        turnWorld(sh, new THREE.Quaternion().setFromUnitVectors(wp(el).sub(S).normalize(), E.clone().sub(S).normalize()));
-        const E1 = wp(el); turnWorld(el, new THREE.Quaternion().setFromUnitVectors(wp(wr).sub(E1).normalize(), W.clone().sub(E1).normalize()));
-        const hn = handNow(), q = new THREE.Quaternion().setFromRotationMatrix(toM.clone().multiply(basis(hn.al, hn.palm).transpose()));
-        const f = W.clone().sub(E1).normalize(), tw = 2 * Math.atan2(q.x * f.x + q.y * f.y + q.z * f.z, q.w);
-        const twist = Math.abs(Math.atan2(Math.sin(tw), Math.cos(tw)));
-        // (an elbow tucked in toward her body, or up, costs as a twist would)
-        return { q, cost: twist + K.poleOut * Math.max(0, -pole.dot(outw)) + (elbowWant ? elbowWant.k * K.elbowWant * (E.distanceTo(elbowWant.at) / perM) : 0) };
+      let reachShown = -1;
+      const place = (fi: number, pi: number) => {
+        const yaw = K.fingerTurns[fi] * Math.PI / 180, along = td.clone().applyAxisAngle(top, yaw);
+        const W = T.clone().addScaledVector(along, -handLen).addScaledVector(top, K.lift * perM), SW = W.clone().sub(S);
+        let d = SW.length(); if (fi === 0 || reachShown < 0) reachShown = d / (a + b);
+        const most = (a + b) * 0.995; if (d > most) { W.copy(S).addScaledVector(SW.normalize(), most); d = most; }
+        const dir = W.clone().sub(S).normalize();
+        const base = outw.clone().addScaledVector(H.clone().sub(S).normalize(), 0.6); base.addScaledVector(dir, -base.dot(dir)).normalize();
+        const x = (a * a - b * b + d * d) / (2 * d), r = Math.sqrt(Math.max(0, a * a - x * x));
+        const pole = base.clone().applyAxisAngle(dir, (2 * Math.PI * pi) / K.poleSteps), E = S.clone().addScaledVector(dir, x).addScaledVector(pole, r);
+        const p = joints.pose(E, W, along, palmWay);
+        // (an elbow tucked in toward her body, or up, costs as a hand turned that far from the way asked would; and the
+        // fingers turned from the way asked a little)
+        return { p, cost: p.residual + K.poleOut * Math.max(0, -pole.dot(outw)) + K.fingerTurnCost * Math.abs(yaw) + (elbowWant ? elbowWant.k * K.elbowWant * (E.distanceTo(elbowWant.at) / perM) : 0) };
       };
-      let best = 0, bestCost = Infinity;
-      for (let k = 0; k < K.poleSteps; k++) { const th = (2 * Math.PI * k) / K.poleSteps; reset(); const c = place(th).cost; if (c < bestCost) { bestCost = c; best = th; } }
-      reset(); const fin = place(best); out[name + 'TwistDeg'] = Math.round((bestCost < 9 ? bestCost : 0) * 180 / Math.PI);
-      turnWorld(wr, fin.q);
+      const memo = armSearch[name], F = K.fingerTurns.length, NP = K.poleSteps;
+      const all = !memo || memo.at.distanceTo(T) > K.searchAgain * perM;
+      let bestF = memo?.fi ?? 0, bestP = memo?.pi ?? 0, bestCost = Infinity;
+      const tryAt = (fi: number, pi: number) => { reset(); const c = place(fi, pi).cost; if (c < bestCost) { bestCost = c; bestF = fi; bestP = pi; } };
+      if (all) { for (let fi = 0; fi < F; fi++) for (let pi = 0; pi < NP; pi++) tryAt(fi, pi); }
+      else { const f0 = bestF, p0 = bestP; for (let df = -1; df <= 1; df++) for (let dp = -1; dp <= 1; dp++) { const fi = f0 + df; if (fi >= 0 && fi < F) tryAt(fi, (p0 + dp + NP) % NP); } }
+      armSearch[name] = { at: (all ? T.clone() : memo!.at), fi: bestF, pi: bestP };
+      reset(); const fin = place(bestF, bestP).p;
+      out[name + 'Reach'] = +reachShown.toFixed(3);
+      out[name + 'TwistDeg'] = Math.round(fin.residual * 180 / Math.PI);
+      out[name + 'ElbowDeg'] = Math.round(fin.elbowDeg); out[name + 'PronDeg'] = Math.round(fin.pronationDeg); out[name + 'WristFlexDeg'] = Math.round(fin.wristFlexDeg); out[name + 'WristRadialDeg'] = Math.round(fin.wristRadialDeg); out[name + 'FingerTurn'] = K.fingerTurns[bestF];
       kneeTips[name] = T.clone();
       // (how far its fingertip is from where it was to go, cm, for the probes)
       out[name] = +(wp(h.tip).distanceTo(T) / perM * 100).toFixed(1);
@@ -3090,7 +3123,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     { const moved = [j.shoulderL, j.elbowL, j.wristL, j.shoulderR, j.elbowR, j.wristR].map((i) => bones[i]);
       const seen = new Set<THREE.Skeleton>([sk.skeleton]);
       for (const m of skinned) { if (!m.skeleton || seen.has(m.skeleton)) continue; seen.add(m.skeleton); for (const b of moved) { const o = m.skeleton.bones.find((x) => x.name === b.name); if (o && o !== b) o.quaternion.copy(b.quaternion); } } }
-    kneeHold = { L: out.L ?? -1, R: out.R ?? -1, holding: out.L !== undefined && out.R !== undefined, reachL: out.LReach ?? -1, reachR: out.RReach ?? -1, wristTwistL: out.LTwistDeg ?? -1, wristTwistR: out.RTwistDeg ?? -1 };
+    kneeHold = { L: out.L ?? -1, R: out.R ?? -1, holding: out.L !== undefined && out.R !== undefined, reachL: out.LReach ?? -1, reachR: out.RReach ?? -1, wristTwistL: out.LTwistDeg ?? -1, wristTwistR: out.RTwistDeg ?? -1, elbowL: out.LElbowDeg ?? -1, elbowR: out.RElbowDeg ?? -1, pronL: out.LPronDeg ?? 0, pronR: out.RPronDeg ?? 0, wristFlexL: out.LWristFlexDeg ?? 0, wristFlexR: out.RWristFlexDeg ?? 0, wristRadL: out.LWristRadialDeg ?? 0, wristRadR: out.RWristRadialDeg ?? 0 };
   }
   /** Each hand's joints, from her bind: its fingertip (the wrist's furthest descendant), the knuckles, the index and the
    * little finger's first joints, and the sign that turns (knuckles x little-to-index) into the palm (as bindPalm). */
