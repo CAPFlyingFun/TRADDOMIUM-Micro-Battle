@@ -1421,9 +1421,43 @@ export function poseOnHer(bones: ReadonlyMap<string, THREE.Bone>, k: number, f: 
   };
   for (const s of ['left', 'right'] as const) {
     limb(BABY_BONES.arm[s], (sd) => v.copy(sd).multiplyScalar(L.armOut).addScaledVector(f.long, L.armUp).addScaledVector(f.front, L.onto), (sd) => v.copy(f.long).multiplyScalar(L.handUp).addScaledVector(f.front, L.onto).addScaledVector(sd, 0.15));
-    limb(BABY_BONES.leg[s], (sd) => v.copy(sd).multiplyScalar(L.legOut).addScaledVector(f.long, -L.legDown).addScaledVector(f.front, L.legOnto), (sd) => v.copy(f.long).multiplyScalar(-L.shinBack).addScaledVector(sd, -L.shinIn).addScaledVector(f.front, L.onto));
+    limb(BABY_BONES.leg[s], (sd) => v.copy(sd).multiplyScalar(L.legOut).addScaledVector(f.long, -L.legDown).addScaledVector(f.front, L.legOnto), (sd) => v.copy(f.long).multiplyScalar(-L.shinBack).addScaledVector(sd, -L.shinIn).addScaledVector(f.front, L.shinOnto));
   }
 }
+/**
+ * HELD IN HER ARMS (P2, position B, 2026-11-04): on its back across her, its arms tucked onto its chest and its legs
+ * drawn up and a little apart, knees bent and feet down toward its bottom, its head turned a little toward her -- each
+ * `k` of the way from however it is posed now (after poseOnHer: the two are blended this way). `f.front` is its belly's
+ * way (up, out of her arms); `f.out` the way to her.
+ */
+export function poseCradle(bones: ReadonlyMap<string, THREE.Bone>, k: number, f: MoveFrame): void {
+  if (!(k > 0)) return;
+  const root = bones.get(BABY_BONES.root); root?.updateMatrixWorld(true);
+  const L = CRADLE_POSE, v = new THREE.Vector3();
+  const neck = bones.get(BABY_BONES.neck);
+  if (neck) {
+    neck.getWorldQuaternion(tQ).premultiply(tR.setFromAxisAngle(f.long, L.headTurn * k));
+    if (neck.parent) neck.parent.getWorldQuaternion(tP).invert(); else tP.identity();
+    neck.quaternion.copy(tP.multiply(tQ)); neck.updateMatrixWorld(true);
+  }
+  const limb = (chain: readonly string[], upper: (s: THREE.Vector3) => THREE.Vector3, lower: (s: THREE.Vector3) => THREE.Vector3) => {
+    const [a, b, c] = chain.map((n) => bones.get(n));
+    if (!a || !b || !c) return;
+    const side = sideOf(bones, chain, f.left) >= 0 ? f.left.clone() : f.left.clone().negate();
+    turnToward(a, b, upper(side).normalize(), k);
+    turnToward(b, c, lower(side).normalize(), k);
+  };
+  for (const s of ['left', 'right'] as const) {
+    // arms: each upper arm down its side and a little up off it, its forearm folded in across its chest
+    limb(BABY_BONES.arm[s], (sd) => v.copy(f.long).multiplyScalar(-L.upperDown).addScaledVector(sd, L.upperOut).addScaledVector(f.front, L.upperFront), (sd) => v.copy(f.long).multiplyScalar(L.foreUp).addScaledVector(sd, -L.foreIn).addScaledVector(f.front, L.foreFront));
+    // legs: each thigh drawn up toward its belly and a little out, its shin folded back down toward its bottom
+    limb(BABY_BONES.leg[s], (sd) => v.copy(f.long).multiplyScalar(-L.thighDown).addScaledVector(f.front, L.thighUp).addScaledVector(sd, L.thighOut), (sd) => v.copy(f.long).multiplyScalar(-L.shinDown).addScaledVector(f.front, -L.shinBack).addScaledVector(sd, L.shinOut));
+  }
+}
+/** GAME TUNING: held in her arms -- its head's turn (radians, toward her); each arm's upper part (down its side, out, up
+ * off it) and forearm (toward its head, in across its chest, up); each leg's thigh (toward its feet, up off its belly,
+ * out) and shin (toward its feet, back down, out) */
+export const CRADLE_POSE = Object.freeze({ headTurn: -0.5, upperDown: 0.85, upperOut: 0.05, upperFront: 0.5, foreUp: 0.5, foreIn: 0.9, foreFront: 0.5, thighDown: 0.45, thighUp: 0.75, thighOut: 0.35, shinDown: 0.8, shinBack: 0.35, shinOut: 0.1 });
 /**
  * Coming down her canal, out of its curl and made long (Joshua, 2026-11-02: "once the baby is in active labor and moving
  * down, don't keep the baby in the fetal position, the arms are straight down and legs are straight for more of a
@@ -1469,8 +1503,10 @@ export const DESCENT = Object.freeze({ straighten: 0.8, legOut: 0.08, upperDown:
 
 /** GAME TUNING: the newborn on her -- how far its back straightens (all the way: its straight body, part-curled, had a
  * hollow belly -- 2026-11-03), its head's turn (radians), and each limb's aim (its
- * side, along it toward its head, and down onto her) */
-export const ON_HER = Object.freeze({ straighten: 1, headTurn: 1.0, armOut: 0.75, armUp: 0.4, handUp: 0.6, legOut: 0.8, legDown: 0.35, legOnto: 0.45, shinBack: 0.55, shinIn: 0.35, onto: 0.5 });
+ * side, along it toward its head, and down onto her -- its shins their own, `shinOnto`; aimed further onto her, its legs
+ * slid down her belly's slope off its frog and hung like a standing child's; P2 2026-11-04: its thighs drawn up toward its
+ * head and in under it, its knees by its belly against her, the frog a newborn lies in on a parent half sitting up) */
+export const ON_HER = Object.freeze({ straighten: 1, headTurn: 1.0, armOut: 0.75, armUp: 0.4, handUp: 0.6, legOut: 0.55, legDown: -0.6, legOnto: 0.8, shinBack: 0.7, shinIn: 0.2, shinOnto: 0.6, onto: 0.5 });
 
 /** How far toward its feet (of its length) a leg's aim always is, kicking or stretching. GAME TUNING. */
 export const KICK_AWAY = 0.45;
