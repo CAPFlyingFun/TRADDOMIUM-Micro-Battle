@@ -119,24 +119,28 @@ const BABY_BODY_FADE = [0.3, 0.7] as const;
  * the knee's point, the fingertip `capPast` beyond the knee and `capOut` off the bone, the wrist `lift` higher than the
  * fingers (metres); the elbow's place round the arm tried at
  * `poleSteps` places, an elbow in toward her costing `poleOut`, and (holding her baby in her arms) each metre the elbow
- * is from where its head lies costing `elbowWant` (as radians of wrist twist do); the turns (degrees, about the palm's
- * face) the fingers' way is tried at from the way asked, each radian of turn costing `fingerTurnCost`; and how far
- * (metres) the place asked moves before the whole search is made again (`searchAgain`; nearer, round last frame's) */
-const KNEE_HANDS = Object.freeze({ capOut: 0.058, capTilt: 0.3, capPast: -0.03, lift: 0.012, poleSteps: 24, poleOut: 1.5, elbowWant: 40, fingerTurns: [0, -25, 25, -50, 50, -75, 75], fingerTurnCost: 0.15, searchAgain: 0.02 });
+ * is from where its head lies costing `elbowWant` (as radians of wrist twist do); each metre her fingertip ends up from
+ * where it was asked costing `tipMiss` (a reach past her arm's length, or a hand her wrist could not turn to); the turns
+ * (degrees, about the palm's face) the fingers' way is tried at from the way asked, each radian of turn costing
+ * `fingerTurnCost`; and how far (metres) the place asked moves before the whole search is made again (`searchAgain`;
+ * nearer, round last frame's) */
+const KNEE_HANDS = Object.freeze({ capOut: 0.058, capTilt: 0.3, capPast: -0.03, lift: 0.012, poleSteps: 24, poleOut: 1.5, elbowWant: 10, tipMiss: 10, fingerTurns: [0, -25, 25, -50, 50, -75, 75], fingerTurnCost: 0.15, searchAgain: 0.02 });
+/**
+ * GAME TUNING (P2, POSITION B -- cradled in her arms, Joshua 2026-11-03): her baby on its back across her, its head to
+ * her left in the crook of her left elbow, her left forearm under its back and her left hand under its bottom, her right
+ * hand on its tummy. In her rest frame (metres): its middle at `y` up her, `left` toward her left and `out` off her skin
+ * there; its length tipped `rise` up toward its head; its back turned `lie` (radians) from her chest down onto her
+ * forearm (0 would be its back flat against her chest -- a palm under it there would face away from her, a turn no
+ * forearm makes: her left hand stood a hand short of it, its wrist bent as far as a wrist goes); her elbow `crook`
+ * under its head and `past` beyond it; her right palm `tummy` of the way from its chest to its hips; and the seconds it
+ * takes to turn into her arms or back onto her
+ */
+const BABY_CRADLE = Object.freeze({ y: 1.16, left: -0.03, out: 0.1, rise: 0.3, lie: 1.2, crook: 0.08, past: 0.03, tummy: 0.4, arc: 0.08, seconds: 2.2 });
 /** GAME TUNING (P2): her hands on her baby lying on her -- her left palm's middle this share of the way from its chest up
  * to its neck, her right palm's this far (metres) down from its hips toward its feet, cupped this much over its bottom,
  * its fingers this share down along it toward its legs (the rest across it);
  * the palm this thick off its skin (metres), its middle this share of a hand back from the fingertip; and the seconds her
  * hands take to go to it or back to her knees */
-/**
- * GAME TUNING (P2, POSITION B -- cradled in her arms, Joshua 2026-11-03): her baby on its back across her, its head to
- * her left in the crook of her left elbow, her left hand under its bottom, her right hand on its tummy. In her rest frame
- * (metres): its middle at `y` up her, `left` toward her left and `out` off her skin there; its length tipped `rise` up
- * toward its head; her elbow `crook` under its head (toward her) and `past` beyond it; her left palm `under` beneath its
- * bottom (and its fingers this share down its length, the rest toward her); and the seconds it takes to turn into her
- * arms or back onto her
- */
-const BABY_CRADLE = Object.freeze({ y: 1.16, left: -0.03, out: 0.13, rise: 0.3, crook: 0.08, past: 0.03, under: 0.055, fingersFeet: 0.6, arc: 0.08, seconds: 2.2 });
 const BABY_HANDS = Object.freeze({ backUp: 0.35, bottomDown: -0.03, bottomCup: 0.6, bottomFeet: 0.85, palm: 0.012, palmAt: 0.45, seconds: 1.4 });
 /** Its soft body's chains (softBaby.ts): each arm and leg from its shoulder or hip out to its hand or foot -- never its
  * torso, neck or head (Joshua, 2026-11-03: "Keep the soft body after birth but not the torso... to hopefully keep the
@@ -3002,7 +3006,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       return { tip, along, face: toHer.clone(), elbow };
     }
     // on its tummy, palm down onto it, fingers along it toward its head
-    const at = C.clone().lerp(H, 0.5), away = toHer.clone().negate(), most = surface(at, away, pick.chest);
+    const at = C.clone().lerp(H, Cr.tummy), away = toHer.clone().negate(), most = surface(at, away, pick.chest);
     if (!Number.isFinite(most)) return null;
     const tip = at.clone().addScaledVector(away, most + B.palm * perM).addScaledVector(long, handLen * B.palmAt);
     return { tip, along: long.clone(), face: away };
@@ -3090,7 +3094,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const place = (fi: number, pi: number) => {
         const yaw = K.fingerTurns[fi] * Math.PI / 180, along = td.clone().applyAxisAngle(top, yaw);
         const W = T.clone().addScaledVector(along, -handLen).addScaledVector(top, K.lift * perM), SW = W.clone().sub(S);
-        let d = SW.length(); if (fi === 0 || reachShown < 0) reachShown = d / (a + b);
+        let d = SW.length(); reachShown = d / (a + b);
         const most = (a + b) * 0.995; if (d > most) { W.copy(S).addScaledVector(SW.normalize(), most); d = most; }
         const dir = W.clone().sub(S).normalize();
         const base = outw.clone().addScaledVector(H.clone().sub(S).normalize(), 0.6); base.addScaledVector(dir, -base.dot(dir)).normalize();
@@ -3098,8 +3102,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         const pole = base.clone().applyAxisAngle(dir, (2 * Math.PI * pi) / K.poleSteps), E = S.clone().addScaledVector(dir, x).addScaledVector(pole, r);
         const p = joints.pose(E, W, along, palmWay);
         // (an elbow tucked in toward her body, or up, costs as a hand turned that far from the way asked would; and the
-        // fingers turned from the way asked a little)
-        return { p, cost: p.residual + K.poleOut * Math.max(0, -pole.dot(outw)) + K.fingerTurnCost * Math.abs(yaw) + (elbowWant ? elbowWant.k * K.elbowWant * (E.distanceTo(elbowWant.at) / perM) : 0) };
+        // fingers turned from the way asked a little; and a fingertip that did not get there -- the turn of the hand alone
+        // does not see a wrist held short of a place past her reach)
+        const miss = wp(h.tip).distanceTo(T) / perM;
+        return { p, cost: p.residual + K.tipMiss * miss + K.poleOut * Math.max(0, -pole.dot(outw)) + K.fingerTurnCost * Math.abs(yaw) + (elbowWant ? elbowWant.k * K.elbowWant * (E.distanceTo(elbowWant.at) / perM) : 0) };
       };
       const memo = armSearch[name], F = K.fingerTurns.length, NP = K.poleSteps;
       const all = !memo || memo.at.distanceTo(T) > K.searchAgain * perM;
@@ -4340,8 +4346,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     for (let i = 0; i < skin.length; i += 3) if (Math.abs(skin[i + 1] - C.y) < 0.02 && Math.abs(skin[i] - C.left) < 0.08) front = Math.max(front, skin[i + 2]);
     if (!Number.isFinite(front)) return null;
     const middle = new THREE.Vector3(C.left, C.y, front + C.out);
-    // its length across her toward her left (+x in her rest frame), tipped up toward its head; its back toward her
-    const long = new THREE.Vector3(1, C.rise, 0).normalize(), back = new THREE.Vector3(0, 0, -1);
+    // its length across her toward her left (+x in her rest frame), tipped up toward its head; its back toward her and
+    // turned down onto her forearm
+    const long = new THREE.Vector3(1, C.rise, 0).normalize(), back = new THREE.Vector3(0, -Math.sin(C.lie), -Math.cos(C.lie));
     back.addScaledVector(long, -back.dot(long)).normalize();
     const side = new THREE.Vector3().crossVectors(long, back).normalize();
     const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(side, long, back).multiply(new THREE.Matrix4().makeBasis(babyCurl.side, babyCurl.long, babyCurl.back).transpose()));
@@ -4965,11 +4972,15 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       vulva?.setDressedLips(fabric?.vulvaKeep() ?? DEFAULT_VULVA_KEEP);
       vulva?.sync();
       stepBirth(dt);
-      // her hands to her baby once it lies on her, or back to her knees (BABY_HANDS.seconds either way)
+      // her hands to her baby once it lies on her, or back to her knees (BABY_HANDS.seconds either way); into her arms
+      // and out of them (BABY_CRADLE.seconds) -- one thing at a time: her hands on it before she lifts it, and it laid back
+      // on her before her hands go back to her knees (both at once, her hand went halfway to her knee from under it, her
+      // arm out straight past her reach)
       { const onHer = pose === 'recline' && !!birthNow && bornStage(birthNow) && birthNow.onHer >= 1;
         const want = babyHold !== 'knees' && onHer ? 1 : 0, cradle = babyHold === 'cradle' && onHer ? 1 : 0;
-        babyHoldShare += Math.max(-dt / BABY_HANDS.seconds, Math.min(dt / BABY_HANDS.seconds, want - babyHoldShare));
-        cradleShare += Math.max(-dt / BABY_CRADLE.seconds, Math.min(dt / BABY_CRADLE.seconds, cradle - cradleShare)); }
+        const handsTo = onHer && want === 0 && cradleShare > 0 ? 1 : want, cradleTo = cradle > 0 && babyHoldShare < 1 ? cradleShare : cradle;
+        babyHoldShare += Math.max(-dt / BABY_HANDS.seconds, Math.min(dt / BABY_HANDS.seconds, handsTo - babyHoldShare));
+        cradleShare += Math.max(-dt / BABY_CRADLE.seconds, Math.min(dt / BABY_CRADLE.seconds, cradleTo - cradleShare)); }
       garmentRoom?.applyPose();
       place();
       feelMotion(dt);

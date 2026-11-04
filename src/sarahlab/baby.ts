@@ -1457,7 +1457,7 @@ export function poseCradle(bones: ReadonlyMap<string, THREE.Bone>, k: number, f:
 /** GAME TUNING: held in her arms -- its head's turn (radians, toward her); each arm's upper part (down its side, out, up
  * off it) and forearm (toward its head, in across its chest, up); each leg's thigh (toward its feet, up off its belly,
  * out) and shin (toward its feet, back down, out) */
-export const CRADLE_POSE = Object.freeze({ headTurn: -0.5, upperDown: 0.85, upperOut: 0.05, upperFront: 0.5, foreUp: 0.5, foreIn: 0.9, foreFront: 0.5, thighDown: 0.45, thighUp: 0.75, thighOut: 0.35, shinDown: 0.8, shinBack: 0.35, shinOut: 0.1 });
+export const CRADLE_POSE = Object.freeze({ headTurn: -0.5, upperDown: 0.85, upperOut: 0.05, upperFront: 0.5, foreUp: 0.5, foreIn: 0.9, foreFront: 0.5, thighDown: 0.6, thighUp: 0.6, thighOut: 0.35, shinDown: 0.8, shinBack: 0.6, shinOut: 0.1 });
 /**
  * Coming down her canal, out of its curl and made long (Joshua, 2026-11-02: "once the baby is in active labor and moving
  * down, don't keep the baby in the fetal position, the arms are straight down and legs are straight for more of a
