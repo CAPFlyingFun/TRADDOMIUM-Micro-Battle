@@ -4,6 +4,10 @@ Gameplay consumes these registries; it never keeps a second copy of a
 number (ARCHITECTURE §2.8). `schema.ts` is the one pattern, `registries.ts`
 is the ten typed registries. Both are pure: no three, no DOM, no storage.
 
+`jointRange.ts` is the master table of how far each human joint goes, a
+woman's and a man's (Joshua, 2026-11-04), every number MEASURED from a named
+source; its `JOINT_RANGE_WIRED` lists the motions a live system reads.
+
 ## The pattern in one line
 
 ```
