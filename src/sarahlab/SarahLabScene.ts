@@ -116,13 +116,23 @@ const BABY_BODY_FADE = [0.3, 0.7] as const;
 /** GAME TUNING: where a hand rests on a knee -- its fingertip on the top of the thigh (`out` above its middle) so far back
  * up it from the knee, the wrist `lift` higher than the fingers (metres) */
 const KNEE_HANDS = Object.freeze({ out: 0.072, up: 0.04, lift: 0.012, poleSteps: 24, poleOut: 1.5 });
-/** Its soft body's chains (softBaby.ts): its back from its waist, then each arm and leg from its shoulder or hip out to its
- * hand or foot -- never its neck or head */
-const BABY_SOFT_CHAINS: readonly (readonly string[])[] = [['Bone_005', 'Bone_004', 'Bone_003'], ['Bone_022', 'Bone_021', 'Bone_020', 'Bone_019'], ['Bone_027', 'Bone_026', 'Bone_025', 'Bone_024'], ['Bone_010', 'Bone_009', 'Bone_008', 'Bone_007'], ['Bone_015', 'Bone_014', 'Bone_013', 'Bone_012']];
+/** Its soft body's chains (softBaby.ts): each arm and leg from its shoulder or hip out to its hand or foot -- never its
+ * torso, neck or head (Joshua, 2026-11-03: "Keep the soft body after birth but not the torso... to hopefully keep the
+ * shape") */
+const BABY_SOFT_CHAINS: readonly (readonly string[])[] = [['Bone_022', 'Bone_021', 'Bone_020', 'Bone_019'], ['Bone_027', 'Bone_026', 'Bone_025', 'Bone_024'], ['Bone_010', 'Bone_009', 'Bone_008', 'Bone_007'], ['Bone_015', 'Bone_014', 'Bone_013', 'Bone_012']];
 /** GAME TUNING: her skin under her baby as it lies on her -- every `every`th point within `reach` (metres), chosen again
  * when it has moved `again`; its joints kept `margin` out from it; and all of it lifted off her as far as its deepest
  * point (within `near` of her skin) goes into her, easing back over `liftEase` seconds */
-const ON_HER_SKIN = Object.freeze({ reach: 0.3, every: 3, again: 0.05, margin: 0.008, near: 0.04, liftEase: 0.4, headDownDeg: 50 });
+const ON_HER_SKIN = Object.freeze({ reach: 0.3, every: 3, again: 0.05, margin: 0.008, near: 0.06, liftEase: 0.4, pitchMost: 35 });
+/** GAME TUNING: its parts bent down onto her as it lies on her, in turn -- each bone, the most it bends (degrees), the
+ * bone it points at, and the skin whose touching her stops it (the bones carrying it: its own part, not its arms that
+ * already lie on her), and how far it may bend back away from her where it goes into her (degrees: its neck, its head
+ * lifted onto her once its back has bent down) -- its back a little from its waist up, and its neck (its legs are laid
+ * by its frog pose, ON_HER, and kept on her skin by its soft body: bent onto her here, its hips crumpled) */
+const ON_HER_DRAPE: readonly (readonly [string, number, string, readonly string[], number?])[] = [
+  ['Bone_005', 6, 'Bone_004', ['Bone_005', 'Bone_004', 'Bone_003', 'Bone_002']], ['Bone_004', 6, 'Bone_003', ['Bone_004', 'Bone_003', 'Bone_002']],
+  ['Bone_018', 50, 'Bone_017', ['Bone_018', 'Bone_017', 'Bone_016'], 60],
+];
 const BIRTH_HEAD = Object.freeze({ radius: 0.0475, atLength: 0.51, lift: [0, 0.008, 0.007] as const, tangentSpan: 0.0125, bodyBehind: 0.1, pastMouth: 0.6, centreEase: 0.35 });
 import { BIRTH_CONTACT_FIELD, createBirthContact, type BirthContact } from './birthContact';
 import { KNEE_TURN_FIELD, createKneeTurn, type KneeTurn } from './kneeTurn';
@@ -3592,9 +3602,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     roots.forEach((r, i) => {
       const m = babyMoveOf(i, r);
       let sb = softBabies.get(r);
-      if (!sb) { sb = createSoftBaby(m.bones, BABY_SOFT_CHAINS, BABY_SOFT_CHAINS[0]); softBabies.set(r, sb); }
-      if (!babySoftOn) { sb.ready = false; return; }
+      if (!sb) { sb = createSoftBaby(m.bones, BABY_SOFT_CHAINS); softBabies.set(r, sb); }
       const b = i === 0 ? birthNow : null;
+      if (!babySoftOn) { sb.ready = false; sb.drive = 1; if (i === 0 && b && b.onHer > 0.5) { onHerPush(r); liftOffHer(r, b.onHer); } return; }
       // what drives it: a move under way; its birth from its settling into her pelvis until it lies on her; a stretch
       let drive = m.t >= 0 ? Math.min(1, 4 * moveEnvelope(m.kind, m.t)) : 0;
       if (b) {
@@ -3608,8 +3618,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       stepSoftBaby(sb, babyStepDt, { drive, fluid, down: babyDown, ...(push ? { push } : {}) });
       // LYING ON HER, ALL OF IT ON HER SKIN (2026-11-03, Joshua: "It appears the baby's head is in her belly?"): its
       // place on her is laid from its curl's size, and posed on her -- its head turned, its back straight -- its head
-      // sank into her. Its points sampled as drawn now; the deepest of them into her skin (along her skin's face) is
-      // how far it is lifted off her, eased, so it rests on her
+      // sank into her. Its points sampled as drawn now; the deepest of them into her skin is how far it is lifted off
+      // her, eased, its head laid on her by its neck, so it rests on her
       if (i === 0) liftOffHer(r, push ? (b?.onHer ?? 0) : 0);
     });
   }
@@ -3619,24 +3629,62 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * faces; a joint that would go into her is put back `margin` out from the nearest of it, along its face.
    */
   const babyLift = new THREE.Vector3(), liftWant = new THREE.Vector3(), liftNrm = new THREE.Vector3(), liftP = new THREE.Vector3();
-  let liftPick: Uint32Array | null = null, liftFor: THREE.SkinnedMesh | null = null;
+  let babyPitch = 0, pitchPick: { chest: Uint32Array; hips: Uint32Array } | null = null, pitchFor: THREE.SkinnedMesh | null = null;
+  function settlePitch(r: THREE.Object3D, m: THREE.SkinnedMesh, share: number): void {
+    const bones = m.skeleton.bones;
+    if (!pitchPick || pitchFor !== m) {
+      pitchFor = m;
+      const SI = m.geometry.getAttribute('skinIndex'), SW = m.geometry.getAttribute('skinWeight'), c: number[] = [], h: number[] = [];
+      for (let i = 0; i < SI.count; i += 3) { let b = 0, w = -1; for (let k = 0; k < 4; k++) if (SW.getComponent(i, k) > w) { w = SW.getComponent(i, k); b = SI.getComponent(i, k); } const nm = bones[b]?.name; if (nm === 'Bone_003' || nm === 'Bone_002' || nm === 'Bone_004') c.push(i); else if (nm === 'Bone_000' || nm === 'Bone_001' || nm === 'Bone_005') h.push(i); }
+      pitchPick = { chest: Uint32Array.from(c), hips: Uint32Array.from(h) };
+    }
+    const hipB = r.getObjectByName('Bone_001'), neckB = r.getObjectByName(BABY_BONES.neck); if (!hipB || !neckB) return;
+    // (its pitch from last frame put on first: birthPlace laid its place afresh)
+    const turnBy = (deg: number) => {
+      const H = hipB.getWorldPosition(new THREE.Vector3()), Nk = neckB.getWorldPosition(new THREE.Vector3()), mid = H.clone().add(Nk).multiplyScalar(0.5);
+      const long = Nk.clone().sub(H).normalize(), face = new THREE.Vector3(); { const [b] = nearestHerSkin(mid); if (b >= 0) face.fromArray(herSkin.nrm, b * 3); else face.set(0, 1, 0); }
+      const axis = new THREE.Vector3().crossVectors(long, face.negate()); if (axis.lengthSq() < 1e-10) return; axis.normalize();
+      const q = new THREE.Quaternion().setFromAxisAngle(axis, (deg * Math.PI) / 180), parent = r.parent;
+      // (about its middle, in the world; back into its holder's frame)
+      const wq = r.getWorldQuaternion(new THREE.Quaternion()), wp = r.getWorldPosition(new THREE.Vector3());
+      wq.premultiply(q); wp.sub(mid).applyQuaternion(q).add(mid);
+      if (parent) { parent.updateMatrixWorld(true); const pq = parent.getWorldQuaternion(new THREE.Quaternion()).invert(); r.quaternion.copy(pq.multiply(wq)); r.position.copy(parent.worldToLocal(wp)); }
+      else { r.quaternion.copy(wq); r.position.copy(wp); }
+      r.updateMatrixWorld(true);
+    };
+    const gap = (pick: Uint32Array): number => { m.skeleton.update(); let least = Infinity; const p = new THREE.Vector3(); for (const q of pick) { m.getVertexPosition(q, p); m.localToWorld(p); const [b] = nearestHerSkin(p); if (b < 0) continue; least = Math.min(least, (p.x - herSkin.pos[b * 3]) * herSkin.nrm[b * 3] + (p.y - herSkin.pos[b * 3 + 1]) * herSkin.nrm[b * 3 + 1] + (p.z - herSkin.pos[b * 3 + 2]) * herSkin.nrm[b * 3 + 2]); } return least; };
+    if (babyPitch !== 0) turnBy(babyPitch);
+    // (the turn that brings its chest as near her as its hips: its chest down by their difference over its length)
+    const gc = gap(pitchPick.chest), gh = gap(pitchPick.hips);
+    if (!Number.isFinite(gc) || !Number.isFinite(gh)) return;
+    const len = hipB.getWorldPosition(new THREE.Vector3()).distanceTo(neckB.getWorldPosition(new THREE.Vector3()));
+    const step = Math.max(-5, Math.min(5, (Math.atan2(gc - gh, Math.max(1e-6, len)) * 180) / Math.PI)) * share;
+    const k = 1 - Math.exp(-Math.max(0, babyStepDt) / ON_HER_SKIN.liftEase);
+    const next = Math.max(-ON_HER_SKIN.pitchMost, Math.min(ON_HER_SKIN.pitchMost, babyPitch + step * k));
+    turnBy(next - babyPitch); babyPitch = next;
+  }
+  let liftPick: Uint32Array | null = null, liftFor: THREE.SkinnedMesh | null = null, liftLeast = Infinity, liftWho = -1;
   function liftOffHer(r: THREE.Object3D, share: number): void {
     const parent = r.parent;
     // (what was added last frame taken off first: birthPlace lays its place afresh each frame, but a held birth does not)
     liftWant.set(0, 0, 0);
     let mesh: THREE.SkinnedMesh | null = null; r.traverse((o) => { const m = o as THREE.SkinnedMesh; if (!mesh && m.isSkinnedMesh && m.visible) mesh = m; });
     const m = mesh as THREE.SkinnedMesh | null, n = herSkin.idx.length;
+    // TIPPED TO LIE ALONG HER (2026-11-03, Joshua: "is it floating?"): its chest and its hips each measured against her
+    // skin, and all of it turned about its side, through its middle, until both are as near her -- a straight body on her
+    // round belly touched her at its hips alone, its chest held up. The turn eased and kept from frame to frame
+    if (share > 0 && m && n > 0) settlePitch(r, m, share); else babyPitch = 0;
     if (share > 0 && m && n > 0) {
-      // (its trunk and head only: its arms and legs keep themselves on her skin -- softBaby's push -- and its knees, folded
+      // (its trunk only: its head is laid on her by its neck, below, and its arms and legs keep themselves on her skin -- softBaby's push -- and its knees, folded
       // under it, held all of it up off her)
       if (!liftPick || liftPick.length === 0 || liftFor !== m) {
         liftFor = m;
-        const limbs = new Set<string>(BABY_SOFT_CHAINS.slice(1).flat()), SI = m.geometry.getAttribute('skinIndex'), SW = m.geometry.getAttribute('skinWeight'), c = SI.count, a: number[] = [];
-        for (let i = 0; i < c; i += 4) { let limb = 0; for (let k = 0; k < 4; k++) if (limbs.has(m.skeleton.bones[SI.getComponent(i, k)]?.name ?? '') || /^Bone_0(19|2[0-9]|3[0-9]|4[0-9]|5[0-9]|6[0-8]|0[6-9]|1[0-5])$/.test(m.skeleton.bones[SI.getComponent(i, k)]?.name ?? '')) limb += SW.getComponent(i, k); if (limb < 0.3) a.push(i); }
+        const limbs = new Set<string>(BABY_SOFT_CHAINS.flat()), SI = m.geometry.getAttribute('skinIndex'), SW = m.geometry.getAttribute('skinWeight'), c = SI.count, a: number[] = [];
+        for (let i = 0; i < c; i += 4) { let limb = 0; for (let k = 0; k < 4; k++) if (limbs.has(m.skeleton.bones[SI.getComponent(i, k)]?.name ?? '') || ['Bone_016', 'Bone_017', 'Bone_018'].includes(m.skeleton.bones[SI.getComponent(i, k)]?.name ?? '') || /^Bone_0(19|2[0-9]|3[0-9]|4[0-9]|5[0-9]|6[0-8]|0[6-9]|1[0-5])$/.test(m.skeleton.bones[SI.getComponent(i, k)]?.name ?? '')) limb += SW.getComponent(i, k); if (limb < 0.3) a.push(i); }
         liftPick = Uint32Array.from(a);
       }
       m.skeleton.update(); r.updateMatrixWorld(true);
-      const margin = ON_HER_SKIN.margin * M; let deepest = 0;
+      const margin = ON_HER_SKIN.margin * M; let deepest = 0; liftLeast = Infinity; liftWho = -1;
       liftNrm.set(0, 0, 0);
       for (const q of liftPick) {
         m.getVertexPosition(q, liftP); m.localToWorld(liftP);
@@ -3645,7 +3693,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         const nx = herSkin.nrm[best * 3], ny = herSkin.nrm[best * 3 + 1], nz = herSkin.nrm[best * 3 + 2];
         const over = (liftP.x - herSkin.pos[best * 3]) * nx + (liftP.y - herSkin.pos[best * 3 + 1]) * ny + (liftP.z - herSkin.pos[best * 3 + 2]) * nz;
         const deep = margin - over;
-        if (deep > 0) { liftNrm.x += nx * deep; liftNrm.y += ny * deep; liftNrm.z += nz * deep; if (deep > deepest) deepest = deep; }
+        if (deep > 0) { liftNrm.x += nx * deep; liftNrm.y += ny * deep; liftNrm.z += nz * deep; if (deep > deepest) { deepest = deep; liftWho = q; } }
+        // (how far its belly floats over her: the least gap of its points that face her)
+        if (over < liftLeast) liftLeast = over;
       }
       if (deepest > 0 && liftNrm.lengthSq() > 1e-18) liftWant.copy(liftNrm.normalize()).multiplyScalar(deepest * share);
     }
@@ -3655,50 +3705,60 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const k = 1 - Math.exp(-Math.max(0, babyStepDt) / ON_HER_SKIN.liftEase);
     babyLift.lerp(liftWant, liftWant.lengthSq() > babyLift.lengthSq() ? 1 : k);
     if (babyLift.lengthSq() > 0) { r.position.add(babyLift); r.updateMatrixWorld(true); }
-    // ITS HEAD DOWN ONTO HER (2026-11-03): lying along her belly its head stood out past where her belly rounds down to
-    // her chest; its neck bent toward her until its head's nearest point is on her skin, at most `headDownDeg`, eased
-    if (m && share > 0 && n > 0) headOntoHer(r, m, share);
-    else headDown = 0;
+    // ALL OF IT DRAPED OVER HER (2026-11-03, Joshua: "is it floating?"): lifted by its trunk, a straight body on her
+    // round belly touched her at its hips alone, its chest, head and legs held up off her. Each part in turn -- its
+    // upper back, its chest, its neck; each thigh, each shin -- bent toward her (about its side, its end down her skin's
+    // face) until the nearest point it carries is on her skin, at most `ON_HER_DRAPE` degrees, eased
+    if (m && share > 0 && n > 0) drapeOverHer(r, m, share);
+    else drapeAt.clear();
   }
-  let headDown = 0, headPick: Uint32Array | null = null, headFor: THREE.SkinnedMesh | null = null;
-  function headOntoHer(r: THREE.Object3D, m: THREE.SkinnedMesh, share: number): void {
-    const neck = r.getObjectByName(BABY_BONES.neck) as THREE.Bone | undefined, crown = r.getObjectByName('Bone_016');
-    if (!neck || !crown) return;
-    if (!headPick || headFor !== m) {
-      headFor = m;
-      const SI = m.geometry.getAttribute('skinIndex'), SW = m.geometry.getAttribute('skinWeight'), a: number[] = [];
-      for (let i = 0; i < SI.count; i += 3) { let h = 0; for (let k = 0; k < 4; k++) { const nm = m.skeleton.bones[SI.getComponent(i, k)]?.name; if (nm === 'Bone_017' || nm === 'Bone_016') h += SW.getComponent(i, k); } if (h > 0.7) a.push(i); }
-      headPick = Uint32Array.from(a);
-    }
-    // its head's gap to her skin now: the least of its points' heights over her skin (along her skin's face)
-    const gapNow = (): number => {
-      m.skeleton.update(); let least = Infinity;
-      for (const q of headPick!) {
-        m.getVertexPosition(q, liftP); m.localToWorld(liftP);
-        const [best] = nearestHerSkin(liftP);
-        if (best < 0) continue;
-        const over = (liftP.x - herSkin.pos[best * 3]) * herSkin.nrm[best * 3] + (liftP.y - herSkin.pos[best * 3 + 1]) * herSkin.nrm[best * 3 + 1] + (liftP.z - herSkin.pos[best * 3 + 2]) * herSkin.nrm[best * 3 + 2];
-        least = Math.min(least, over);
+  const drapeAt = new Map<string, number>(), drapePick = new Map<string, Uint32Array>(); let drapeFor: THREE.SkinnedMesh | null = null;
+  function drapeOverHer(r: THREE.Object3D, m: THREE.SkinnedMesh, share: number): void {
+    const bones = m.skeleton.bones;
+    // (each part's points: those its bone or any below it carries most, every third)
+    if (drapeFor !== m) {
+      drapeFor = m; drapePick.clear();
+      const SI = m.geometry.getAttribute('skinIndex'), SW = m.geometry.getAttribute('skinWeight');
+      for (const [name, , , carried] of ON_HER_DRAPE) {
+        const set = new Set(carried), a: number[] = [];
+        for (let i = 0; i < SI.count; i += 3) { let b = 0, w = -1; for (let k = 0; k < 4; k++) if (SW.getComponent(i, k) > w) { w = SW.getComponent(i, k); b = SI.getComponent(i, k); } if (set.has(bones[b]?.name ?? '')) a.push(i); }
+        drapePick.set(name, Uint32Array.from(a));
       }
+    }
+    const margin = ON_HER_SKIN.margin * M, p = new THREE.Vector3();
+    const gapOf = (pick: Uint32Array): number => {
+      m.skeleton.update(); let least = Infinity;
+      for (const q of pick) { m.getVertexPosition(q, p); m.localToWorld(p); const [best, bd] = nearestHerSkin(p); if (best < 0) { void bd; continue; }
+        least = Math.min(least, (p.x - herSkin.pos[best * 3]) * herSkin.nrm[best * 3] + (p.y - herSkin.pos[best * 3 + 1]) * herSkin.nrm[best * 3 + 1] + (p.z - herSkin.pos[best * 3 + 2]) * herSkin.nrm[best * 3 + 2]); }
       return least;
     };
-    // the way to bend it: about its side, turning its crown toward her (down her skin's face)
-    const N = neck.getWorldPosition(new THREE.Vector3()), up = crown.getWorldPosition(new THREE.Vector3()).sub(N).normalize();
     const face = liftNrm.lengthSq() > 0 ? liftNrm.clone() : new THREE.Vector3(0, 1, 0);
-    const axis = new THREE.Vector3().crossVectors(up, face.clone().negate()); if (axis.lengthSq() < 1e-10) return; axis.normalize();
-    const turn = (deg: number) => { const q = new THREE.Quaternion().setFromAxisAngle(axis, (deg * Math.PI) / 180), pq = neck.parent ? neck.parent.getWorldQuaternion(new THREE.Quaternion()).invert() : new THREE.Quaternion(), wq = neck.getWorldQuaternion(new THREE.Quaternion()); neck.quaternion.copy(pq.multiply(q).multiply(wq)); neck.updateMatrixWorld(true); };
-    const keep = neck.quaternion.clone(), margin = ON_HER_SKIN.margin * M;
-    // (searched: the bend at which its head just meets her, by halving, from none to the most)
-    let want = 0;
-    if (gapNow() > margin) {
-      let lo = 0, hi: number = ON_HER_SKIN.headDownDeg;
-      for (let it = 0; it < 7; it++) { const mid = (lo + hi) / 2; neck.quaternion.copy(keep); neck.updateMatrixWorld(true); turn(mid); if (gapNow() > margin) lo = mid; else hi = mid; }
-      want = lo;
-    }
     const k = 1 - Math.exp(-Math.max(0, babyStepDt) / ON_HER_SKIN.liftEase);
-    headDown += (want * share - headDown) * k;
-    neck.quaternion.copy(keep); neck.updateMatrixWorld(true);
-    if (headDown > 0.05) turn(headDown);
+    for (const [name, most, childName, , away = 0] of ON_HER_DRAPE) {
+      const bone = bones.find((x) => x.name === name), child = r.getObjectByName(childName), pick = drapePick.get(name);
+      if (!bone || !child || !pick || !pick.length) continue;
+      const B = bone.getWorldPosition(new THREE.Vector3()), along = child.getWorldPosition(new THREE.Vector3()).sub(B).normalize();
+      const axis = new THREE.Vector3().crossVectors(along, face.clone().negate()); if (axis.lengthSq() < 1e-10) continue; axis.normalize();
+      const keep = bone.quaternion.clone();
+      const turn = (deg: number) => { const q = new THREE.Quaternion().setFromAxisAngle(axis, (deg * Math.PI) / 180), pq = bone.parent ? bone.parent.getWorldQuaternion(new THREE.Quaternion()).invert() : new THREE.Quaternion(), wq = bone.getWorldQuaternion(new THREE.Quaternion()); bone.quaternion.copy(pq.multiply(q).multiply(wq)); bone.updateMatrixWorld(true); };
+      // (searched: the bend at which it just meets her, by halving, from none to the most; none if it is on her already)
+      // (and where it goes into her -- its head, once its back has bent down -- back away from her, up to `away`)
+      let want = 0;
+      const g0 = gapOf(pick);
+      if (g0 > margin) {
+        let lo = 0, hi: number = most;
+        for (let it = 0; it < 6; it++) { const mid = (lo + hi) / 2; bone.quaternion.copy(keep); bone.updateMatrixWorld(true); turn(mid); if (gapOf(pick) > margin) lo = mid; else hi = mid; }
+        want = lo;
+      } else if (g0 < margin && away > 0) {
+        let lo = -away, hi = 0;
+        for (let it = 0; it < 7; it++) { const mid = (lo + hi) / 2; bone.quaternion.copy(keep); bone.updateMatrixWorld(true); turn(mid); if (gapOf(pick) < margin) hi = mid; else lo = mid; }
+        want = lo;
+      }
+      const was = drapeAt.get(name) ?? 0, now = was + (want * share - was) * k;
+      drapeAt.set(name, now);
+      bone.quaternion.copy(keep); bone.updateMatrixWorld(true);
+      if (Math.abs(now) > 0.05) turn(now);
+    }
   }
   /** her skin's sample in cells `near` across (built once a frame), and the nearest of it to a point within one cell */
   const skinGrid = new Map<string, number[]>(); let skinGridFrame = -1;
@@ -4785,6 +4845,15 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // length from its head) points the camera there
         // (a probe's look at her baby alone: her own meshes hidden, the baby's left)
         kneeHands: () => kneeHold,
+        // (a probe's: how far its newborn is lifted off her, by which bone's skin, and its trunk's least gap to her)
+        // (a probe's: the gap from her skin, as drawn now, of each of its trunk's parts and its legs' -- cm, the least)
+        onHerGaps: () => { const r = babyRoots()[0]; let mesh: THREE.SkinnedMesh | null = null; r?.traverse((o) => { const m = o as THREE.SkinnedMesh; if (!mesh && m.isSkinnedMesh && m.visible) mesh = m; }); const m = mesh as THREE.SkinnedMesh | null; if (!m || !herSkin.idx.length) return null;
+          m.skeleton.update(); r!.updateMatrixWorld(true); const SI = m.geometry.getAttribute('skinIndex'), SW = m.geometry.getAttribute('skinWeight'), out: Record<string, number> = {}, p = new THREE.Vector3();
+          for (let i = 0; i < SI.count; i += 3) { let b = 0, w = -1; for (let k = 0; k < 4; k++) if (SW.getComponent(i, k) > w) { w = SW.getComponent(i, k); b = SI.getComponent(i, k); } const nm = m.skeleton.bones[b]?.name ?? ''; const part = ({ Bone_000: 'hips', Bone_001: 'hips', Bone_005: 'waist', Bone_004: 'belly', Bone_003: 'chest', Bone_002: 'chest', Bone_018: 'neck', Bone_017: 'head', Bone_016: 'head', Bone_010: 'thighL', Bone_015: 'thighR', Bone_009: 'shinL', Bone_014: 'shinR' } as Record<string, string>)[nm]; if (!part) continue;
+            m.getVertexPosition(i, p); m.localToWorld(p); const [best] = nearestHerSkin(p); if (best < 0) continue; const over = (p.x - herSkin.pos[best * 3]) * herSkin.nrm[best * 3] + (p.y - herSkin.pos[best * 3 + 1]) * herSkin.nrm[best * 3 + 1] + (p.z - herSkin.pos[best * 3 + 2]) * herSkin.nrm[best * 3 + 2]; out[part] = Math.min(out[part] ?? Infinity, over / M * 100); }
+          return Object.fromEntries(Object.entries(out).map(([k2, v2]) => [k2, +v2.toFixed(1)])); },
+        onHerLift: () => { const r = babyRoots()[0]; let who = ''; if (r && liftFor && liftWho >= 0) { const SI = liftFor.geometry.getAttribute('skinIndex'), SW = liftFor.geometry.getAttribute('skinWeight'); let b = 0, w = -1; for (let k = 0; k < 4; k++) if (SW.getComponent(liftWho, k) > w) { w = SW.getComponent(liftWho, k); b = SI.getComponent(liftWho, k); } who = liftFor.skeleton.bones[b]?.name ?? ''; }
+          return { liftCm: +(babyLift.length() / M * 100).toFixed(2), byBone: who, leastGapCm: Number.isFinite(liftLeast) ? +(liftLeast / M * 100).toFixed(2) : null, pitchDeg: +babyPitch.toFixed(1), drapeDeg: Object.fromEntries([...drapeAt].map(([k2, v2]) => [k2, +v2.toFixed(1)])) }; },
         // (a probe's camera on her hand: aimed at where her left (or right) fingertip goes, from yaw/pitch/distance)
         aimHand: (side: 'L' | 'R', yaw: number, pitch: number, distance: number) => { const t = kneeTips[side]; if (!t) return false; orbit.yaw = yaw; orbit.pitch = pitch; orbit.distance = distance; orbit.target.copy(t); turning = false; return true; },
         // its soft body: on or off, and how far each part lags its pose now (degrees, the most), its drive

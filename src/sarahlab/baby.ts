@@ -1410,7 +1410,7 @@ export function poseOnHer(bones: ReadonlyMap<string, THREE.Bone>, k: number, f: 
   };
   for (const s of ['left', 'right'] as const) {
     limb(BABY_BONES.arm[s], (sd) => v.copy(sd).multiplyScalar(L.armOut).addScaledVector(f.long, L.armUp).addScaledVector(f.front, L.onto), (sd) => v.copy(f.long).multiplyScalar(L.handUp).addScaledVector(f.front, L.onto).addScaledVector(sd, 0.15));
-    limb(BABY_BONES.leg[s], (sd) => v.copy(sd).multiplyScalar(L.legOut).addScaledVector(f.long, -L.legDown).addScaledVector(f.front, L.onto), (sd) => v.copy(f.long).multiplyScalar(-L.shinBack).addScaledVector(sd, -L.shinIn).addScaledVector(f.front, L.onto));
+    limb(BABY_BONES.leg[s], (sd) => v.copy(sd).multiplyScalar(L.legOut).addScaledVector(f.long, -L.legDown).addScaledVector(f.front, L.legOnto), (sd) => v.copy(f.long).multiplyScalar(-L.shinBack).addScaledVector(sd, -L.shinIn).addScaledVector(f.front, L.onto));
   }
 }
 /**
@@ -1459,7 +1459,7 @@ export const DESCENT = Object.freeze({ straighten: 0.8, legOut: 0.08, upperDown:
 /** GAME TUNING: the newborn on her -- how far its back straightens (all the way: its straight body, part-curled, had a
  * hollow belly -- 2026-11-03), its head's turn (radians), and each limb's aim (its
  * side, along it toward its head, and down onto her) */
-export const ON_HER = Object.freeze({ straighten: 1, headTurn: 1.0, armOut: 0.75, armUp: 0.4, handUp: 0.6, legOut: 0.7, legDown: 0.35, shinBack: 0.55, shinIn: 0.35, onto: 0.5 });
+export const ON_HER = Object.freeze({ straighten: 1, headTurn: 1.0, armOut: 0.75, armUp: 0.4, handUp: 0.6, legOut: 0.8, legDown: 0.35, legOnto: 0.45, shinBack: 0.55, shinIn: 0.35, onto: 0.5 });
 
 /** How far toward its feet (of its length) a leg's aim always is, kicking or stretching. GAME TUNING. */
 export const KICK_AWAY = 0.45;
