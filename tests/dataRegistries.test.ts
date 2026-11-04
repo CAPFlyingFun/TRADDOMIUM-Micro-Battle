@@ -84,8 +84,9 @@ describe('the import boundary', () => {
   const codeOf = (file: string): string =>
     readFileSync(join(dir, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 
-  it('covers the three modules', () => {
-    expect(sources.sort()).toEqual(['jointRange.ts', 'registries.ts', 'schema.ts']);
+  it('covers the two modules', () => {
+    // (the joint-range table moved with the character room to the Character Builder, 2026-11-04)
+    expect(sources.sort()).toEqual(['registries.ts', 'schema.ts']);
   });
 
   it('imports nothing from three, the DOM, storage or the network', () => {

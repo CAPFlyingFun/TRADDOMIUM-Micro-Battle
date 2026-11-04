@@ -1,12 +1,18 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <!-- A link straight into the character room (`?open=CharacterRoom`, src/app/openLink.ts) may be held upright from
-         the first paint: the rotate prompt below stands down for it. PORTRAIT_LINKS there is this list (a test pins it). -->
+    <!-- THE CHARACTER ROOM HAS ITS OWN SITE (Joshua, 2026-11-04; src/app/characterBuilder.ts). An old bookmark into it
+         here (`?open=CharacterRoom`, `?open=sarah`, `?open=lab.sarah`) goes straight to the Character Builder before
+         anything of the game loads, carrying the rest of its address. CHARACTER_BUILDER_LINKS and CHARACTER_BUILDER_URL
+         are this list and this address (a test pins both). -->
     <script>
       try {
-        var open = (new URLSearchParams(location.search).get('open') || '').trim().toLowerCase();
-        if (['characterroom', 'sarah', 'lab.sarah'].indexOf(open) >= 0) document.documentElement.setAttribute('data-any-orientation', '');
+        var query = new URLSearchParams(location.search), open = (query.get('open') || '').trim().toLowerCase();
+        if (['characterroom', 'sarah', 'lab.sarah'].indexOf(open) >= 0) {
+          query.delete('open');
+          var rest = query.toString();
+          location.replace('https://capflyingfun.github.io/Custom-Character-Builder-System/' + (rest ? '?' + rest : '') + location.hash);
+        }
       } catch (e) {}
     </script>
     <meta charset="UTF-8" />
@@ -148,20 +154,15 @@
          INSTALLED app honours on Android; this is what covers Safari,
          the browser tab, and every phone that ignores it.
 
-         ONE EXCEPTION, THE CHARACTER ROOM (Joshua, 2026-10-20: "Just in
-         this room, allow both portraits and landscape views by removing
-         that force rotate screen message"). The gate stands down while
-         <html> carries `data-any-orientation`. Only the scene manager sets
-         it, for a scene that says it may be upright (AppScene.portrait),
-         and it clears it as every scene goes; the inline script at the top
-         of <head> sets it before the first paint for a link that opens
-         that room. With no attribute, which is every other screen and any
-         failure, the gate works exactly as before. */
+         NO EXCEPTIONS. The character room was the one screen allowed
+         upright (Joshua, 2026-10-20); it moved to its own site, the
+         Character Builder, on 2026-11-04, and may still be held either
+         way THERE. Everything this site serves is landscape only. */
       #orient {
         display: none;
       }
       @media (orientation: portrait) and (pointer: coarse) {
-        html:not([data-any-orientation]) #orient {
+        #orient {
           display: flex;
           position: fixed;
           inset: 0;
@@ -173,9 +174,9 @@
           background: #06090c;
         }
         /* Nothing behind the gate may be touched, scrolled or read out. */
-        html:not([data-any-orientation]) #app,
-        html:not([data-any-orientation]) #ui,
-        html:not([data-any-orientation]) #boot {
+        #app,
+        #ui,
+        #boot {
           visibility: hidden;
         }
       }

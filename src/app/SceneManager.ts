@@ -33,11 +33,6 @@ export interface SceneManagerDeps {
   readonly onFallback?: (error: unknown) => void;
   /** Milliseconds per fade; 0 in tests. */
   readonly fadeMs?: number;
-  /**
-   * Told whether the current scene may be held upright (`AppScene.portrait`): false as the old scene goes, then the
-   * new scene's answer once it is current. The app turns the static rotate prompt off and on with it.
-   */
-  readonly portrait?: (allowed: boolean) => void;
 }
 
 export interface GoToOptions {
@@ -99,11 +94,7 @@ export class SceneManager {
 
   private async swap(factory: SceneFactory, fade: boolean): Promise<void> {
     await this.fadeOut(fade && this.active !== null);
-    if (this.active) {
-      this.active.dispose();
-      // (not before the first scene: a link into an upright room may already have stood the prompt down)
-      this.deps.portrait?.(false);
-    }
+    if (this.active) this.active.dispose();
     this.active = null;
     this.hygiene();
 
@@ -119,7 +110,6 @@ export class SceneManager {
     }
 
     this.active = next;
-    this.deps.portrait?.(next.portrait === true);
     const { width, height } = this.deps.viewport();
     next.resize(width, height);
     // Told once the fallback scene is fully current, so the app can reset

@@ -281,27 +281,12 @@ const HUMANS = [
     master: 'Sarah-Toon.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true, protectBump: true, rigFingers: true,
   },
   //
-  // SARAH'S BASE MANNEQUIN (Joshua, 2026-10-07): the body Sarah may be rebuilt
-  // from — bald, no clothes, all five fingers rigged by Meshy this time (71
-  // joints). It is NOT the game's Sarah: only the Sarah Lab dev tool loads
-  // `sarah-base.glb`, so it can be tried "before placing live". The bake adds
-  // the `belly` morph target (bellyMorph.mjs, full term to nearly flat) and
-  // grows a fitted shirt and leggings from her skin (growClothes.mjs), after the
-  // same weight passes her toon body needs.
-  {
-    master: 'Sarah-Base.glb', out: 'sarah-base.glb', who: 'Sarah (base)', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true, smoothArmpits: true, smoothHands: true, protectBump: 'overhang', smoothCrease: true, bellyMorph: true, clothes: true,
-  },
-  // SARAH v2 (Joshua, 2026-10-13): a newer Meshy master of the same woman at 36
-  // weeks, arms down at her sides, a realistic skin, the outie navel modelled into
-  // the mesh and all five fingers rigged. Baked beside v1 so the Sarah Lab can
-  // switch between them and compare; the same weight passes. Her belly is HER OWN
-  // (scripts/bellyV2.mjs, Joshua 2026-10-13): the master IS 100% and is never
-  // reshaped; 0-75% shrink from it, 150-200% grow past it with v1's approved curve,
-  // the groin anchored, and the 100% curve correction is a separate switchable
-  // target (bellyRefine). v1's bake is not touched by any of it. No clothes yet.
-  {
-    master: 'Sarah-V2.glb', out: 'sarah-v2.glb', who: 'Sarah (v2)', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true, smoothArmpits: true, smoothHands: true, protectBump: 'overhang', smoothCrease: true, bellyMorph: true, bellyV2: true, navel: [0, 1.012], armsDown: true, navelModelled: true,
-  },
+  // Sarah's base mannequin (`sarah-base.glb`, 2026-10-07) and Sarah v2
+  // (`sarah-v2.glb`, 2026-10-13) were baked here for the character room. The
+  // room moved to its own site on 2026-11-04 (the Custom Character Builder
+  // System, `src/app/characterBuilder.ts`) and bakes them there; this list is
+  // the game's own people. The options they used (bellyMorph, bellyV2,
+  // clothes, armsDown, ...) stay, for the next body that needs one.
 ];
 
 /**

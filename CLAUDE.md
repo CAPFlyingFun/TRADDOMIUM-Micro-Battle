@@ -135,26 +135,37 @@ manifest's `"orientation": "landscape"` is the other half, for an
 installed app. Do not build a portrait layout for anything; the gate
 means nobody will ever see one.
 
-*The one exception, the character room* (Joshua, 2026-10-20: "Just in
-this room, allow both portraits and landscape views by removing that
-force rotate screen message"). The Sarah Lab (`?open=CharacterRoom`)
-may be held upright: its scene sets `AppScene.portrait`, the scene
-manager is the only thing that raises `data-any-orientation` on
-`<html>` for it (and clears it as every scene goes), and the gate's CSS
-reads that one attribute. Its HUD has a portrait layout of its own.
-Every other screen is landscape only, as above; do not widen this to
-another screen without his say-so. `tests/landscapeOnly.test.ts` pins
-it.
+*No exceptions.* The character room was the one screen allowed upright
+(Joshua, 2026-10-20); it moved to its own site on 2026-11-04 (below) and
+may be held either way THERE. Nothing here sets a portrait flag any
+more, and `tests/landscapeOnly.test.ts` pins that.
 
 **A character appears dressed, all at once, in the game** (Joshua,
 2026-10-20: "When Sarah, Lena, or another character appears, I want the
 complete equipped character revealed together once its required body,
 clothing, and materials are ready"). Her files may download separately
 and progressively behind the scenes, and nothing is merged into one big
-file for it; what is held back is the REVEAL. The character room is the
-exception, the way it is for orientation: it may show the base body on
-its own (body paint hides her clothes on purpose) while the rest loads,
-with the loading card saying how far (`sarahlab/loadingCard.ts`).
+file for it; what is held back is the REVEAL. (The character room, which
+may show her base body alone while the rest loads, is the builder's, below.)
+
+**Character work lives in the Custom Character Builder System** (Joshua,
+2026-11-04: "Let remove the character room from TRADDOMIUM altogether.
+Instead, the character room will be the separate repo"). The room --
+Sarah, Jack and the newborn, shapes, skin, clothes, poses, joint ranges,
+birth -- is `CAPFlyingFun/custom-character-builder-system`, served at
+https://capflyingfun.github.io/Custom-Character-Builder-System/ and used
+by every game. This repo keeps only the way there: the Editors card
+(a link, OPEN ↗) and index.html's first script, which sends an old
+`?open=CharacterRoom` / `?open=sarah` bookmark straight to the builder
+(`src/app/characterBuilder.ts`). Do not rebuild the room here. When
+Joshua brings a character back — the builder's EXPORT of his character
+book, his saved looks and stats — it is baked into the game as a PRESET:
+ideally one shared body file and many characters as numbers on it (his
+"one female model with 30 variations"), not a model per character. A
+Sims-style creator INSIDE the game would be a separate feature, not this
+link. What stays here is what the game's own people use: the human body
+and pose code (`actor/human*`, `view/HumanRig`), `sarah.glb`, `jack.glb`,
+`badge.glb`, and `npm run bake:humans`.
 
 **Controls belong to the thumbs, not the screen.** Screen space near the
 thumbs is the scarcest resource; action controls have first claim.

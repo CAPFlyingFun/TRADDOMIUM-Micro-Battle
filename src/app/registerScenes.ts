@@ -35,8 +35,7 @@ import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/p
 import { LAB_SCENE_ID, createCreatureLabScene, creatureLabTool } from '../lab';
 import { TOMBS_SCENE_ID, createTombsLabScene, tombsTool } from '../tombs';
 import { STORY_LAB_SCENE_ID, createStoryLabScene, storyLabTool } from '../storylab';
-import { SARAH_LAB_SCENE_ID, createSarahLabScene, sarahLabTool } from '../sarahlab';
-import { CHARACTER_BOOK_KEY, CHARACTER_BOOK_VERSION, EMPTY_BOOK, sanitizeBook, type CharacterBook } from '../sarahlab/characterSaves';
+import { characterBuilderTool } from './characterBuilder';
 import {
   LocalSoloSession, isSoloSlot, newSoloGame, readSoloSlots, resumeSoloSlot, restorableStateOf, savedSoloGame,
   soloSlotSpec, toolSoloSlot, type KnownMap, type SoloSlot,
@@ -172,13 +171,6 @@ const DETAIL_OVERRIDE: DetailTier | null = isDetailTier(DETAIL_NAMED) ? DETAIL_N
  * setting: nothing is stored, and the HUD's sky line says `sim` while
  * one is in force, so a held sky can never be mistaken for the island's.
  */
-/**
- * `?skin=ktx2`: the character room loads Sarah's body with GPU-compressed skin maps, the KTX2 pilot, to compare with
- * the PNG skin on the phone (Joshua, 2026-10-22). An override like `?tier=`, never a setting; the room's status line
- * says "KTX2 skin" while it is in force.
- */
-const SKIN_QUERY_PARAM = 'skin';
-const SKIN_OVERRIDE: 'ktx2' | null = typeof globalThis.location !== 'undefined' && new URLSearchParams(globalThis.location.search).get(SKIN_QUERY_PARAM) === 'ktx2' ? 'ktx2' : null;
 const SKY_QUERY_PARAM = 'sky';
 const HOUR_QUERY_PARAM = 'hour';
 const SKY_NAMED = typeof globalThis.location === 'undefined'
@@ -624,21 +616,8 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
     })),
   );
 
-  // THE SARAH LAB (Joshua, 2026-10-07: "Good to test Sarah maybe in a separate
-  // link in like a Dev menu I can play around with before placing live"): the
-  // base mannequin with its belly slider and grown clothes. Loads its own file,
-  // which nothing else reads.
-  registerTool(sarahLabTool);
-  registerScene(
-    SARAH_LAB_SCENE_ID,
-    createSarahLabScene((ctx) => ({
-      onBack: () => goToScreen(ctx, SCREEN_ID.editors),
-      skin: SKIN_OVERRIDE,
-      // saved characters and the outfit library, on the device (Joshua, 2026-10-22)
-      characters: (() => {
-        const store = ctx.storage.open<CharacterBook>({ key: CHARACTER_BOOK_KEY, version: CHARACTER_BOOK_VERSION, defaults: EMPTY_BOOK, sanitize: (raw) => sanitizeBook(raw) });
-        return { read: () => store.read(), write: (book: CharacterBook) => store.write(book) };
-      })(),
-    })),
-  );
+  // THE CHARACTER ROOM, on its own site (Joshua, 2026-11-04): the Sarah Lab
+  // that stood here became the Custom Character Builder System. Its card is a
+  // link there; index.html sends an old `?open=CharacterRoom` bookmark too.
+  registerTool(characterBuilderTool);
 }

@@ -9,7 +9,8 @@
  * from the hub it finds the app in `menu` and leaves the state alone,
  * entered from the loading screen it asks for `playing` itself. A panel
  * tool is the hub's own business: it opens over the hub and the hub
- * closes it on the way out.
+ * closes it on the way out. A link tool (`href`) is a real link to its
+ * own site, labelled OPEN ↗ so it never looks like a tool that is here.
  *
  * Every control carries `data-action` (app/actions.ts): `back`, and
  * `tool:<id>` per card, so a probe can drive the hub by the names a
@@ -32,6 +33,8 @@ export const HUB_TITLE = 'Editors / Dev Tools';
 export const HUB_SUBTITLE = 'Tools for looking at and tuning the game. What a tool saves stays on this device unless you export it.';
 export const HUB_EMPTY = 'No tools are registered in this build.';
 export const OPEN_LABEL = 'Open';
+/** A link tool's button: the arrow says it leaves for another site. */
+export const OPEN_ELSEWHERE_LABEL = 'Open ↗';
 export const BACK_LABEL = 'Back';
 
 export interface DevToolsHubHooks {
@@ -69,6 +72,8 @@ const CSS = {
   button:
     'min-height:var(--ui-touch,48px);padding:10px 18px;font:inherit;color:inherit;' +
     'background:var(--ui-button,#1a2014);border:1px solid var(--ui-gold,#c9a94a);border-radius:var(--ui-radius,10px);',
+  /** A link drawn as the same button. */
+  link: 'box-sizing:border-box;display:flex;align-items:center;justify-content:center;text-decoration:none;',
   actions: 'display:flex;justify-content:flex-end;gap:10px;',
 } as const;
 
@@ -133,13 +138,17 @@ export class DevToolsHubScene implements AppScene {
     this.root = null;
   }
 
-  /** What OPEN does. A scene-tool is the owner's to open; a panel opens here, over the hub. */
+  /** What OPEN does. A scene-tool is the owner's to open; a link leaves for its site; a panel opens here, over the hub. */
   open(tool: DevTool): void {
     if (tool.sceneId !== undefined) {
       this.hooks.openScene(tool.sceneId);
       return;
     }
-    // `registerTool` guarantees a tool without a sceneId has an open().
+    if (tool.href !== undefined) {
+      this.ctx.uiLayer.ownerDocument.defaultView?.location.assign(tool.href);
+      return;
+    }
+    // `registerTool` guarantees a tool without a sceneId or an href has an open().
     this.closePanel();
     tool.open?.(this.ctx);
     this.openedPanel = tool;
@@ -157,6 +166,16 @@ export class DevToolsHubScene implements AppScene {
     title.textContent = tool.title;
     const text = el(doc, 'p', CSS.cardText);
     text.textContent = tool.description;
+    if (tool.href !== undefined) {
+      // A real link, so the phone treats it as one: it opens the other site in place of this one.
+      const link = doc.createElement('a');
+      link.href = tool.href;
+      link.dataset.action = toolAction(tool.id);
+      link.textContent = OPEN_ELSEWHERE_LABEL;
+      link.style.cssText = CSS.button + CSS.link;
+      card.append(title, text, link);
+      return card;
+    }
     // Same shape as `actionButton`, outside the closed ACTION vocabulary: one action per registered tool.
     const open = doc.createElement('button');
     open.type = 'button';

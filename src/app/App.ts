@@ -23,7 +23,7 @@ import { Renderer } from './Renderer';
 import type { AppHandle, SceneContext } from './Scene';
 import { SceneManager } from './SceneManager';
 import { listTools } from '../devtools/DevTool';
-import { openLinkScene, PORTRAIT_ATTRIBUTE } from './openLink';
+import { openLinkScene } from './openLink';
 import { registerScenes } from './registerScenes';
 import { sceneFactory } from './registry';
 
@@ -68,8 +68,6 @@ export class App {
       viewport: () => this.renderer.size(),
       context: () => this.ctx,
       fallback: () => sceneFactory('menu'),
-      // the static rotate prompt (#orient in index.html) stands down while a scene that may be upright is current
-      portrait: (allowed) => document.documentElement.toggleAttribute(PORTRAIT_ATTRIBUTE, allowed),
       onFallback: () => {
         // A scene that could not be entered has no session worth keeping.
         void this.handle.endSession();
@@ -94,7 +92,7 @@ export class App {
     // Every scene and dev tool this build contains, in one list.
     registerScenes();
 
-    // `?open=sarah` and the like: a bookmark straight into an Editors tool (openLink.ts); the menu otherwise.
+    // `?open=tombs` and the like: a bookmark straight into an Editors tool (openLink.ts); the menu otherwise.
     const opened = typeof globalThis.location === 'undefined' ? null : openLinkScene(globalThis.location.search, listTools());
     await this.scenes.goTo(sceneFactory(opened ?? 'menu'));
     this.state.set('menu');

@@ -12,8 +12,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SceneContext } from '../src/app/Scene';
 import { listTools, registerTool, toolAction, type DevTool } from '../src/devtools/DevTool';
 import {
-  BACK_LABEL, DEVTOOLS_SCENE_ID, DevToolsHubScene, HUB_EMPTY, HUB_TITLE, OPEN_LABEL, createDevToolsHubScene,
-  type DevToolsHubHooks,
+  BACK_LABEL, DEVTOOLS_SCENE_ID, DevToolsHubScene, HUB_EMPTY, HUB_TITLE, OPEN_ELSEWHERE_LABEL, OPEN_LABEL,
+  createDevToolsHubScene, type DevToolsHubHooks,
 } from '../src/devtools/DevToolsHubScene';
 
 function rig() {
@@ -130,6 +130,23 @@ describe('DevToolsHubScene', () => {
     expect(uiLayer.querySelector('h1')?.textContent).toBe(HUB_TITLE);
     scene.resize(932, 430);
     scene.resize(932, 0);
+    scene.dispose();
+  });
+
+  // (last: it registers a tool, and the cases above count what is registered)
+  it("draws a link tool as a real link to its own site, saying it leaves, never as a button that pretends it is here", async () => {
+    const builder: DevTool = { id: 'site-tool', title: 'Elsewhere', description: 'Lives on its own site.', href: 'https://example.org/builder/' };
+    registerTool(builder);
+    const { uiLayer, ctx, hooks } = rig();
+    const scene = new DevToolsHubScene(ctx, hooks);
+    await scene.enter();
+    const card = uiLayer.querySelector<HTMLElement>('li[data-tool="site-tool"]')!;
+    const link = card.querySelector<HTMLAnchorElement>(`a[data-action="${toolAction('site-tool')}"]`);
+    expect(link?.href).toBe('https://example.org/builder/');
+    expect(link?.textContent).toBe(OPEN_ELSEWHERE_LABEL);
+    expect(OPEN_ELSEWHERE_LABEL).toContain('↗');
+    expect(card.querySelector('button')).toBeNull();
+    expect(hooks.openScene).not.toHaveBeenCalled();
     scene.dispose();
   });
 });

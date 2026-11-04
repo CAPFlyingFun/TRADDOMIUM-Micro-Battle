@@ -1,7 +1,7 @@
 /**
  * The DevTool contract (ARCHITECTURE §8) and the registry the hub lists.
  *
- * A tool is one of two things:
+ * A tool is one of three things:
  *
  *  - a SCENE. `sceneId` names a scene in `app/registry`, and the hub opens
  *    it through the same `SceneManager.goTo` every other screen goes
@@ -12,6 +12,10 @@
  *  - a PANEL. `open(ctx)` builds something over the hub — a DOM panel,
  *    typically — and `close()` takes it down. For a tool too small to
  *    deserve a scene of its own.
+ *  - a LINK. `href` is a tool that lives on another site (the Character
+ *    Builder, split out on 2026-11-04): the card's button is a link to it
+ *    and says it leaves (OPEN ↗), rather than a button that pretends the
+ *    tool is here.
  *
  * §8 sketches the contract with an "optional sceneFactory". This carries
  * a scene ID instead: the scene registry already owns the factories, and
@@ -41,6 +45,8 @@ export interface DevTool {
   readonly description: string;
   /** A registered scene id. The hub asks its owner to open it; nothing else is special about it. */
   readonly sceneId?: string;
+  /** An https address on another site; the hub's card is a link there. */
+  readonly href?: string;
   /** A panel tool builds itself here, with the hub's own context. */
   open?(ctx: SceneContext): void;
   /** Take the panel down. The hub calls it when it leaves or when another panel opens. */
@@ -66,8 +72,8 @@ const tools = new Map<string, DevTool>();
  * evaluation turns every dev-server edit into a crash. A replaced tool
  * keeps its place in the list, because `Map.set` on an existing key does.
  *
- * Throws for a tool that could never be opened. With neither `sceneId`
- * nor `open()` there is nothing for the OPEN button to do, and a card
+ * Throws for a tool that could never be opened. With no `sceneId`,
+ * `open()` or `href` there is nothing for the OPEN button to do, and a card
  * whose button does nothing is an unavailable action that looks
  * functional (§2.9). Loud at registration — which is module load, in
  * development — rather than silent on the phone.
@@ -78,8 +84,11 @@ export function registerTool(tool: DevTool): void {
       `DevTool id "${tool.id}" must be letters, digits, dot, dash or underscore, starting with a letter or digit`,
     );
   }
-  if (tool.sceneId === undefined && tool.open === undefined) {
+  if (tool.sceneId === undefined && tool.open === undefined && tool.href === undefined) {
     throw new Error(`DevTool "${tool.id}" has neither a sceneId nor an open(); nothing could open it`);
+  }
+  if (tool.href !== undefined && !/^https:\/\/[^\s"]+$/.test(tool.href)) {
+    throw new Error(`DevTool "${tool.id}" links to "${tool.href}", which is not an https address`);
   }
   tools.set(tool.id, tool);
 }

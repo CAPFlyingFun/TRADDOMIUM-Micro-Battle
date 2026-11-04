@@ -4,13 +4,9 @@ Gameplay consumes these registries; it never keeps a second copy of a
 number (ARCHITECTURE §2.8). `schema.ts` is the one pattern, `registries.ts`
 is the ten typed registries. Both are pure: no three, no DOM, no storage.
 
-`jointRange.ts` is the master table of how far each human joint goes, a
-woman's and a man's (Joshua, 2026-11-04), every number MEASURED from a named
-source; its `JOINT_RANGE_WIRED` lists the motions a live system reads. It has
-two levels (Joshua's choice, 2026-11-04): ACTIVE, what a person moves a joint
-to by herself, and PASSIVE, how far it gives placed or loaded (a squat, a
-birth position, a lunge) -- a study's mean plus two standard deviations where
-one measured it, never less than active, and the active range where none did.
+The human joint-range table (`jointRange.ts`, 2026-11-04) moved with the
+character room to the Custom Character Builder System, the one place every
+game's character work now happens (`src/app/characterBuilder.ts`).
 
 ## The pattern in one line
 

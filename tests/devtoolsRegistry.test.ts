@@ -55,6 +55,15 @@ describe('DevTool registry', () => {
     expect(() => toolById('dead')).toThrow(/No dev tool registered/);
   });
 
+  it('accepts a link tool that lives on another site, and only at an https address', () => {
+    const link: DevTool = { id: 'elsewhere', title: 'Elsewhere', description: 'Its own site.', href: 'https://example.org/tool/' };
+    registerTool(link);
+    expect(toolById('elsewhere')).toBe(link);
+    for (const href of ['http://example.org/', 'javascript:alert(1)', '/relative/', 'https://has space.org/', '']) {
+      expect(() => registerTool({ ...link, id: 'bad-link', href }), href).toThrow(/not an https address/);
+    }
+  });
+
   it('refuses an id that would not survive as a data-action selector', () => {
     for (const bad of ['', ' ', 'has space', 'quote"mark', '-leading-dash', 'tool:colon']) {
       expect(() => registerTool(sceneTool(bad))).toThrow(/DevTool id/);

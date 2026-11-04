@@ -17,7 +17,8 @@
  * Bytes the browser served from its own cache are counted as received (the bar has to finish) but not as speed: a
  * 66 MB shirt read from disk in a tenth of a second is not a 660 MB/s connection, and an ETA built on it would lie.
  *
- * Pure: no DOM, no fetch, a clock passed in. `src/sarahlab/loadingCard.ts` draws it.
+ * Pure: no DOM, no fetch, a clock passed in. The character room's loading card drew it; the room moved to its own site
+ * on 2026-11-04 (the Character Builder), and the meter stays here as part of the one asset loader.
  */
 
 export type LoadPhase = 'idle' | 'downloading' | 'preparing' | 'ready' | 'failed';
