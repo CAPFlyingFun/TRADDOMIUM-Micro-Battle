@@ -3,9 +3,9 @@
  * is the baby connected to the mother from the umbilical cord, and is in the womb with fluid?"; the model: "for web
  * lower to 2K and actually in the womb, no textures since you won't see it anyway").
  *
- * The Meshy newborn re-proportioned to a newborn's (head about a quarter of its length, legs about a third), curled into
- * a fetal pose that is baked in as its rest, simplified and packed untextured (`.scratch/baby`, local): one skinned mesh,
- * its rig kept for kicks later. It sits in her womb -- the egg fitted inside each approved belly size (`WOMB_FIT`) and
+ * Joshua's second Meshy newborn (Baby_v2, 2026-11-03), its head at 95%, curled into a fetal pose that is baked in as its
+ * rest, simplified and packed with its skin (`.scratch/baby`, local; its skin shows only from its birth, babySkin.ts):
+ * one skinned mesh, its rig kept for its moves. It sits in her womb -- the egg fitted inside each approved belly size (`WOMB_FIT`) and
  * tipped by BABY WEIGHT as the baby-weight shapes were baked -- head down, its back to her front and left, the way most
  * babies settle by week 28.
  *
@@ -33,8 +33,8 @@ export const FETAL_CHART: readonly ChartWeek[] = Object.freeze([
   W(40, 51.0, 3460, 2595, 4617), W(41, 51.8, 3600, 2700, 4800),
 ]);
 
-/** The model's crown-rump as a share of its crown-heel (as re-proportioned): turns the chart's early crown-rump into a length. MEASURED on the model. */
-export const MODEL_CROWN_RUMP = 0.642;
+/** The model's crown-rump (crown to its hip joints) as a share of its crown-heel, upright: turns the chart's early crown-rump into a length. MEASURED on the model. */
+export const MODEL_CROWN_RUMP = 0.602;
 
 /** The week her belly stands for: 0% week 12, 100% week 40, on to 42 at 200%. */
 export function weekForBump(bumpPercent: number, babies = 1): number {
@@ -174,16 +174,16 @@ export function wombRadius(w: Pick<Womb, 'a' | 'b' | 'd' | 'egg'>, x: number, u:
 // --------------------------------------------------------------------------------------------------------- placement
 
 export const BABY_MODEL = 'models/sarah-baby.glb';
-/** The same newborn baked straight, in the pose it is born in (arms tucked across its chest, legs straight), bound to the
- * same bones: drawn while it is born so its belly is its own and not the curl's folds pulled straight (2026-11-03). Both
- * are baked at a real newborn's proportions (Joshua, 2026-11-03: "Keep the 12cm as that's realistic") -- at 50 cm long,
- * its head 9.9 cm side to side (9.5 cm of skull, its scalp), its shoulders 12.4 (a newborn's biacromial 12.4 +/- 1.0),
- * its chest 10.5 (from a 30-33 cm chest round) -- from the Meshy newborn: head x0.68 across and x0.9 tall, body width
- * x0.8 and depth x0.92, shoulders drawn in a further x0.63 (`.scratch/baby/py/slim.py 0.68 0.8 0.92 0.9 0.63`), then
- * `pose.py` with `pose3.json` (curled) and `straight-pose.json`. */
+/** The same newborn baked straight (legs straight, its arms bent with its hands at its belly), bound to the same bones:
+ * drawn while it is born so its belly is its own and not the curl's pulled straight (2026-11-03). Both are Joshua's
+ * second Meshy newborn (Baby_v2, 2026-11-03: its own newborn proportions and five rigged fingers a hand), its head
+ * alone made 95% (Joshua: "Just the head") -- at 50 cm long its head 10.6 cm side to side (its ears) and 12.1 front to
+ * back -- baked by `.scratch/baby/py/v2bake.py` with `v2/curl.json` and `v2/straight.json` (no smoothing pass: on this
+ * sculpt it crumpled its belly), packed to about 20k triangles by `.scratch/baby/pack2.mjs`, its skin a 1024 JPEG on the
+ * curled one (the straight one is drawn with the curled one's material). */
 export const BABY_STRAIGHT_MODEL = 'models/sarah-baby-straight.glb';
-/** The packed model's crown-heel length in its own units (re-proportioned and slimmed, before the curl). MEASURED on the model. */
-export const BABY_MODEL_LENGTH = 1.5008;
+/** The packed model's crown-heel length in its own units (upright, its head at 95%, before the curl). MEASURED on the model. */
+export const BABY_MODEL_LENGTH = 1.6766;
 /** How far round from straight forward its back faces, toward her left: the commonest settling (left occiput anterior). GAME TUNING. */
 export const BACK_TO_LEFT_RAD = Math.PI / 4;
 
@@ -1296,11 +1296,22 @@ export function nextMove(rnd: () => number, kicks: number, after?: MoveKind): { 
   return { kind, inS: MOVE_SOONEST_S + (-Math.log(Math.max(1e-6, 1 - rnd())) * MOVE_EVERY_S) / share };
 }
 
-/** The baby's bones a move uses (the packed model's names): each side's leg and arm, top to tip; its back and head. */
+/**
+ * The baby's bones by what they are (the packed model's names, its second Meshy newborn, 2026-11-03): each side's leg
+ * (hip, knee, ankle, toes) and arm (shoulder, elbow, wrist, its middle fingertip) -- the bones that carry its skin there
+ * (its thigh's mid bone and its upper arm's lower one skin nothing: turned, they would bend it where it has no joint), its back from its hips up, its neck,
+ * head and crown, its root and hips, and each hand's fingers (root to tip, its thumb first). Between the ones a move
+ * turns lie bones it leaves as they are (its knee's lower bone, its forearm's, its collarbones): measured on the rig.
+ */
 export const BABY_BONES = Object.freeze({
-  leg: { left: ['Bone_010', 'Bone_009', 'Bone_008', 'Bone_007'], right: ['Bone_015', 'Bone_014', 'Bone_013', 'Bone_012'] },
-  arm: { left: ['Bone_022', 'Bone_021', 'Bone_020', 'Bone_019'], right: ['Bone_027', 'Bone_026', 'Bone_025', 'Bone_024'] },
-  back: ['Bone_001', 'Bone_005', 'Bone_004'], neck: 'Bone_018',
+  leg: { left: ['Bone_012', 'Bone_010', 'Bone_009', 'Bone_007'], right: ['Bone_018', 'Bone_016', 'Bone_015', 'Bone_013'] },
+  arm: { left: ['Bone_027', 'Bone_025', 'Bone_023', 'Bone_045'], right: ['Bone_033', 'Bone_031', 'Bone_029', 'Bone_063'] },
+  back: ['Bone_001', 'Bone_006', 'Bone_005', 'Bone_004', 'Bone_003'], neck: 'Bone_022', head: 'Bone_021', crown: 'Bone_020',
+  root: 'Bone_000', hips: 'Bone_001',
+  fingers: {
+    left: [['Bone_041', 'Bone_040', 'Bone_039', 'Bone_038'], ['Bone_052', 'Bone_051', 'Bone_050', 'Bone_049'], ['Bone_048', 'Bone_047', 'Bone_046', 'Bone_045'], ['Bone_044', 'Bone_043', 'Bone_042'], ['Bone_037', 'Bone_036', 'Bone_035']],
+    right: [['Bone_059', 'Bone_058', 'Bone_057', 'Bone_056'], ['Bone_070', 'Bone_069', 'Bone_068', 'Bone_067'], ['Bone_066', 'Bone_065', 'Bone_064', 'Bone_063'], ['Bone_062', 'Bone_061', 'Bone_060'], ['Bone_055', 'Bone_054', 'Bone_053']],
+  },
 });
 
 /**
@@ -1346,7 +1357,7 @@ export interface MoveFrame {
  */
 export function poseMove(bones: ReadonlyMap<string, THREE.Bone>, rest: ReadonlyMap<string, THREE.Quaternion>, kind: MoveKind, side: 'left' | 'right', k: number, f: MoveFrame): THREE.Bone | null {
   for (const [name, q] of rest) { const b = bones.get(name); if (b) b.quaternion.copy(q); }
-  const root = bones.get('Bone_000'); root?.updateMatrixWorld(true);
+  const root = bones.get(BABY_BONES.root); root?.updateMatrixWorld(true);
   if (!(k > 0) || kind === 'roll') return null;
   const limb = (chain: readonly string[], to: THREE.Vector3, reach: number, straighten: number): THREE.Bone | null => {
     const [a, b, c, tip] = chain.map((n) => bones.get(n));
@@ -1388,10 +1399,10 @@ export function poseMove(bones: ReadonlyMap<string, THREE.Bone>, rest: ReadonlyM
  */
 export function poseOnHer(bones: ReadonlyMap<string, THREE.Bone>, k: number, f: MoveFrame): void {
   if (!(k > 0)) return;
-  const root = bones.get('Bone_000'); root?.updateMatrixWorld(true);
+  const root = bones.get(BABY_BONES.root); root?.updateMatrixWorld(true);
   const L = ON_HER, v = new THREE.Vector3();
   // its back and neck out of the curl, toward its length
-  const spine = [...BABY_BONES.back, BABY_BONES.neck, 'Bone_017'];
+  const spine = [...BABY_BONES.back, BABY_BONES.neck, BABY_BONES.head];
   for (let i = 0; i + 1 < spine.length; i++) { const a = bones.get(spine[i]), b = bones.get(spine[i + 1]); if (a && b) turnToward(a, b, f.long, L.straighten * k); }
   // its head to one side, its cheek down on her
   const neck = bones.get(BABY_BONES.neck);
@@ -1423,7 +1434,7 @@ export function poseOnHer(bones: ReadonlyMap<string, THREE.Bone>, k: number, f: 
  */
 export function poseDescent(bones: ReadonlyMap<string, THREE.Bone>, k: number, f: MoveFrame, legK = k): void {
   if (!(k > 0)) return;
-  const root = bones.get('Bone_000'); root?.updateMatrixWorld(true);
+  const root = bones.get(BABY_BONES.root); root?.updateMatrixWorld(true);
   const L = DESCENT, v = new THREE.Vector3();
   // its back out of the curl, along its length (not its neck)
   const back = BABY_BONES.back;
@@ -1516,6 +1527,25 @@ export const CORD_CM: readonly (readonly [number, number])[] = [[12, 8], [16, 16
 export const cordLength = (week: number): number => lerpTable(CORD_CM, week, 1) / 100;
 /** The cord's radius by week (rest metres): about 1.5 cm across at term. BIOLOGICAL SHAPE. */
 export const cordRadius = (week: number): number => 0.0075 * Math.min(1, Math.max(0.3, (week - 8) / 30));
+/**
+ * ITS NAVEL ON THE MODEL (Joshua, 2026-11-03: "You can get the actual diameter of the bellybutton and make the umbilical
+ * cord to the same diameter"): the second Meshy newborn's navel is a knot about 0.042 model units across (1.25 cm at
+ * 50 cm long; a newborn's cord is 1 to 2 cm), standing a little out of its belly. Where it is in each of its two bodies'
+ * rests (model units), and the way out of its belly there; the cord is that thick (`radius`, model units) and goes into
+ * it. `knot` and `ring` pick its points on a body (within `knot` of `at` on its front: the knot; `ring` from it: the skin
+ * round it) so it is followed as the body is posed. MEASURED on the model (`.scratch/baby/py/v2navelbind.py`).
+ */
+export const BABY_NAVEL = Object.freeze({
+  curled: { at: [-0.0189, 0.7927, 0.1455], out: [0.01, -0.2568, 0.9664] },
+  straight: { at: [-0.0165, 0.7894, 0.1819], out: [0.0102, -0.3015, 0.9534] },
+  radius: 0.021, knot: 0.02, ring: [0.03, 0.045], stands: 0.0145,
+  /** how far down it from its crown, upright (a share of its length): out of her once that much of it is */
+  fromCrown: 0.516,
+});
+/** Its cord once its navel is out of her, until it is cut (GAME TUNING): how much longer than the way from her opening
+ * to its navel it hangs; then its stump (metres, a clamp's 2 to 3 cm), and how long after it is settled on her it is
+ * cut (seconds of the FAST birth; REALISTIC stretches it) unless CUT CORD cuts it first. */
+export const CORD_CUT = Object.freeze({ slack: 1.15, stumpM: 0.03, stumpNodes: 6, autoAfterS: 12 });
 /** The placenta by week: [week, radius, thickness] (rest metres): about 22 cm across and 2.5 thick at term. BIOLOGICAL SHAPE. */
 export const PLACENTA: readonly (readonly [number, number, number])[] = [[12, 0.035, 0.008], [20, 0.07, 0.015], [28, 0.09, 0.02], [40, 0.11, 0.025], [42, 0.112, 0.026]];
 export const placentaSize = (week: number): { radius: number; thick: number } => ({ radius: lerpTable(PLACENTA, week, 1), thick: lerpTable(PLACENTA, week, 2) });
@@ -1567,6 +1597,21 @@ export interface CordBody { readonly solid: BabySolid; readonly position: THREE.
 
 /** The cord's own pull and its fluid (GAME TUNING): how fast its swing dies (per second kept), and its weight in the fluid (m/s²). */
 export const CORD_FLUID = Object.freeze({ keep: 0.08, sink: 0.6, passes: 10, nodes: 28 });
+const DOWN_Y = Object.freeze(new THREE.Vector3(0, -1, 0));
+
+/** How a cord is stepped beyond its two ends held (all optional; left out, it is the cord in her womb as it was). */
+export interface CordStepOptions {
+  /** kept inside her womb (default true): false once out of her */
+  readonly inWomb?: boolean;
+  /** the way down (unit, the cord's frame; default -y): its weight */
+  readonly down?: THREE.Vector3;
+  /** its first end loose (a cut stump's end): only its last held */
+  readonly freeA?: boolean;
+  /** the way its last link leaves `b` (unit): held so, out of its navel */
+  readonly bWay?: THREE.Vector3;
+  /** each of its points kept out of something (written in place) */
+  readonly keepOut?: (p: THREE.Vector3) => void;
+}
 
 /**
  * A CORD: a chain of points (rest metres) from its placenta to its baby's navel, as long as the week says, stepped like a
@@ -1577,7 +1622,7 @@ export class Cord {
   readonly points: Float32Array;
   private readonly was: Float32Array;
   length: number; radius: number;
-  constructor(length: number, radius: number, readonly n = CORD_FLUID.nodes) {
+  constructor(length: number, radius: number, readonly n: number = CORD_FLUID.nodes) {
     this.points = new Float32Array(n * 3); this.was = new Float32Array(n * 3); this.length = length; this.radius = radius;
   }
   /** Laid afresh from `a` to `b`: an arc bowed toward `toward`, as long as the cord (so it starts with no pull). */
@@ -1594,29 +1639,34 @@ export class Cord {
     this.was.set(this.points);
   }
   /** One step: `a` (its placenta) and `b` (the navel) held; inside `womb` (its middle moved by `offset`), out of `bodies` (the last, `own`, not near its navel). */
-  step(dt: number, a: THREE.Vector3, b: THREE.Vector3, womb: WombShape, offset: THREE.Vector3, bodies: readonly CordBody[], own = -1): void {
+  step(dt: number, a: THREE.Vector3, b: THREE.Vector3, womb: WombShape, offset: THREE.Vector3, bodies: readonly CordBody[], own = -1, o: CordStepOptions = {}): void {
     const n = this.n, P = this.points, W = this.was, h = Math.min(0.05, Math.max(0, dt)), keep = Math.pow(CORD_FLUID.keep, h), seg = this.length / (n - 1);
-    for (let i = 1; i < n - 1; i++) for (let c = 0; c < 3; c++) {
-      const o = i * 3 + c, v = (P[o] - W[o]) * keep; W[o] = P[o]; P[o] += v - (c === 1 ? CORD_FLUID.sink * h * h : 0);
+    const inWomb = o.inWomb ?? true, first = o.freeA ? 0 : 1, last = o.bWay ? n - 2 : n - 1;
+    const dn = o.down ?? DOWN_Y, sink = CORD_FLUID.sink * h * h;
+    for (let i = first; i < last; i++) for (let c = 0; c < 3; c++) {
+      const k = i * 3 + c, v = (P[k] - W[k]) * keep; W[k] = P[k]; P[k] += v + sink * (c === 0 ? dn.x : c === 1 ? dn.y : dn.z);
     }
     const p = new THREE.Vector3(), q = new THREE.Vector3(), local = new THREE.Vector3(), inv = bodies.map((bd) => bd.quaternion.clone().invert());
     const centre = womb.centre.clone().add(offset);
     for (let pass = 0; pass < CORD_FLUID.passes; pass++) {
-      P.set([a.x, a.y, a.z], 0); P.set([b.x, b.y, b.z], (n - 1) * 3);
+      if (!o.freeA) P.set([a.x, a.y, a.z], 0);
+      P.set([b.x, b.y, b.z], (n - 1) * 3);
+      if (o.bWay) P.set([b.x + o.bWay.x * seg, b.y + o.bWay.y * seg, b.z + o.bWay.z * seg], (n - 2) * 3);
       // each link its length
       for (let i = 0; i < n - 1; i++) {
         p.fromArray(P, i * 3); q.fromArray(P, (i + 1) * 3);
         const d = q.clone().sub(p), L = d.length();
         if (L < 1e-9) continue;
-        const fix = d.multiplyScalar((L - seg) / L / 2), wa = i === 0 ? 0 : 1, wb = i + 1 === n - 1 ? 0 : 1, sum = wa + wb || 1;
+        const fix = d.multiplyScalar((L - seg) / L / 2), wa = i < first || i >= last ? 0 : 1, wb = i + 1 >= last ? 0 : 1, sum = wa + wb || 1;
         p.addScaledVector(fix, (2 * wa) / sum); q.addScaledVector(fix, (-2 * wb) / sum);
         p.toArray(P, i * 3); q.toArray(P, (i + 1) * 3);
       }
-      for (let i = 1; i < n - 1; i++) {
+      for (let i = first; i < last; i++) {
         p.fromArray(P, i * 3);
         // inside her womb
         const d = p.clone().sub(centre), r = d.length();
-        if (r > 1e-9) { const lim = sacRadius(womb, d.x / r, d.y / r, d.z / r) * SAC_FILL - this.radius; if (r > lim) p.copy(centre).addScaledVector(d, lim / r); }
+        if (inWomb && r > 1e-9) { const lim = sacRadius(womb, d.x / r, d.y / r, d.z / r) * SAC_FILL - this.radius; if (r > lim) p.copy(centre).addScaledVector(d, lim / r); }
+        o.keepOut?.(p);
         // out of every baby: along the way its body thins (its depth's slope), by how deep, plus its own thickness
         bodies.forEach((bd, k) => {
           if (k === own && i > n - 4) return;
@@ -1655,7 +1705,8 @@ export function cordTube(): THREE.BufferGeometry {
   g.setIndex(index);
   return g;
 }
-export function layCordTube(g: THREE.BufferGeometry, points: ArrayLike<number>, radius: number): void {
+/** (`capEnd`: its last end closed flat -- a cut cord's end, its vessels in the jelly -- its last ring drawn in to its middle) */
+export function layCordTube(g: THREE.BufferGeometry, points: ArrayLike<number>, radius: number, capEnd = false): void {
   const n = Math.floor(points.length / 3);
   if (n < 2) return;
   const pts: THREE.Vector3[] = [];
@@ -1666,7 +1717,7 @@ export function layCordTube(g: THREE.BufferGeometry, points: ArrayLike<number>, 
   nrm.set(0, 1, 0);
   const len = curve.getLength();
   for (let r = 0; r <= CORD_RINGS; r++) {
-    const t = r / CORD_RINGS;
+    const cap = capEnd && r === CORD_RINGS, t = (cap ? r - 1 : r) / CORD_RINGS;
     curve.getPointAt(t, at); curve.getTangentAt(t, tan).normalize();
     // carried along without twisting (each ring's frame from the one before)
     nrm.addScaledVector(tan, -nrm.dot(tan));
@@ -1676,7 +1727,8 @@ export function layCordTube(g: THREE.BufferGeometry, points: ArrayLike<number>, 
     for (let s = 0; s < CORD_SIDES; s++) {
       const ang = (s / CORD_SIDES) * 2 * Math.PI, k = r * CORD_SIDES + s;
       o.copy(nrm).multiplyScalar(Math.cos(ang)).addScaledVector(bin, Math.sin(ang));
-      P.setXYZ(k, at.x + o.x * radius, at.y + o.y * radius, at.z + o.z * radius); N.setXYZ(k, o.x, o.y, o.z);
+      if (cap) { P.setXYZ(k, at.x, at.y, at.z); N.setXYZ(k, tan.x, tan.y, tan.z); }
+      else { P.setXYZ(k, at.x + o.x * radius, at.y + o.y * radius, at.z + o.z * radius); N.setXYZ(k, o.x, o.y, o.z); }
       // the vessels: a vein (blue) and two arteries (red) winding round the pale jelly
       const v = (ang - turn) / (2 * Math.PI), f = (x: number) => Math.max(0, Math.cos(2 * Math.PI * (v - x)) - 0.55) / 0.45;
       const vein = f(0), art = Math.max(f(1 / 3), f(2 / 3));

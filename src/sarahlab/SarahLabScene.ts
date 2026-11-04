@@ -72,6 +72,7 @@ import { newJointTurn, type BindJoint, type HumanMeasure, type JointTurn, type M
 import { SEATED_TURNS, poseSeated } from '../actor/humanSeated';
 import { createSoftBaby, restorePose, stepSoftBaby, type SoftBaby } from './softBaby';
 import { createSqueezeUniforms, patchSqueeze, setSqueeze } from './babySqueeze';
+import { createSkinUniforms, patchSkin, stepSkin } from './babySkin';
 import { measureHuman } from '../actor/humanSkeleton';
 import type { AppScene, FrameInfo, SceneContext, SceneFactory } from '../app/Scene';
 import { assets, assetUrl } from '../assets/assets';
@@ -83,7 +84,7 @@ import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields,
 import { dropIdleMorphs } from '../view/morphPrune';
 import { BIRTH_CLEFT_FIELD, BIRTH_LIPS_FIELD, birthAreaCentre, birthAreaFields, LIPS_COVERED, patchBirthShade } from './birthArea';
 import { BIRTH_POSES, poseBirth, type BirthSpec } from '../actor/humanBirth';
-import { AUTO_LIES, BABIES_NAME, BABY_MODEL, BABY_MODEL_LENGTH, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordRadius, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, poseOnHer, poseDescent, BABY_BONES, BABY_STRAIGHT_MODEL, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, wombFromSkin, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
+import { AUTO_LIES, BABIES_NAME, BABY_MODEL, BABY_MODEL_LENGTH, babiesInHer, babyLine, babySolid, carriedShare, weekForBump, Cord, cordLength, cordTube, layCordTube, layPlacenta, placentaGeometry, placentaSpots, curlFrame, floatDrift, floatRoom, floatTune, kickOnSkin, KICK_FELT_M, KICK_MOST_M, KICK_WIDE_M, liningPast, kicksShare, moveEnvelope, moveLength, nextMove, poseMove, poseOnHer, poseDescent, BABY_BONES, BABY_NAVEL, BABY_STRAIGHT_MODEL, CORD_CUT, ROLL_RAD, solidDeep, type MoveKind, type CordBody, type PlacentaSpot, LIE_NAME, pushAt, sacAround, sacRadius, WOMB_WALL_M, wombFromSkin, type BabySolid, type BellyPush, type CurlFrame, type Lie, type WombShape } from './baby';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { PUBIC_PRESS, pubicPressWant, setPush, jiggleOf as jiggleOfMesh, navelAfterBirth, navelPressure, restingSoftBelly, softAt, softBellyWant, stepSoftBelly, type SoftBellyWant } from './softBody';
 import { createVulvaPatch, VULVA_OPEN, type VulvaPatch } from './vulvaMesh';
@@ -119,7 +120,7 @@ const KNEE_HANDS = Object.freeze({ out: 0.072, up: 0.04, lift: 0.012, poleSteps:
 /** Its soft body's chains (softBaby.ts): each arm and leg from its shoulder or hip out to its hand or foot -- never its
  * torso, neck or head (Joshua, 2026-11-03: "Keep the soft body after birth but not the torso... to hopefully keep the
  * shape") */
-const BABY_SOFT_CHAINS: readonly (readonly string[])[] = [['Bone_022', 'Bone_021', 'Bone_020', 'Bone_019'], ['Bone_027', 'Bone_026', 'Bone_025', 'Bone_024'], ['Bone_010', 'Bone_009', 'Bone_008', 'Bone_007'], ['Bone_015', 'Bone_014', 'Bone_013', 'Bone_012']];
+const BABY_SOFT_CHAINS: readonly (readonly string[])[] = [BABY_BONES.arm.left, BABY_BONES.arm.right, BABY_BONES.leg.left, BABY_BONES.leg.right];
 /** GAME TUNING: her skin under her baby as it lies on her -- every `every`th point within `reach` (metres), chosen again
  * when it has moved `again`; its joints kept `margin` out from it; and all of it lifted off her as far as its deepest
  * point (within `near` of her skin) goes into her, easing back over `liftEase` seconds */
@@ -131,13 +132,13 @@ const ON_HER_SKIN = Object.freeze({ reach: 0.3, every: 3, again: 0.05, margin: 0
  * by its frog pose, ON_HER, and kept on her skin by its soft body: bent onto her here, its hips crumpled) */
 const ON_HER_DRAPE: readonly (readonly [string, number, string, readonly string[], number?])[] = [
   ['Bone_005', 6, 'Bone_004', ['Bone_005', 'Bone_004', 'Bone_003', 'Bone_002']], ['Bone_004', 6, 'Bone_003', ['Bone_004', 'Bone_003', 'Bone_002']],
-  ['Bone_018', 50, 'Bone_017', ['Bone_018', 'Bone_017', 'Bone_016'], 60],
+  [BABY_BONES.neck, 50, BABY_BONES.head, [BABY_BONES.neck, BABY_BONES.head, BABY_BONES.crown, 'Bone_019'], 60],
 ];
 const BIRTH_HEAD = Object.freeze({ radius: 0.0475, atLength: 0.51, lift: [0, 0.008, 0.007] as const, tangentSpan: 0.0125, bodyBehind: 0.1, pastMouth: 0.6, centreEase: 0.35 });
 import { BIRTH_CONTACT_FIELD, createBirthContact, type BirthContact } from './birthContact';
 import { KNEE_TURN_FIELD, createKneeTurn, type KneeTurn } from './kneeTurn';
 import { HIP_TURN_FIELD, createHipTurn, type HipTurn } from './hipTurn';
-import { birthAt, birthLength, birthLine, type BirthMoment, type BirthPace } from './birthSequence';
+import { birthAt, birthLength, birthLine, REALISTIC_STRETCH, type BirthMoment, type BirthPace } from './birthSequence';
 /** GAME TUNING: all of it within `near` of a knee, none past `far` (metres); `passes` of `lambda` each */
 const KNEE_SMOOTH = Object.freeze({ near: 0.06, far: 0.12, passes: 60, lambda: 0.6, restore: 0 });
 import { DEFAULT_VULVA_KEEP } from './detailMaterials';
@@ -471,6 +472,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** where its head came out of her and the way it was going (her rest frame), held while the rest of it follows */
   let birthOutLine: { at: THREE.Vector3; way: THREE.Vector3 } | null = null;
   const babySqueeze = createSqueezeUniforms();
+  /** its skin (its model's texture) shown from the start of its birth, plain in her womb (babySkin.ts) */
+  const babySkin = createSkinUniforms();
   const babyDown = new THREE.Vector3(0, -1, 0);
   /** how her hands' reach onto her knees went last (reclined) */
   let kneeHold: { L: number; R: number; holding: boolean; [k: string]: number | boolean } | null = null;
@@ -531,7 +534,53 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * THE CORD AND THE PLACENTA (baby.ts): its navel (the trunk bone it rides, where on it, and where it is in the curl,
    * model units), each baby's placenta and cord, and what draws them (SEE BABY only: nothing of it shows from outside).
    */
-  let babyNavel: { bone: string; local: THREE.Vector3; model: THREE.Vector3 } | null = null;
+  let babyNavel: { model: THREE.Vector3 } | null = null;
+  /** its navel followed on each of its bodies (BABY_NAVEL): the points of its knot and of the skin round it, by geometry
+   * (its curled body's and its straight one's, and a twin's, which shares its curled one's) */
+  const navelPicks = new WeakMap<THREE.BufferGeometry, { knot: Uint32Array; ring: Uint32Array }>();
+  /**
+   * ITS CORD CUT (Joshua, 2026-11-03: "Keep it at first but then either have it automatically be cut or manual button so
+   * it can be used in the game later"): once its navel is out of her its cord runs in two -- inside her from its placenta
+   * to her opening (drawn with SEE BABY, as before), and outside from her opening to its navel, hanging (always drawn:
+   * it is outside her) -- until CUT CORD, or `CORD_CUT.autoAfterS` after it is settled on her; then a stump on its navel.
+   */
+  let cordOuter: Cord | null = null, cordStump: Cord | null = null, cordOuterMesh: THREE.Mesh | null = null, cordStumpMesh: THREE.Mesh | null = null;
+  let cordCut = false, cordOnHerAt: number | null = null, cordOuterLaid = false, cordStumpLaid = false;
+  const navelWay = new THREE.Vector3(), navelV = new THREE.Vector3(), navelRing = new THREE.Vector3(), cordOpen = new THREE.Vector3(), cordDown = new THREE.Vector3(), cordToward = new THREE.Vector3();
+  const holderInv = new THREE.Matrix4(), offHerAt = new THREE.Vector3(), offHerN = new THREE.Vector3();
+  /** Its knot's points and the skin round it, on a body at its rest (as skinned at rest: `spot` from BABY_NAVEL). */
+  function pickNavel(mesh: THREE.SkinnedMesh, spot: { readonly at: readonly number[]; readonly out: readonly number[] }): void {
+    const at = new THREE.Vector3().fromArray(spot.at), out = new THREE.Vector3().fromArray(spot.out).normalize(), v = new THREE.Vector3(), N = BABY_NAVEL;
+    const knot: number[] = [], ring: number[] = [], n = mesh.geometry.getAttribute('position').count;
+    mesh.updateMatrixWorld(true);
+    for (let i = 0; i < n; i++) {
+      mesh.getVertexPosition(i, v).applyMatrix4(mesh.matrixWorld).sub(at);
+      const h = v.dot(out), d = Math.sqrt(Math.max(0, v.lengthSq() - h * h));
+      if (d < N.knot && h > -0.004 && h < 0.03) knot.push(i);
+      else if (d > N.ring[0] && d < N.ring[1] && Math.abs(h) < 0.015) ring.push(i);
+    }
+    navelPicks.set(mesh.geometry, { knot: Uint32Array.from(knot), ring: Uint32Array.from(ring) });
+  }
+  /** Its navel now (world) on whichever of its bodies is drawn, and the way out of its belly there; false if not known. */
+  function navelNow(r: THREE.Object3D, at: THREE.Vector3, way: THREE.Vector3): boolean {
+    const own = babyStraight.get(r);
+    let mesh: THREE.SkinnedMesh | null = own && own.visible && (own.userData.share ?? 0) >= 0.5 ? own : null;
+    if (!mesh) r.traverse((o) => { const m = o as THREE.SkinnedMesh; if (!mesh && m.isSkinnedMesh && m !== own) mesh = m; });
+    const m = mesh as THREE.SkinnedMesh | null, pick = m ? navelPicks.get(m.geometry) : undefined;
+    if (!m || !pick || pick.knot.length === 0 || pick.ring.length === 0) return false;
+    at.set(0, 0, 0); navelRing.set(0, 0, 0);
+    for (const i of pick.knot) at.add(m.getVertexPosition(i, navelV));
+    for (const i of pick.ring) navelRing.add(m.getVertexPosition(i, navelV));
+    m.localToWorld(at.divideScalar(pick.knot.length)); m.localToWorld(navelRing.divideScalar(pick.ring.length));
+    way.subVectors(at, navelRing).normalize();
+    return true;
+  }
+  /** CUT CORD: once its navel is out of her (false before, and nothing cut). */
+  function cutCord(): boolean {
+    if (!birthNow || birthNow.down < 1 + BABY_NAVEL.fromCrown) return false;
+    if (!cordCut) { cordCut = true; cordStumpLaid = false; }
+    return true;
+  }
   let babyPlacentas: PlacentaSpot[] = [], babyCords: Cord[] = [], cordLaid: boolean[] = [], cordMeshes: THREE.Mesh[] = [], placentaMeshes: THREE.Mesh[] = [], babyStepDt = 0;
   const cordMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0 }), placentaMat = new THREE.MeshStandardMaterial({ color: 0x8e2f3c, roughness: 0.6, metalness: 0 });
   const navelAt = new THREE.Vector3(), cordA = new THREE.Vector3();
@@ -539,7 +588,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const moveFrame = { long: new THREE.Vector3(), front: new THREE.Vector3(), left: new THREE.Vector3(), out: new THREE.Vector3() }, moveQ = new THREE.Quaternion();
   function babyMoveOf(i: number, root: THREE.Object3D): BabyMove {
     let m = babyMoves[i];
-    if (m && m.bones.get('Bone_000') && isUnder(m.bones.get('Bone_000')!, root)) return m;
+    if (m && m.bones.get(BABY_BONES.root) && isUnder(m.bones.get(BABY_BONES.root)!, root)) return m;
     const bones = new Map<string, THREE.Bone>();
     root.traverse((n) => { if ((n as THREE.Bone).isBone) bones.set(n.name, n as THREE.Bone); });
     // its curl, as the model has it (taken from the first baby when it came: a copy made mid-move would hold the move)
@@ -2011,7 +2060,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const run = btn('BIRTH ▶', SARAH_LAB_ACTION.birth + 'run', () => { birthControl('run'); run.textContent = birthRunning ? 'BIRTH ❚❚' : 'BIRTH ▶'; });
       const pace = btn('FAST', SARAH_LAB_ACTION.birth + 'pace', () => { birthControl('pace'); pace.textContent = birthPace === 'fast' ? 'FAST' : 'REALISTIC'; });
       const reset = btn('RESET', SARAH_LAB_ACTION.birth + 'reset', () => { birthControl('reset'); run.textContent = 'BIRTH ▶'; });
-      row.append(run, pace, reset); right.appendChild(row);
+      // CUT CORD (its cord is cut on its own a while after it is on her; this cuts it sooner)
+      const cut = btn('CUT CORD', SARAH_LAB_ACTION.birth + 'cut', () => { if (!cutCord()) { const f = fields[SARAH_LAB_FIELD.birthLine]; if (f) f.textContent = 'CUT CORD · once it is born'; } });
+      row.append(run, pace, reset, cut); right.appendChild(row);
       // its TIMELINE: drag to any moment of it (it pauses there; BIRTH ▶ carries on from it)
       birthTimeInput = slider(SARAH_LAB_FIELD.birthTime, 0, (v) => {
         if (!BIRTH_POSES_OK.includes(pose)) return;
@@ -3085,6 +3136,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     if (birthNow && birthNow.contraction > 0) jiggle.belly.value.add(tmp.set(BIRTH_HEAD.lift[0], BIRTH_HEAD.lift[1], BIRTH_HEAD.lift[2]).multiplyScalar(birthNow.contraction));
     // her babies in their fluid: each lags what her body does a little, within the room it has (baby.ts `FLUID`)
     babyClock += dt; babyStepDt = dt;
+    stepSkin(babySkin, birthNow ? 1 : 0, dt);
     babyFloats.forEach((f, i) => { const t = floatTune(babyRooms[i] ?? 0, body.babyFloat); stepMass(f, dt, feltBelly.x * t.gain, feltBelly.y * t.gain, feltBelly.z * t.gain, t); });
     // two babies floating toward each other meet and stay apart (along the line between their middles), the fluid taking it up
     const roots = babyRoots();
@@ -3147,7 +3199,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       void assets.loadModel(BABY_MODEL, () => new THREE.Object3D()).then((root) => {
         babyLoading = false;
         if (disposed || root.userData.isPlaceholder === true) { release(root); refresh(); return; }
-        const mat = new THREE.MeshStandardMaterial({ color: 0xe9a98f, roughness: 0.55, metalness: 0 });
+        // (its own skin kept, drawn plain until its birth begins: babySkin.ts)
+        let skinMap: THREE.Texture | null = null;
+        root.traverse((n) => { const m = n as THREE.Mesh; if (!skinMap && m.isMesh) skinMap = (m.material as THREE.MeshStandardMaterial).map ?? null; });
+        const mat = new THREE.MeshStandardMaterial({ map: skinMap, roughness: 0.55, metalness: 0 });
+        patchSkin(mat, babySkin);
         // (giving a little where it crosses her opening: babySqueeze.ts)
         patchSqueeze(mat, babySqueeze);
         root.traverse((n) => { const m = n as THREE.Mesh; if (m.isMesh) { m.material = mat; m.frustumCulled = false; } });
@@ -3156,7 +3212,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         const pts: number[] = [], v = new THREE.Vector3(), head = new THREE.Vector3();
         // (as skinned at rest: the packed file keeps its points quantized and its scale in the skin's binds)
         root.traverse((n) => { const m = n as THREE.Mesh; if (!m.isMesh) return; const a = m.geometry.getAttribute('position'); for (let i = 0; i < a.count; i++) { m.getVertexPosition(i, v).applyMatrix4(m.matrixWorld); pts.push(v.x, v.y, v.z); } });
-        root.getObjectByName('Bone_017')?.getWorldPosition(head);
+        root.getObjectByName(BABY_BONES.head)?.getWorldPosition(head);
         babyCurl = curlFrame(pts, head); babySolidOf = null; babyMoves = [];
         // its head's middle (model units): the cap of it furthest along its curl, a head's radius in from its crown
         { const c = babyCurl, hr = BIRTH_HEAD.radius * BABY_MODEL_LENGTH / BIRTH_HEAD.atLength, q = new THREE.Vector3();
@@ -3168,32 +3224,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // the bones a move turns, as the curl has them
         babyCurlRest = new Map();
         for (const n of [...BABY_BONES.leg.left, ...BABY_BONES.leg.right, ...BABY_BONES.arm.left, ...BABY_BONES.arm.right, ...BABY_BONES.back, BABY_BONES.neck]) { const b = root.getObjectByName(n); if (b) babyCurlRest.set(n, b.quaternion.clone()); }
-        // its navel: on its trunk (the skin its back bones carry), between its hips and chest, the furthest forward
-        babyNavel = null;
-        const skinMesh = (() => { let f: THREE.SkinnedMesh | null = null; root.traverse((n) => { if (!f && (n as THREE.SkinnedMesh).isSkinnedMesh) f = n as THREE.SkinnedMesh; }); return f as THREE.SkinnedMesh | null; })();
-        const bpos = (n: string) => root.getObjectByName(n)?.getWorldPosition(new THREE.Vector3());
-        const hipL = bpos(BABY_BONES.leg.left[0]), hipR = bpos(BABY_BONES.leg.right[0]), armL = bpos(BABY_BONES.arm.left[0]), armR = bpos(BABY_BONES.arm.right[0]);
-        if (skinMesh && hipL && hipR && armL && armR) {
-          const pelvis = hipL.clone().add(hipR).multiplyScalar(0.5), chest = armL.clone().add(armR).multiplyScalar(0.5), A = chest.clone().sub(pelvis), len = A.length();
-          A.normalize();
-          const front = babyCurl.back.clone().negate(); front.addScaledVector(A, -front.dot(A)).normalize();
-          const across = new THREE.Vector3().crossVectors(A, front);
-          const trunk = new Set(['Bone_000', ...BABY_BONES.back].map((n) => skinMesh.skeleton.bones.findIndex((b) => b.name === n)).filter((k) => k >= 0));
-          const SI = skinMesh.geometry.getAttribute('skinIndex'), SW = skinMesh.geometry.getAttribute('skinWeight'), pos = skinMesh.geometry.getAttribute('position');
-          let best = -Infinity, at = -1, bone = -1;
-          for (let i = 0; i < pos.count; i++) {
-            let top = 0, w = -1; for (let c = 0; c < 4; c++) { const x = SW.getComponent(i, c); if (x > w) { w = x; top = SI.getComponent(i, c); } }
-            if (!trunk.has(top)) continue;
-            skinMesh.getVertexPosition(i, v).applyMatrix4(skinMesh.matrixWorld);
-            const d = v.clone().sub(pelvis), t = d.dot(A) / len;
-            if (t < 0.2 || t > 0.5 || Math.abs(d.dot(across)) > 0.2 * len) continue;
-            const f = d.dot(front); if (f > best) { best = f; at = i; bone = top; }
-          }
-          if (at >= 0) {
-            const b = skinMesh.skeleton.bones[bone], model = skinMesh.getVertexPosition(at, new THREE.Vector3()).applyMatrix4(skinMesh.matrixWorld);
-            babyNavel = { bone: b.name, local: b.worldToLocal(model.clone()), model };
-          }
-        }
+        // its navel (BABY_NAVEL, measured on the model): where it is in its curl, and its points to follow it by
+        babyNavel = { model: new THREE.Vector3().fromArray(BABY_NAVEL.curled.at) };
+        root.traverse((n) => { const m = n as THREE.SkinnedMesh; if (m.isSkinnedMesh) pickNavel(m, BABY_NAVEL.curled); });
         // a sample of its points, to keep it inside her womb
         babyPoints = Float32Array.from(pts.filter((_, i) => Math.floor(i / 3) % 10 === 0));
         babyAll = Float32Array.from(pts);
@@ -3211,9 +3244,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           let sm: THREE.SkinnedMesh | null = null; s2.traverse((n) => { if (!sm && (n as THREE.SkinnedMesh).isSkinnedMesh) sm = n as THREE.SkinnedMesh; });
           const mesh = sm as THREE.SkinnedMesh | null; if (!mesh) return;
           s2.updateMatrixWorld(true);
+          pickNavel(mesh, BABY_NAVEL.straight);
           const bones = mesh.skeleton.bones.map((b) => root.getObjectByName(b.name) as THREE.Bone | undefined);
           if (bones.some((b) => !b)) return;
-          const ownMat = mat.clone(); patchSqueeze(ownMat, babySqueeze);
+          const ownMat = mat.clone(); patchSkin(ownMat, babySkin); patchSqueeze(ownMat, babySqueeze);
           const own = new THREE.SkinnedMesh(mesh.geometry, ownMat); own.name = 'baby-straight'; own.frustumCulled = false; own.visible = false;
           root.add(own); own.bind(new THREE.Skeleton(bones as THREE.Bone[], mesh.skeleton.boneInverses.map((m) => m.clone())), mesh.matrixWorld.clone());
           babyStraight.set(root, own);
@@ -3468,8 +3502,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const navels = fits.map((f) => babyNavel ? babyNavel.model.clone().multiplyScalar(f.scale).applyQuaternion(f.quaternion).add(f.position) : f.position.clone());
       babyPlacentas = placentaSpots(babyPoints, fits, babyWomb, weekForBump(bump, babyCount), navels);
       const wk = weekForBump(bump, babyCount);
-      if (babyCords.length !== fits.length) { babyCords = fits.map(() => new Cord(cordLength(wk), cordRadius(wk))); cordLaid = fits.map(() => false); }
-      for (const c of babyCords) { c.length = cordLength(wk); c.radius = cordRadius(wk); }
+      // (as thick as its navel at the size it is: BABY_NAVEL)
+      if (babyCords.length !== fits.length) { babyCords = fits.map((f) => new Cord(cordLength(wk), BABY_NAVEL.radius * f.scale)); cordLaid = fits.map(() => false); }
+      babyCords.forEach((c, i) => { c.length = cordLength(wk); c.radius = BABY_NAVEL.radius * fits[i].scale; });
       while (babyFloats.length < fits.length) babyFloats.push(restingMass());
       babyFloats.length = fits.length; babyMoves.length = Math.min(babyMoves.length, fits.length);
       if (babySac && babyWall) {
@@ -3486,6 +3521,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       refresh();
     }
     moveBabies();
+    // (its cord stepped through its birth with SEE BABY off too: once its navel is out of her, it is seen outside her)
+    if (!babyShown && birthNow && babyHolder) layCords();
     if (!babyShown || !babyHolder || !babySac || !babyWall) return;
     // the belly's mass carries what is in it (her frame, metres)
     babyRoots().forEach((r, i) => { const f = babyFloats[i], d = r.userData.drift as THREE.Vector3 | undefined; babyOwnSacs[i]?.position.copy(jiggle.belly.value).add(d ?? floatAt.set(0, 0, 0)).add(f ? floatAt.set(f.x, f.y, f.z) : floatAt.set(0, 0, 0)); });
@@ -3635,10 +3672,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     if (!pitchPick || pitchFor !== m) {
       pitchFor = m;
       const SI = m.geometry.getAttribute('skinIndex'), SW = m.geometry.getAttribute('skinWeight'), c: number[] = [], h: number[] = [];
-      for (let i = 0; i < SI.count; i += 3) { let b = 0, w = -1; for (let k = 0; k < 4; k++) if (SW.getComponent(i, k) > w) { w = SW.getComponent(i, k); b = SI.getComponent(i, k); } const nm = bones[b]?.name; if (nm === 'Bone_003' || nm === 'Bone_002' || nm === 'Bone_004') c.push(i); else if (nm === 'Bone_000' || nm === 'Bone_001' || nm === 'Bone_005') h.push(i); }
+      for (let i = 0; i < SI.count; i += 3) { let b = 0, w = -1; for (let k = 0; k < 4; k++) if (SW.getComponent(i, k) > w) { w = SW.getComponent(i, k); b = SI.getComponent(i, k); } const nm = bones[b]?.name; if (nm === 'Bone_003' || nm === 'Bone_002' || nm === 'Bone_004') c.push(i); else if (nm === BABY_BONES.root || nm === BABY_BONES.hips || nm === 'Bone_006') h.push(i); }
       pitchPick = { chest: Uint32Array.from(c), hips: Uint32Array.from(h) };
     }
-    const hipB = r.getObjectByName('Bone_001'), neckB = r.getObjectByName(BABY_BONES.neck); if (!hipB || !neckB) return;
+    const hipB = r.getObjectByName(BABY_BONES.hips), neckB = r.getObjectByName(BABY_BONES.neck); if (!hipB || !neckB) return;
     // (its pitch from last frame put on first: birthPlace laid its place afresh)
     const turnBy = (deg: number) => {
       const H = hipB.getWorldPosition(new THREE.Vector3()), Nk = neckB.getWorldPosition(new THREE.Vector3()), mid = H.clone().add(Nk).multiplyScalar(0.5);
@@ -3679,8 +3716,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       // under it, held all of it up off her)
       if (!liftPick || liftPick.length === 0 || liftFor !== m) {
         liftFor = m;
-        const limbs = new Set<string>(BABY_SOFT_CHAINS.flat()), SI = m.geometry.getAttribute('skinIndex'), SW = m.geometry.getAttribute('skinWeight'), c = SI.count, a: number[] = [];
-        for (let i = 0; i < c; i += 4) { let limb = 0; for (let k = 0; k < 4; k++) if (limbs.has(m.skeleton.bones[SI.getComponent(i, k)]?.name ?? '') || ['Bone_016', 'Bone_017', 'Bone_018'].includes(m.skeleton.bones[SI.getComponent(i, k)]?.name ?? '') || /^Bone_0(19|2[0-9]|3[0-9]|4[0-9]|5[0-9]|6[0-8]|0[6-9]|1[0-5])$/.test(m.skeleton.bones[SI.getComponent(i, k)]?.name ?? '')) limb += SW.getComponent(i, k); if (limb < 0.3) a.push(i); }
+        // (a limb's or its head's: any bone under a shoulder, a hip or its neck)
+        const tops = [BABY_BONES.arm.left[0], BABY_BONES.arm.right[0], BABY_BONES.leg.left[0], BABY_BONES.leg.right[0], BABY_BONES.neck];
+        const notTrunk = new Set(m.skeleton.bones.map((bn, bi) => { for (let q: THREE.Object3D | null = bn; q; q = q.parent) if (tops.includes(q.name)) return bi; return -1; }).filter((bi) => bi >= 0));
+        const SI = m.geometry.getAttribute('skinIndex'), SW = m.geometry.getAttribute('skinWeight'), c = SI.count, a: number[] = [];
+        for (let i = 0; i < c; i += 4) { let limb = 0; for (let k = 0; k < 4; k++) if (notTrunk.has(SI.getComponent(i, k))) limb += SW.getComponent(i, k); if (limb < 0.3) a.push(i); }
         liftPick = Uint32Array.from(a);
       }
       m.skeleton.update(); r.updateMatrixWorld(true);
@@ -4012,7 +4052,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
   /** BIRTH: begun (from the start) or paused and on again; reset takes it back to before it began. */
   function birthControl(cmd: 'run' | 'reset' | 'pace'): void {
-    if (cmd === 'reset') { birthRest = null; birthOutLine = null; if (birthPushWas !== null) { babyPushOff = birthPushWas; birthPushWas = null; babyDirty = true; } if (birthBellyShare !== 1) { birthBellyShare = 1; applyLook(); } if (birthTimeInput) birthTimeInput.value = '0'; if (babyHolder && !babyShown) { babyHolder.visible = false; for (const m of [...placentaMeshes, ...cordMeshes]) m.visible = true; if (babySac) babySac.visible = babyCount === 1; } birthLen = null; birthClock = null; birthRunning = false; birthNow = null; birthPath = null; vulva?.setBirthDrive(null); vulva?.setHead(null, 0); const f = fields[SARAH_LAB_FIELD.birthLine]; if (f) f.textContent = birthLine(null); return; }
+    if (cmd === 'reset') { birthRest = null; birthOutLine = null; cordCut = false; cordOnHerAt = null; cordOuterLaid = false; cordStumpLaid = false; if (cordOuterMesh) cordOuterMesh.visible = false; if (cordStumpMesh) cordStumpMesh.visible = false; if (birthPushWas !== null) { babyPushOff = birthPushWas; birthPushWas = null; babyDirty = true; } if (birthBellyShare !== 1) { birthBellyShare = 1; applyLook(); } if (birthTimeInput) birthTimeInput.value = '0'; if (babyHolder && !babyShown) { babyHolder.visible = false; for (const m of [...placentaMeshes, ...cordMeshes]) m.visible = true; if (babySac) babySac.visible = babyCount === 1; } birthLen = null; birthClock = null; birthRunning = false; birthNow = null; birthPath = null; vulva?.setBirthDrive(null); vulva?.setHead(null, 0); const f = fields[SARAH_LAB_FIELD.birthLine]; if (f) f.textContent = birthLine(null); return; }
     if (cmd === 'pace') { const was = birthPace; birthPace = was === 'fast' ? 'realistic' : 'fast'; if (birthClock !== null) birthClock *= was === 'fast' ? 5 : 1 / 5; return; }
     // (a birth from RECLINE or SQUAT only -- Joshua, 2026-11-02: LEGS APART is her pre-labour stance)
     if (birthClock === null) { if (!BIRTH_POSES_OK.includes(pose)) { const f = fields[SARAH_LAB_FIELD.birthLine]; if (f) f.textContent = 'BIRTH · from RECLINE or SQUAT'; return; } birthClock = 0; birthRunning = true; return; }
@@ -4027,21 +4067,82 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     while (cordMeshes.length < babyCords.length) { const m = new THREE.Mesh(cordTube(), cordMat); m.frustumCulled = false; m.renderOrder = 3; babyHolder.add(m); cordMeshes.push(m); }
     while (cordMeshes.length > babyCords.length) { const m = cordMeshes.pop()!; m.removeFromParent(); m.geometry.dispose(); }
     const bodies: CordBody[] = roots.map((r) => ({ solid: babySolidOf!, position: r.position, quaternion: r.quaternion, scale: r.scale.x, curlCentre: babyCurl!.centre }));
+    babyHolder.updateMatrixWorld(true); holderInv.copy(babyHolder.matrixWorld).invert();
     babyPlacentas.forEach((pl, i) => {
       const m = placentaMeshes[i], r = roots[i], cord = babyCords[i];
       // laid on her lining once a fit (where it is does not change between), carried by her belly's swing
       if (m.userData.laid !== pl) { layPlacenta(m.geometry, pl, babyWomb!); m.userData.laid = pl; }
       m.position.copy(jiggle.belly.value);
-      if (!r || !cord || !babyNavel) return;
-      // its navel where its trunk has it now (in her frame), and the placenta's middle
-      const bone = r.getObjectByName(babyNavel.bone);
-      if (!bone) return;
-      bone.localToWorld(navelAt.copy(babyNavel.local)); babyHolder!.worldToLocal(navelAt);
+      if (!r || !cord) return;
+      // its navel where its body has it now (in her frame), the way out of it, and the cord's end in it (in its knot,
+      // under its skin: BABY_NAVEL); and the placenta's middle
+      if (!navelNow(r, navelAt, navelWay)) return;
+      babyHolder!.worldToLocal(navelAt); navelWay.transformDirection(holderInv);
+      navelAt.addScaledVector(navelWay, -0.6 * BABY_NAVEL.stands * r.scale.x);
       cordA.copy(pl.at).addScaledVector(pl.normal, pl.thick - 0.003).add(jiggle.belly.value);
-      if (!cordLaid[i]) { cord.lay(cordA, navelAt, babyWomb!.centre.clone().add(jiggle.belly.value)); cordLaid[i] = true; for (let k = 0; k < 30; k++) cord.step(1 / 60, cordA, navelAt, babyWomb!, jiggle.belly.value, bodies, i); }
-      cord.step(babyStepDt, cordA, navelAt, babyWomb!, jiggle.belly.value, bodies, i);
+      // (out of her: from her opening -- in her frame -- once its navel is past it)
+      const out = i === 0 && !!birthNow && birthNow.down >= 1 + BABY_NAVEL.fromCrown && !!birthPath && birthPath.points.length > 1;
+      if (!out) { cordCut = false; cordOnHerAt = null; cordOuterLaid = false; cordStumpLaid = false; }
+      if (out) babyHolder!.worldToLocal(cordOpen.copy(birthPath!.points[birthPath!.points.length - 1]));
+      const innerTo = out ? cordOpen : navelAt, innerWay = out ? undefined : navelWay;
+      if (!cordLaid[i]) { cord.lay(cordA, innerTo, babyWomb!.centre.clone().add(jiggle.belly.value)); cordLaid[i] = true; for (let k = 0; k < 30; k++) cord.step(1 / 60, cordA, innerTo, babyWomb!, jiggle.belly.value, bodies, i, { bWay: innerWay }); }
+      cord.step(babyStepDt, cordA, innerTo, babyWomb!, jiggle.belly.value, bodies, i, { bWay: innerWay });
       layCordTube(cordMeshes[i].geometry, cord.points, cord.radius);
+      if (i === 0) layCordOut(out, cord.radius, bodies);
     });
+  }
+  /**
+   * Its cord out of her (CORD_CUT): from her opening to its navel, hanging, until it is cut -- by CUT CORD or on its own
+   * once it has been settled on her a while -- and then its stump on its navel, its cut end closed. Inside her the rest
+   * is hidden once it is cut.
+   */
+  function layCordOut(out: boolean, radius: number, bodies: CordBody[]): void {
+    const holder = babyHolder!;
+    if (!cordOuterMesh) { cordOuterMesh = new THREE.Mesh(cordTube(), cordMat); cordOuterMesh.frustumCulled = false; cordOuterMesh.renderOrder = 3; holder.add(cordOuterMesh); }
+    if (!cordStumpMesh) { cordStumpMesh = new THREE.Mesh(cordTube(), cordMat); cordStumpMesh.frustumCulled = false; cordStumpMesh.renderOrder = 3; holder.add(cordStumpMesh); }
+    if (cordOuterMesh.parent !== holder) holder.add(cordOuterMesh);
+    if (cordStumpMesh.parent !== holder) holder.add(cordStumpMesh);
+    cordOuterMesh.visible = out && !cordCut; cordStumpMesh.visible = out && cordCut;
+    if (!out) return;
+    // cut on its own a while after it is settled on her (seconds of the birth's own clock: REALISTIC is slower)
+    if (!cordCut && birthNow && birthClock !== null) {
+      if (birthNow.onHer < 0.999) cordOnHerAt = null;
+      else if (cordOnHerAt === null || cordOnHerAt > birthClock) cordOnHerAt = birthClock;
+      else if (birthClock - cordOnHerAt >= CORD_CUT.autoAfterS * (birthPace === 'realistic' ? REALISTIC_STRETCH : 1)) cutCord();
+    }
+    // inside her, once cut, nothing (the placenta stays)
+    if (cordCut && cordMeshes[0]) cordMeshes[0].visible = false;
+    else if (babyShown && cordMeshes[0]) cordMeshes[0].visible = true;
+    // the way down in her frame, and her skin kept off (her skin as sampled near it: softBaby's `onHerPush`)
+    cordDown.set(0, -1, 0).transformDirection(holderInv);
+    const per = new THREE.Vector3().setFromMatrixScale(holder.matrixWorld).x;
+    const fresh = herSkin.frame === softFrame && herSkin.idx.length > 0;
+    const keepOut = fresh ? (p: THREE.Vector3) => {
+      offHerAt.copy(p).applyMatrix4(holder.matrixWorld);
+      const [k] = nearestHerSkin(offHerAt); if (k < 0) return;
+      offHerN.fromArray(herSkin.nrm, k * 3);
+      const over = (offHerAt.x - herSkin.pos[k * 3]) * offHerN.x + (offHerAt.y - herSkin.pos[k * 3 + 1]) * offHerN.y + (offHerAt.z - herSkin.pos[k * 3 + 2]) * offHerN.z - radius * per;
+      if (over < 0) { offHerAt.addScaledVector(offHerN, -over); p.copy(offHerAt).applyMatrix4(holderInv); }
+    } : undefined;
+    const dt = babyStepDt;
+    if (!cordCut) {
+      const want = Math.max(4 * radius, CORD_CUT.slack * cordOpen.distanceTo(navelAt));
+      if (!cordOuter) cordOuter = new Cord(want, radius, 16);
+      cordOuter.radius = radius;
+      cordOuter.length = cordOuterLaid ? cordOuter.length + (want - cordOuter.length) * Math.min(1, dt * 4) : want;
+      if (!cordOuterLaid) { cordOuter.lay(cordOpen, navelAt, cordToward.copy(cordOpen).add(navelAt).multiplyScalar(0.5).addScaledVector(cordDown, cordOuter.length)); cordOuterLaid = true; }
+      cordOuter.step(dt, cordOpen, navelAt, babyWomb!, jiggle.belly.value, bodies, 0, { inWomb: false, down: cordDown, bWay: navelWay, keepOut });
+      layCordTube(cordOuterMesh.geometry, cordOuter.points, radius);
+      return;
+    }
+    // its stump: held out of its navel, its cut end loose (drawn from that end, closed)
+    if (!cordStump) cordStump = new Cord(CORD_CUT.stumpM, radius, CORD_CUT.stumpNodes);
+    cordStump.radius = radius; cordStump.length = CORD_CUT.stumpM;
+    if (!cordStumpLaid) { cordToward.copy(navelAt).addScaledVector(navelWay, CORD_CUT.stumpM); cordStump.lay(cordToward, navelAt, cordToward.clone().add(cordDown)); cordStumpLaid = true; }
+    cordStump.step(dt, cordToward, navelAt, babyWomb!, jiggle.belly.value, bodies, 0, { inWomb: false, freeA: true, down: cordDown, bWay: navelWay, keepOut });
+    const P = cordStump.points, n = P.length / 3, rev = new Float32Array(P.length);
+    for (let k = 0; k < n; k++) rev.set([P[(n - 1 - k) * 3], P[(n - 1 - k) * 3 + 1], P[(n - 1 - k) * 3 + 2]], k * 3);
+    layCordTube(cordStumpMesh.geometry, rev, radius, true);
   }
   /** A womb shell (laid by `layShell`) with her kicks on it: out where each one is, as her belly is. */
   function bumpShell(mesh: THREE.Mesh): void {
@@ -4849,7 +4950,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // (a probe's: the gap from her skin, as drawn now, of each of its trunk's parts and its legs' -- cm, the least)
         onHerGaps: () => { const r = babyRoots()[0]; let mesh: THREE.SkinnedMesh | null = null; r?.traverse((o) => { const m = o as THREE.SkinnedMesh; if (!mesh && m.isSkinnedMesh && m.visible) mesh = m; }); const m = mesh as THREE.SkinnedMesh | null; if (!m || !herSkin.idx.length) return null;
           m.skeleton.update(); r!.updateMatrixWorld(true); const SI = m.geometry.getAttribute('skinIndex'), SW = m.geometry.getAttribute('skinWeight'), out: Record<string, number> = {}, p = new THREE.Vector3();
-          for (let i = 0; i < SI.count; i += 3) { let b = 0, w = -1; for (let k = 0; k < 4; k++) if (SW.getComponent(i, k) > w) { w = SW.getComponent(i, k); b = SI.getComponent(i, k); } const nm = m.skeleton.bones[b]?.name ?? ''; const part = ({ Bone_000: 'hips', Bone_001: 'hips', Bone_005: 'waist', Bone_004: 'belly', Bone_003: 'chest', Bone_002: 'chest', Bone_018: 'neck', Bone_017: 'head', Bone_016: 'head', Bone_010: 'thighL', Bone_015: 'thighR', Bone_009: 'shinL', Bone_014: 'shinR' } as Record<string, string>)[nm]; if (!part) continue;
+          for (let i = 0; i < SI.count; i += 3) { let b = 0, w = -1; for (let k = 0; k < 4; k++) if (SW.getComponent(i, k) > w) { w = SW.getComponent(i, k); b = SI.getComponent(i, k); } const nm = m.skeleton.bones[b]?.name ?? ''; const part = ({ Bone_000: 'hips', Bone_001: 'hips', Bone_006: 'waist', Bone_005: 'waist', Bone_004: 'belly', Bone_003: 'chest', Bone_002: 'chest', Bone_022: 'neck', Bone_021: 'head', Bone_020: 'head', Bone_012: 'thighL', Bone_018: 'thighR', Bone_011: 'shinL', Bone_010: 'shinL', Bone_017: 'shinR', Bone_016: 'shinR' } as Record<string, string>)[nm]; if (!part) continue;
             m.getVertexPosition(i, p); m.localToWorld(p); const [best] = nearestHerSkin(p); if (best < 0) continue; const over = (p.x - herSkin.pos[best * 3]) * herSkin.nrm[best * 3] + (p.y - herSkin.pos[best * 3 + 1]) * herSkin.nrm[best * 3 + 1] + (p.z - herSkin.pos[best * 3 + 2]) * herSkin.nrm[best * 3 + 2]; out[part] = Math.min(out[part] ?? Infinity, over / M * 100); }
           return Object.fromEntries(Object.entries(out).map(([k2, v2]) => [k2, +v2.toFixed(1)])); },
         onHerLift: () => { const r = babyRoots()[0]; let who = ''; if (r && liftFor && liftWho >= 0) { const SI = liftFor.geometry.getAttribute('skinIndex'), SW = liftFor.geometry.getAttribute('skinWeight'); let b = 0, w = -1; for (let k = 0; k < 4; k++) if (SW.getComponent(liftWho, k) > w) { w = SW.getComponent(liftWho, k); b = SI.getComponent(liftWho, k); } who = liftFor.skeleton.bones[b]?.name ?? ''; }
@@ -4857,6 +4958,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // (a probe's camera on her hand: aimed at where her left (or right) fingertip goes, from yaw/pitch/distance)
         aimHand: (side: 'L' | 'R', yaw: number, pitch: number, distance: number) => { const t = kneeTips[side]; if (!t) return false; orbit.yaw = yaw; orbit.pitch = pitch; orbit.distance = distance; orbit.target.copy(t); turning = false; return true; },
         // its soft body: on or off, and how far each part lags its pose now (degrees, the most), its drive
+        // (a probe's: its cord -- cut it, and whether it is cut, what is drawn of it, how thick and how long outside her)
+        babyCord: (cmd?: { cut?: boolean }) => { if (cmd?.cut) cutCord(); return { cut: cordCut, outerShown: !!cordOuterMesh?.visible, stumpShown: !!cordStumpMesh?.visible, innerShown: !!cordMeshes[0]?.visible, acrossCm: babyCords[0] ? +(babyCords[0].radius * 200).toFixed(2) : null, outsideCm: cordOuter ? +(cordOuter.length * 100).toFixed(1) : null, onHerFor: cordOnHerAt !== null && birthClock !== null ? +(birthClock - cordOnHerAt).toFixed(1) : null }; },
+        // (a probe's: its skin's share shown, 0 plain .. 1 its own)
+        babySkin: () => +babySkin.skinShow.value.toFixed(3),
         babySoft: (on?: boolean) => { if (on !== undefined) { babySoftOn = on; if (!on) setSqueeze(babySqueeze, null, M); } const r = babyRoots()[0], sb = r && softBabies.get(r); if (!sb) return { on: babySoftOn };
           return { on: babySoftOn, drive: +sb.drive.toFixed(3), ready: sb.ready, swing: +Math.max(...sb.vel.map((v) => v.length())).toFixed(3) }; },
         herHidden: (on: boolean) => {
@@ -4871,7 +4976,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         babyParts: () => {
           const r = babyRoots()[0]; if (!r) return null; r.updateMatrixWorld(true);
           const wp = (n: string) => r.getObjectByName(n)?.getWorldPosition(new THREE.Vector3()) ?? null;
-          const hip = wp(BABY_BONES.leg.left[0])?.add(wp(BABY_BONES.leg.right[0])!).multiplyScalar(0.5), sh = wp(BABY_BONES.arm.left[0])?.add(wp(BABY_BONES.arm.right[0])!).multiplyScalar(0.5), neck = wp(BABY_BONES.neck), headB = wp('Bone_017'), top = wp('Bone_016');
+          const hip = wp(BABY_BONES.leg.left[0])?.add(wp(BABY_BONES.leg.right[0])!).multiplyScalar(0.5), sh = wp(BABY_BONES.arm.left[0])?.add(wp(BABY_BONES.arm.right[0])!).multiplyScalar(0.5), neck = wp(BABY_BONES.neck), headB = wp(BABY_BONES.head), top = wp(BABY_BONES.crown);
           if (!hip || !sh || !neck || !headB || !top) return null;
           const knee = wp(BABY_BONES.leg.left[1])!.add(wp(BABY_BONES.leg.right[1])!).multiplyScalar(0.5), ankle = wp(BABY_BONES.leg.left[2])!.add(wp(BABY_BONES.leg.right[2])!).multiplyScalar(0.5);
           const P: number[] = [], lead: string[] = [], v = new THREE.Vector3();
@@ -4885,10 +4990,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             return idx.length ? { wideCm: cm(wide), narrowCm: cm(narrow), points: idx.length } : null;
           };
           // the head: its own skin, from its crown along the way from its neck
-          const H = top.clone().sub(neck).normalize(), headIdx: number[] = []; for (let i = 0; i < N; i++) if (lead[i] === 'Bone_017' || lead[i] === 'Bone_016') headIdx.push(i);
+          const H = top.clone().sub(neck).normalize(), headIdx: number[] = []; for (let i = 0; i < N; i++) if (lead[i] === BABY_BONES.head || lead[i] === BABY_BONES.crown) headIdx.push(i);
           let hlo = Infinity, hhi = -Infinity; for (const i of headIdx) { const t = v.set(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]).dot(H); hlo = Math.min(hlo, t); hhi = Math.max(hhi, t); }
           const A = sh.clone().sub(hip).normalize(), at = (p: THREE.Vector3) => p.dot(A), half = (0.75 / 100) * M;
-          const slice = (level: number, skipHead = true) => { const idx: number[] = []; for (let i = 0; i < N; i++) { if (skipHead && (lead[i] === 'Bone_017' || lead[i] === 'Bone_016')) continue; const t = v.set(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]).dot(A); if (Math.abs(t - level) <= half) idx.push(i); } return spans(idx, A); };
+          const slice = (level: number, skipHead = true) => { const idx: number[] = []; for (let i = 0; i < N; i++) { if (skipHead && (lead[i] === BABY_BONES.head || lead[i] === BABY_BONES.crown)) continue; const t = v.set(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]).dot(A); if (Math.abs(t - level) <= half) idx.push(i); } return spans(idx, A); };
           const h0 = at(hip), s0 = at(sh), n0 = at(neck);
           return {
             head: { lengthCm: cm(hhi - hlo), ...spans(headIdx, H) },

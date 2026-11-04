@@ -373,6 +373,28 @@ describe('her babies: the cord and the placenta', () => {
     for (let i = 0; i < n; i++) { p.fromArray(P, i * 3).sub(womb.centre); const r = p.length(); expect(r).toBeLessThanOrEqual(sacRadius(womb, p.x / r, p.y / r, p.z / r) * SAC_FILL + 1e-4); }
   });
 
+  it('out of her: a held way out of its navel, its weight any way down, a loose end once cut, and nothing of her womb', () => {
+    const a = womb.centre.clone().add(new THREE.Vector3(0, -2, 0)), b = a.clone().add(new THREE.Vector3(0.1, 0.2, 0));
+    const way = new THREE.Vector3(0, 0, 1), down = new THREE.Vector3(1, 0, 0), p = new THREE.Vector3(), q = new THREE.Vector3();
+    const cord = new Cord(0.35, 0.006, 16);
+    cord.lay(a, b, a.clone().add(b).multiplyScalar(0.5).add(down));
+    for (let k = 0; k < 300; k++) cord.step(1 / 60, a, b, womb, new THREE.Vector3(), [], -1, { inWomb: false, down, bWay: way });
+    const P = cord.points, n = P.length / 3;
+    // (its last link leaves its navel the way it is held; outside her womb, where it was put; it sags toward `down`)
+    expect(p.fromArray(P, (n - 2) * 3).sub(b).normalize().dot(way)).toBeGreaterThan(0.999);
+    expect(p.fromArray(P, 0).distanceTo(a)).toBeLessThan(1e-6);
+    let most = -Infinity; for (let i = 1; i < n - 1; i++) most = Math.max(most, p.fromArray(P, i * 3).sub(a).dot(down)); expect(most).toBeGreaterThan(0.05);
+    // its stump: held at its navel, its other end loose, and its length kept
+    const stump = new Cord(0.03, 0.006, 6), top = b.clone().addScaledVector(way, 0.03);
+    stump.lay(top, b, top.clone().add(down));
+    for (let k = 0; k < 300; k++) stump.step(1 / 60, top, b, womb, new THREE.Vector3(), [], -1, { inWomb: false, freeA: true, down, bWay: way });
+    const S = stump.points; let len = 0; for (let i = 0; i < 5; i++) len += p.fromArray(S, i * 3).distanceTo(q.fromArray(S, (i + 1) * 3));
+    expect(len).toBeGreaterThan(0.03 * 0.95); expect(len).toBeLessThan(0.03 * 1.05);
+    expect(p.fromArray(S, 5 * 3).distanceTo(b)).toBeLessThan(1e-6);
+    // (its loose end has swung down from straight out, toward `down`)
+    expect(p.fromArray(S, 0).sub(b).dot(down)).toBeGreaterThan(0.005);
+  });
+
   it('a placenta for each baby: high on her lining, never low, never on another', () => {
     const pts = (() => { const o: number[] = []; for (let i = 0; i < 300; i++) { const t = i * 2.39996, z = ((i + 0.5) / 300) * 2 - 1, r = Math.sqrt(1 - z * z); o.push(0.25 * r * Math.cos(t), 0.55 * z, 0.3 * r * Math.sin(t)); } return o; })();
     const place = (y: number): BabyPlace => ({ position: womb.centre.clone().add(new THREE.Vector3(0, y, 0)), quaternion: new THREE.Quaternion(), scale: 0.1 });
